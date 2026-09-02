@@ -1,9 +1,10 @@
 # Veri Modeli
 
 Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007`.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010`.
 Yetki sınırı ve RLS testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
-(73 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
+(124 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
+Muhasebe kuralları: [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md).
 Bakım görevleri: [`supabase/setup/maintenance-cron.sql`](../supabase/setup/maintenance-cron.sql).
 
 ## 1. İlişki şeması
@@ -115,8 +116,16 @@ Altın ürün kataloğu. Tek kaynak `src/domain/catalog.ts`; SQL kopyası `npm r
 | `note` | `text` | En fazla 280 karakter |
 | `created_at` / `updated_at` | `timestamptz` | |
 
+`0009` ile eklenen defter sütunları (transaction_kind, pricing_input_mode,
+acquisition/disposal_unit_price, gross_amount, fees, workmanship, total_paid, net_proceeds,
+cost_basis_origin, price_snapshot_id, status, voided_at, void_reason, replaces/replaced_by,
+client_request_id, request_hash, ledger_sequence) için bkz. bölüm 17. `side`, `unit_price`,
+`fee_amount` eski sütunlardır; uyumluluk için aynı değerleri taşır. `unit_price` artık `>= 0`.
+
 İndeksler: `transactions_user_id_idx`, `transactions_portfolio_id_idx`,
-`transactions_user_product_idx (user_id, product_id)`, `transactions_user_traded_at_idx (user_id, traded_at)`
+`transactions_user_product_idx (user_id, product_id)`, `transactions_user_traded_at_idx (user_id, traded_at)`,
+`transactions_client_request_idx (user_id, client_request_id) WHERE client_request_id IS NOT NULL`,
+`transactions_ledger_order_idx (user_id, product_id, status, traded_at, created_at, ledger_sequence)`
 
 ## 7. `price_sources`
 
@@ -186,16 +195,12 @@ Alış ve satışın ters kaydedilmesi veritabanı düzeyinde engellenir.
 | Kalıcı silme | `auth.users` satırı silinir → `profiles`, `portfolios`, `transactions`, `user_preferences`, `app_sessions` `CASCADE` ile silinir |
 | Denetim kayıtları | Her iki durumda da **korunur** |
 
-## 12. Hesaplama kuralları (uygulama katmanı)
+## 12. Hesaplama kuralları
 
-- Maliyet yöntemi: ağırlıklı ortalama (kayan ortalama).
-- Alış: `miktar × birim fiyat + işçilik` maliyete eklenir.
-- Satış: `miktar × birim fiyat − işçilik` gelir; ortalama maliyet üzerinden gerçekleşmiş kâr/zarar yazılır.
-- Bozdurma değeri = `kalan miktar × buy_price`
-- Yeniden alım değeri = `kalan miktar × sell_price`
-- Gerçekleşmemiş kâr/zarar = bozdurma değeri − kalan maliyet
-- Fiyatı olmayan pozisyon **sıfır değil `null`** sayılır ve toplam değerlemeye dâhil edilmez;
-  arayüz bunu ayrıca belirtir.
+Bkz. [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md): ürün bazlı hareketli ağırlıklı ortalama,
+açılış bakiyesi kökenleri (ACTUAL / ESTIMATED / MARKET_BASELINE), alış-satış formülleri,
+liquidation/replacement fiyat ayrımı, decimal ve yuvarlama politikası. Fiyatı olmayan pozisyon
+**sıfır değil `null`** sayılır ve toplam değerlemeye dâhil edilmez.
 
 ## 13. Sprint 0.5 eklemeleri (`0005_security_hardening.sql`)
 
@@ -334,3 +339,66 @@ Migration mevcut veriyi bir kez onarır ve tekrar çalıştırılabilir.
 Dönüşüm: eski `shared` oturumlar iptal edilir (zaten kalıcı değildi), `personal`
 oturumlar hareketsizlik sınırı olmadan kaydırmalı ömre taşınır; `device_mode`
 null'lanır, kısıtları ve `idle_expires_at` kullanımı kaldırılır.
+
+## 16. Oturum politikası (`0008_session_policy.sql`)
+
+| Sütun | Tip | Notlar |
+| --- | --- | --- |
+| `persistent` | `boolean` (default `true`) | "Oturumumu açık tut" tercihi. Mevcut kullanıcı oturumları kalıcı sayılır |
+| `idle_expires_at` | `timestamptz` | Yeniden kullanımda: kalıcı olmayan oturumda hareketsizlik bitişi (kullanıcı 30 dk, admin 15 dk) |
+| `absolute_expires_at` | `timestamptz` | Kalıcıda kaydırmalı bitişle aynı; kalıcı olmayanda giriş + 8 saat (uzatılmaz) |
+
+Migration mevcut admin oturumlarını `persistent = false`, 8 saat / 15 dk sınırına çeker.
+`purge_expired_sessions()` artık hareketsizliği dolan oturumları da siler.
+
+## 17. Muhasebe şeması (`0009_portfolio_accounting.sql`)
+
+### 17.1 `transactions` — defter sütunları
+
+| Sütun | Tip | Notlar |
+| --- | --- | --- |
+| `transaction_kind` | `text` | `OPENING_BALANCE` \| `BUY` \| `SELL` |
+| `pricing_input_mode` | `text` | `UNIT_PRICE` \| `TOTAL_AMOUNT` \| `MARKET_BASELINE` |
+| `acquisition_unit_price` | `numeric(20,8)` | Kullanıcının ödediği birim fiyat (piyasa fiyatı değil); TOTAL_AMOUNT'ta bilgi amaçlı türetilir |
+| `disposal_unit_price` | `numeric(20,8)` | Kullanıcının aldığı birim fiyat |
+| `gross_amount`, `fees`, `workmanship` | `numeric(20,8)` | `>= 0` |
+| `total_paid` | `numeric(20,8)` | BUY/OPENING: masraflar dâhil edinim maliyeti |
+| `net_proceeds` | `numeric(20,8)` | SELL: masraflar düşülmüş net tahsilat |
+| `cost_basis_origin` | `text` | `ACTUAL` \| `ESTIMATED` \| `MARKET_BASELINE` (baseline → `price_snapshot_id` zorunlu) |
+| `status` | `text` | `ACTIVE` \| `VOID` \| `REPLACED`; `voided_at`, `void_reason` |
+| `replaces_transaction_id` / `replaced_by_transaction_id` | `uuid` | Düzeltme ilişkisi |
+| `created_by` | `uuid` | |
+| `client_request_id`, `request_hash` | `text` | Idempotency: `(user_id, client_request_id)` benzersiz; içerik md5 ile karşılaştırılır |
+| `ledger_sequence` | `bigint identity` | Deterministik sıra: `traded_at`, `created_at`, `ledger_sequence` |
+
+Tetikleyiciler `transactions_ledger_guard_update/delete`: finansal alanlar değiştirilemez;
+yalnızca `ACTIVE → VOID/REPLACED` geçişi ve REPLACED kayda bir kez `replaced_by` yazımı;
+hard delete yalnızca hesap cascade'inde. Eski kayıtlar `ACTUAL` / `UNIT_PRICE` olarak taşınır.
+
+### 17.2 `price_snapshots`
+
+`id`, `user_id`, `product_id`, `liquidation_price`, `replacement_price`, `provider`, `market`,
+`currency`, `provider_status`, `is_real_market_data`, `provider_timestamp`, `fetched_at`,
+`created_at`. RLS: kendi satırını SELECT. Grant: authenticated SELECT; service_role SELECT+INSERT;
+UPDATE/DELETE hiçbir role (tetikleyici de reddeder).
+
+### 17.3 `portfolio_positions` (türetilmiş projeksiyon)
+
+`(portfolio_id, product_id)` PK, `user_id`, `quantity numeric(20,6)`, `remaining_cost_basis`,
+`average_cost` (miktar 0 ise null), `realized_pnl`, `has_actual/estimated/baseline`,
+`active_transaction_count`, `last_ledger_sequence`, `updated_at`. RLS: kendi satırını SELECT.
+Grant: authenticated ve service_role yalnızca SELECT — yazma yalnızca SECURITY DEFINER RPC ile.
+`npm run accounting:verify` defterden yeniden hesaplayıp karşılaştırır.
+
+## 18. Muhasebe RPC'leri (`0010_accounting_rpc.sql`)
+
+| Fonksiyon | Yetki | İş |
+| --- | --- | --- |
+| `ledger_append(uuid, jsonb)` | service_role | Kilit → idempotency → (MARKET_BASELINE ise snapshot) → tutar hesabı → INSERT → rebuild; `ALTIN_OVERSELL` (P0001), `ALTIN_IDEMPOTENCY_CONFLICT` (P0003), doğrulama (P0004) |
+| `ledger_void(uuid, uuid, text)` | service_role | ACTIVE → VOID; rebuild; oversell olursa geri alır; `ALTIN_LEDGER_NOT_ACTIVE` (P0005) |
+| `ledger_replace(uuid, uuid, jsonb)` | service_role | ACTIVE → REPLACED + yeni kayıt; iki ürünü de rebuild; tek transaction |
+| `ledger_void_all(uuid, text)` | service_role | Tüm aktif kayıtları VOID |
+| `ledger_list(uuid)`, `positions_list(uuid)` | service_role | JSON, sayılar kanonik metin |
+| `ledger_verify(uuid)` | service_role | Yeniden oynatma ↔ projeksiyon karşılaştırması |
+| `ledger_compute_amounts`, `ledger_replay_product`, `ledger_rebuild_position`, JSON yardımcıları | hiçbiri | Dahili |
+| `create/update/delete_transaction_checked` (eski) | service_role | Yeni deftere yönlendirilir (uyumluluk) |

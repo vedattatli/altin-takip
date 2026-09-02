@@ -6,9 +6,16 @@ import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { AuthService } from "@/server/auth/service";
 import { MemoryLoginRateLimiter } from "@/server/rate-limit/memory";
 import { adminActor, scopeOf } from "./actors";
-import { makeInput } from "./helpers";
+import { dec, parseLedgerCommand } from "@/domain/accounting";
+import { buyCommand } from "./helpers";
 
 const ADMIN_PASSWORD = "Yonetici7Kasa";
+
+function requestOf(command: Parameters<typeof parseLedgerCommand>[0]) {
+  const parsed = parseLedgerCommand(command);
+  if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+  return parsed.request;
+}
 const USER_PASSWORD = "Kuyumcu7Defter";
 const CLIENT = "127.0.0.1";
 
@@ -175,14 +182,14 @@ describe("yönetici: pasifleştirme ve silme", () => {
 
   it("kullanıcı adı birebir yazıldığında siler", async () => {
     const user = await createUserAccount("ayse");
-    await backend.createTransaction(scopeOf(user), makeInput({ quantity: 2 }));
+    await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "2" })));
 
     const result = await admin.deleteUser(adminActor(adminProfile), user.id, "AYSE");
 
     expect(result.deleted).toBe(true);
     expect(result.auditWriteFailed).toBe(false);
     expect(await backend.getProfile(user.id)).toBeNull();
-    expect(await backend.listTransactions(scopeOf(user))).toHaveLength(0);
+    expect(await backend.listLedger(scopeOf(user))).toHaveLength(0);
   });
 
   it("kendi hesabını silemez", async () => {
@@ -195,20 +202,22 @@ describe("yönetici: pasifleştirme ve silme", () => {
 describe("yönetici: portföy görüntüleme", () => {
   it("kullanıcının portföy özetini hesaplar", async () => {
     const user = await createUserAccount("ayse");
-    await backend.createTransaction(scopeOf(user), makeInput({ quantity: 10, unitPrice: 5000 }));
+    await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
 
     const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
 
     expect(view.user.username).toBe("ayse");
-    expect(view.transactions).toHaveLength(1);
-    expect(view.summary.totalCostBasis).toBe(50_000);
-    expect(view.summary.totalRepurchaseValue).toBeGreaterThan(view.summary.totalLiquidationValue);
+    expect(view.ledger).toHaveLength(1);
+    expect(view.summary.totalRemainingCostBasis).toBe("50000");
+    expect(dec(view.summary.totalReplacementValue).greaterThan(dec(view.summary.totalLiquidationValue))).toBe(true);
   });
 
-  it("ilk sürümde yönetici kullanıcı adına düzenleme yapamaz", async () => {
+  it("yönetici yalnızca okur: kullanıcı adına düzenleme yetkisi yoktur ve servis mutation sunmaz", async () => {
     const user = await createUserAccount("ayse");
     const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
     expect(view.canEdit).toBe(false);
+    const adminMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(admin));
+    expect(adminMethods.some((name) => /transaction|ledger|buy|sell|void|replace/i.test(name))).toBe(false);
   });
 
   it("olmayan kullanıcı için 404 döner", async () => {
@@ -311,7 +320,7 @@ describe("denetim kaydı (audit log)", () => {
 
   it("denetim kaydına parola veya finansal içerik yazılmaz", async () => {
     const user = await createUserAccount("ayse");
-    await backend.createTransaction(scopeOf(user), makeInput({ quantity: 10, unitPrice: 5000 }));
+    await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
     await admin.getUserPortfolio(adminActor(adminProfile), user.id);
     await admin.resetUserPassword(adminActor(adminProfile), user.id, "GeciciParola7Kasa");
 

@@ -14,7 +14,7 @@ const EXPIRES = "2026-12-31T00:00:00.000Z";
 
 describe("oturum çerezi", () => {
   it("HttpOnly, SameSite=Lax, Path=/ ve Domain'siz olur", () => {
-    const options = sessionCookieOptions(EXPIRES, true);
+    const options = sessionCookieOptions(EXPIRES, true, true);
     expect(options.httpOnly).toBe(true);
     expect(options.sameSite).toBe("lax");
     expect(options.path).toBe("/");
@@ -22,13 +22,13 @@ describe("oturum çerezi", () => {
   });
 
   it("HTTPS üzerinde Secure işaretlenir", () => {
-    expect(sessionCookieOptions(EXPIRES, true).secure).toBe(true);
-    expect(sessionCookieOptions(EXPIRES, false).secure).toBe(false);
+    expect(sessionCookieOptions(EXPIRES, true, true).secure).toBe(true);
+    expect(sessionCookieOptions(EXPIRES, false, true).secure).toBe(false);
   });
 
-  it("KALICIDIR: son kullanma tarihi oturumun bitiş zamanıdır", () => {
-    const options = sessionCookieOptions(EXPIRES, true);
-    expect(options.expires.toISOString()).toBe(EXPIRES);
+  it("'oturumu açık tut' işaretliyse KALICIDIR: son kullanma tarihi oturumun bitiş zamanıdır", () => {
+    const options = sessionCookieOptions(EXPIRES, true, true) as { expires?: Date };
+    expect(options.expires?.toISOString()).toBe(EXPIRES);
   });
 
   it("kaydırmalı ömür 180 gündür ve kısa oturum yoktur", () => {

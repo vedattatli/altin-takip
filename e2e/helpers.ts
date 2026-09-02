@@ -54,16 +54,34 @@ export async function gotoReady(page: Page, path: string) {
   await page.waitForSelector('html[data-hydrated="true"]', { timeout: 30_000 });
 }
 
-/** Giriş yapar. Cihaz türü sorulmaz; her cihazda aynı kalıcı oturum verilir. */
-export async function login(page: Page, username: string, password = TEST_PASSWORD) {
+export interface LoginOptions {
+  /** "Bu cihazda oturumumu açık tut" kutusu. Varsayılan: işaretli (testlerin çoğu kalıcı oturum bekler). */
+  keepSignedIn?: boolean;
+}
+
+/** Giriş yapar. Cihaz türü sorulmaz; yalnızca "oturumu açık tut" tercihi vardır. */
+export async function login(
+  page: Page,
+  username: string,
+  password = TEST_PASSWORD,
+  options: LoginOptions = {},
+) {
   await gotoReady(page, "/giris");
   await page.getByLabel("Kullanıcı adı").fill(username);
   await page.getByLabel("Parola", { exact: true }).fill(password);
+  const keep = page.getByLabel(/oturumumu açık tut/);
+  if (options.keepSignedIn ?? true) await keep.check();
+  else await keep.uncheck();
   await page.getByRole("button", { name: "Giriş yap" }).click();
 }
 
-export async function loginAsUser(page: Page, username: string, password = TEST_PASSWORD) {
-  await login(page, username, password);
+export async function loginAsUser(
+  page: Page,
+  username: string,
+  password = TEST_PASSWORD,
+  options: LoginOptions = {},
+) {
+  await login(page, username, password, options);
   await page.waitForURL("**/panel");
 }
 
@@ -83,19 +101,36 @@ export async function expectNoHorizontalOverflow(page: Page) {
   ).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
-/** Yeni bir altın alış işlemi ekler. */
+/** Yeni bir alış işlemi ekler (İşlemler sayfasında olmalı). */
 export async function addPurchase(
   page: Page,
-  options: { product?: string; quantity: string; unitPrice: string },
+  options: { product?: string; quantity: string; unitPrice: string; workmanship?: string; fees?: string },
 ) {
-  await page.getByTestId("add-transaction").click();
+  await page.getByTestId("add-buy").click();
   if (options.product) {
     await page.getByLabel("Altın türü").selectOption({ label: options.product });
   }
   await page.getByLabel(/^Miktar/).fill(options.quantity);
   await page.getByLabel(/^Birim alış fiyatı/).fill(options.unitPrice);
-  await page.getByRole("button", { name: "İşlemi kaydet" }).click();
+  if (options.workmanship) await page.getByLabel(/^İşçilik/).fill(options.workmanship);
+  if (options.fees) await page.getByLabel(/^Komisyon/).fill(options.fees);
+  await page.getByTestId("submit-buy").click();
   await expect(page.getByTestId("transaction-list")).toBeVisible();
+}
+
+/** Satış işlemi ekler (İşlemler sayfasında olmalı). */
+export async function addSale(
+  page: Page,
+  options: { product?: string; quantity: string; unitPrice: string; fees?: string },
+) {
+  await page.getByTestId("add-sell").click();
+  if (options.product) {
+    await page.getByLabel("Altın türü").selectOption({ label: options.product });
+  }
+  await page.getByLabel(/^Miktar/).fill(options.quantity);
+  await page.getByLabel(/^Birim satış fiyatı/).fill(options.unitPrice);
+  if (options.fees) await page.getByLabel(/^Satış masrafı/).fill(options.fees);
+  await page.getByTestId("submit-sell").click();
 }
 
 export interface BrowserApiResult<T = unknown> {

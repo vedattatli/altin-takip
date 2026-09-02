@@ -7,7 +7,8 @@ import { AdminService } from "@/server/admin/admin-service";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { UserPortfolioService } from "@/server/portfolio/user-portfolio-service";
 import { adminActor, scopeOf, userActor } from "./actors";
-import { makeInput } from "./helpers";
+import { parseLedgerCommand } from "@/domain/accounting";
+import { buyCommand } from "./helpers";
 
 /**
  * YETKİLENDİRME MATRİSİ
@@ -53,6 +54,7 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/change-password/route.ts": "authenticated",
   "auth/logout-all/route.ts": "authenticated",
   "portfolio/route.ts": "usable",
+  "portfolio/summary/route.ts": "usable",
   "transactions/route.ts": "usable",
   "transactions/[id]/route.ts": "usable",
   "admin/users/route.ts": "admin",
@@ -162,36 +164,39 @@ describe("kullanıcı verisi ayrımı", () => {
   });
 
   it("kullanıcı yalnızca kendi işlemlerini görür", async () => {
-    await portfolio.createTransaction(userActor(userA), makeInput({ quantity: 5 }));
-    await portfolio.createTransaction(userActor(userB), makeInput({ quantity: 9 }));
+    await portfolio.appendTransaction(userActor(userA), buyCommand({ quantity: "5" }));
+    await portfolio.appendTransaction(userActor(userB), buyCommand({ quantity: "9" }));
 
-    const aRows = await portfolio.listTransactions(userActor(userA));
-    const bRows = await portfolio.listTransactions(userActor(userB));
+    const aRows = await portfolio.listLedger(userActor(userA));
+    const bRows = await portfolio.listLedger(userActor(userB));
 
     expect(aRows).toHaveLength(1);
     expect(bRows).toHaveLength(1);
-    expect(aRows[0].quantity).toBe(5);
-    expect(bRows[0].quantity).toBe(9);
+    expect(aRows[0]!.quantity).toBe("5");
+    expect(bRows[0]!.quantity).toBe("9");
   });
 
-  it("kullanıcı başka kullanıcının işlemini silemez", async () => {
-    const created = await portfolio.createTransaction(userActor(userB), makeInput({ quantity: 3 }));
+  it("kullanıcı başka kullanıcının işlemini kimlik tahminiyle iptal edemez", async () => {
+    const created = await portfolio.appendTransaction(userActor(userB), buyCommand({ quantity: "3" }));
 
-    await expect(portfolio.deleteTransaction(userActor(userA), created.id)).rejects.toMatchObject({
+    await expect(portfolio.voidTransaction(userActor(userA), created.entry.id, "x")).rejects.toMatchObject({
       status: 404,
     });
-    expect(await portfolio.listTransactions(userActor(userB))).toHaveLength(1);
+    const rows = await portfolio.listLedger(userActor(userB));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe("ACTIVE");
   });
 
-  it("kullanıcı başka kullanıcının işlemini güncelleyemez", async () => {
-    const created = await portfolio.createTransaction(userActor(userB), makeInput({ quantity: 3 }));
+  it("kullanıcı başka kullanıcının işlemini düzeltemez veya okuyamaz", async () => {
+    const created = await portfolio.appendTransaction(userActor(userB), buyCommand({ quantity: "3" }));
 
     await expect(
-      portfolio.updateTransaction(userActor(userA), created.id, makeInput({ quantity: 99 })),
+      portfolio.replaceTransaction(userActor(userA), created.entry.id, buyCommand({ quantity: "99" })),
     ).rejects.toMatchObject({ status: 404 });
 
-    const rows = await portfolio.listTransactions(userActor(userB));
-    expect(rows[0].quantity).toBe(3);
+    const rows = await portfolio.listLedger(userActor(userB));
+    expect(rows[0]!.quantity).toBe("3");
+    expect((await portfolio.listLedger(userActor(userA))).some((entry) => entry.id === created.entry.id)).toBe(false);
   });
 
   it("kullanıcı portföyleri birbirinden ayrıdır", async () => {
@@ -202,18 +207,21 @@ describe("kullanıcı verisi ayrımı", () => {
     expect((await portfolio.getPortfolio(userActor(userB))).name).toBe("B Portföyü");
   });
 
-  it("yönetici başka kullanıcının verisini adminScope ile okur", async () => {
-    await portfolio.createTransaction(userActor(userA), makeInput({ quantity: 7 }));
+  it("yönetici başka kullanıcının verisini adminScope ile yalnızca okur", async () => {
+    await portfolio.appendTransaction(userActor(userA), buyCommand({ quantity: "7" }));
 
     const view = await admin.getUserPortfolio(adminActor(adminProfile), userA.id);
-    expect(view.transactions).toHaveLength(1);
+    expect(view.ledger).toHaveLength(1);
     expect(view.canEdit).toBe(false);
   });
 
   it("arka uç kapsamı kullanıcı kimliğine sıkıca bağlıdır", async () => {
-    await backend.createTransaction(scopeOf(userA), makeInput({ quantity: 2 }));
-    expect(await backend.listTransactions(scopeOf(userA))).toHaveLength(1);
-    expect(await backend.listTransactions(scopeOf(userB))).toHaveLength(0);
+    const parsed = parseLedgerCommand(buyCommand({ quantity: "2" }));
+    if (!parsed.ok) throw new Error("komut geçersiz");
+    await backend.appendLedgerEntry(scopeOf(userA), parsed.request);
+    expect(await backend.listLedger(scopeOf(userA))).toHaveLength(1);
+    expect(await backend.listLedger(scopeOf(userB))).toHaveLength(0);
+    expect(await backend.listPositions(scopeOf(userB))).toHaveLength(0);
   });
 });
 

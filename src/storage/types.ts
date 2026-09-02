@@ -1,10 +1,22 @@
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import type {
+  AccountingSummary,
+  LedgerAppendResult,
+  LedgerCommand,
+  LedgerEntry,
+  LedgerReplaceResult,
+  LedgerVoidResult,
+} from "@/domain/accounting/types";
+import type { PortfolioMeta } from "@/domain/types";
 
 /**
  * Portföy deposu sözleşmesi.
  *
  * Arayüz katmanı YALNIZCA bu sözleşmeyi bilir. Böylece depolama
- * (IndexedDB / sunucu / Supabase) tek noktadan değiştirilebilir.
+ * (IndexedDB demo / sunucu) tek noktadan değiştirilebilir.
+ *
+ * Kaynak gerçek işlem defteridir; özet (pozisyon + değerleme) türetilir.
+ * Sunucu deposunda özet SUNUCUDA hesaplanır; demo depolarında aynı motor
+ * istemcide çalışır.
  */
 export type RepositoryKind = "indexeddb" | "memory" | "server";
 
@@ -18,12 +30,18 @@ export interface PortfolioRepository {
   getPortfolio(): Promise<PortfolioMeta>;
   renamePortfolio(patch: { name?: string; displayName?: string }): Promise<PortfolioMeta>;
 
-  listTransactions(): Promise<Transaction[]>;
-  createTransaction(input: TransactionInput): Promise<Transaction>;
-  updateTransaction(id: string, input: TransactionInput): Promise<Transaction>;
-  deleteTransaction(id: string): Promise<void>;
-  /** Tüm işlemleri siler. Portföy kaydı korunur. */
-  clearTransactions(): Promise<void>;
+  /** Pozisyonlar + güncel (test) fiyatla değerleme. Salt okuma. */
+  getSummary(): Promise<AccountingSummary>;
+  /** Bütün defter kayıtları (ACTIVE, VOID, REPLACED). */
+  listLedger(): Promise<LedgerEntry[]>;
+  /** OPENING_BALANCE / BUY / SELL ekler (idempotent: command.clientRequestId). */
+  appendTransaction(command: LedgerCommand): Promise<LedgerAppendResult>;
+  /** Kaydı düzeltir: eski REPLACED, yeni kayıt eklenir. */
+  replaceTransaction(id: string, command: LedgerCommand): Promise<LedgerReplaceResult>;
+  /** Kaydı iptal eder (VOID). Hard delete yoktur. */
+  voidTransaction(id: string, reason: string): Promise<LedgerVoidResult>;
+  /** Tüm aktif kayıtları iptal eder. Portföy kaydı korunur. */
+  voidAll(): Promise<number>;
 }
 
 export function createId(): string {

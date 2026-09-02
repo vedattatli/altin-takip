@@ -1,15 +1,40 @@
 import "server-only";
 
-import { getProduct } from "@/domain/catalog";
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
-import { validateTransaction } from "@/domain/validation";
+import {
+  buildAccountingSummary,
+  parseLedgerCommand,
+  valuePositions,
+  type AccountingSummary,
+  type LedgerAppendRequest,
+  type LedgerEntry,
+  type PriceSnapshotInput,
+  type ProductPosition,
+} from "@/domain/accounting";
+import { LedgerAmountError } from "@/domain/accounting/amounts";
+import { GOLD_PRODUCTS } from "@/domain/catalog";
+import type { PortfolioMeta } from "@/domain/types";
+import { getPriceProvider, isSnapshotStale, type PriceSnapshot } from "@/prices";
 import { ownScope, type UserActor } from "@/server/auth/actor";
 import {
+  IdempotencyConflictError,
+  LedgerEntryNotActiveError,
+  LedgerEntryNotFoundError,
   OversellError,
   PortfolioNotProvisionedError,
   type AuthBackend,
+  type LedgerAppendResult,
+  type LedgerReplaceResult,
+  type LedgerVoidResult,
 } from "@/server/auth/backend";
-import { badRequest, notFound, portfolioNotProvisioned } from "@/server/auth/errors";
+import {
+  badRequest,
+  conflict,
+  idempotencyConflict,
+  notFound,
+  oversell,
+  portfolioNotProvisioned,
+  priceUnavailable,
+} from "@/server/auth/errors";
 
 /**
  * Kullanıcının KENDİ portföyü.
@@ -18,20 +43,30 @@ import { badRequest, notFound, portfolioNotProvisioned } from "@/server/auth/err
  * her zaman `ownScope(actor)` ile belirlenir; dolayısıyla bir route gövdeden
  * gelen bir kimlikle başka kullanıcının verisine ulaşamaz.
  *
- * Başka kullanıcıyı hedefleyen işlemler AdminService'tedir.
+ * Başka kullanıcıyı hedefleyen işlemler AdminService'tedir (salt okunur).
+ *
+ * MUHASEBE: işlem defteri kaynak gerçektir; pozisyonlar türetilir. Bütün
+ * finansal mutation'lar arka ucun atomik yoluna (Postgres RPC / yerel kuyruk)
+ * gider; bu katman doğrulama, fiyat anlık görüntüsü ve hata dönüşümü yapar.
  */
-/** Sayısal alanlar: yalnızca sonlu sayı veya sayı biçimli dize kabul edilir. */
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+
+const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
+const VOID_REASON_MAX = 140;
+
+export interface PortfolioOverview {
+  portfolio: PortfolioMeta;
+  summary: AccountingSummary;
 }
 
 export class UserPortfolioService {
-  constructor(private readonly backend: AuthBackend) {}
+  constructor(
+    private readonly backend: AuthBackend,
+    private readonly options: { now?: () => number } = {},
+  ) {}
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
 
   /** Salt okuma: hiçbir koşulda veritabanını değiştirmez. */
   async getPortfolio(actor: UserActor): Promise<PortfolioMeta> {
@@ -62,111 +97,145 @@ export class UserPortfolioService {
     }
   }
 
-  async listTransactions(actor: UserActor): Promise<Transaction[]> {
-    return this.backend.listTransactions(ownScope(actor));
+  /** Sunucunun fiyat sağlayıcısından anlık görüntü. Test verisi olduğu snapshot'ta etiketlidir. */
+  async currentSnapshot(): Promise<PriceSnapshot> {
+    return getPriceProvider().getQuotes(ALL_PRODUCT_IDS);
   }
 
   /**
-   * İstemciden gelen gövdeyi SUNUCUDA yeniden doğrular.
+   * Özet: türetilmiş pozisyonlar + sunucu tarafı değerleme.
+   * Salt okuma; hiçbir şey yazmaz. Fiyat yoksa/bayatsa değerleme alanları null döner.
+   */
+  async getSummary(actor: UserActor): Promise<AccountingSummary> {
+    try {
+      const [positions, snapshot] = await Promise.all([
+        this.backend.listPositions(ownScope(actor)),
+        this.currentSnapshot(),
+      ]);
+      return valuePositions(positions, snapshot, this.now());
+    } catch (error) {
+      this.toAppError(error);
+    }
+  }
+
+  /** Defter kayıtları (ACTIVE, VOID, REPLACED). VOID/REPLACED kullanıcıdan gizlenmez. */
+  async listLedger(actor: UserActor): Promise<LedgerEntry[]> {
+    return this.backend.listLedger(ownScope(actor));
+  }
+
+  async listPositions(actor: UserActor): Promise<ProductPosition[]> {
+    return this.backend.listPositions(ownScope(actor));
+  }
+
+  /** Defterden bağımsız çapraz doğrulama (accounting:verify). */
+  async recomputeSummary(actor: UserActor): Promise<AccountingSummary> {
+    const [ledger, snapshot] = await Promise.all([
+      this.backend.listLedger(ownScope(actor)),
+      this.currentSnapshot(),
+    ]);
+    return buildAccountingSummary(ledger, snapshot, this.now());
+  }
+
+  /**
+   * MARKET_BASELINE için sunucu fiyatı: istemciden gelen fiyat KABUL EDİLMEZ.
+   * Fiyat yoksa, geçersizse veya bayatsa null döner (açılış bakiyesi oluşturulmaz).
+   */
+  async baselineSnapshotFor(productId: string): Promise<PriceSnapshotInput | null> {
+    const snapshot = await this.currentSnapshot();
+    if (snapshot.status === "unavailable" || isSnapshotStale(snapshot, this.now())) return null;
+    const quote = snapshot.quotes[productId];
+    if (!quote || quote.status !== "ok") return null;
+    return {
+      productId,
+      liquidationPrice: quote.liquidationPrice,
+      replacementPrice: quote.replacementPrice,
+      provider: quote.provider,
+      market: quote.market,
+      currency: quote.currency,
+      providerStatus: quote.status,
+      isRealMarketData: snapshot.provider.isRealMarketData,
+      providerTimestamp: quote.providerTimestamp,
+      fetchedAt: quote.fetchedAt,
+    };
+  }
+
+  /**
+   * İstemciden gelen gövdeyi SUNUCUDA sıkı biçimde doğrular ve arka uç isteğine çevirir.
    * İstemci doğrulaması yalnızca kullanıcı deneyimi içindir.
    */
-  private async parseInput(
-    actor: UserActor,
-    raw: unknown,
-    options: { editingTransactionId?: string } = {},
-  ): Promise<TransactionInput> {
-    if (typeof raw !== "object" || raw === null) {
+  private async parseCommand(raw: unknown): Promise<LedgerAppendRequest> {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw badRequest("Geçersiz işlem verisi.");
     }
     const body = raw as Record<string, unknown>;
-
-    // Ürün katalogda YOKSA açıkça reddedilir; birim istemciden alınmaz.
-    const productId = typeof body.productId === "string" ? body.productId : "";
-    const product = getProduct(productId);
-    if (!product) throw badRequest("Lütfen listeden geçerli bir altın türü seçin.");
-
-    // side yalnızca "buy" veya "sell" olabilir; başka değer sessizce çevrilmez.
-    if (body.side !== "buy" && body.side !== "sell") {
-      throw badRequest("İşlem türü yalnızca alış veya satış olabilir.");
+    let baselineSnapshot: PriceSnapshotInput | null = null;
+    if (body.kind === "OPENING_BALANCE" && body.costMethod === "MARKET_BASELINE") {
+      const productId = typeof body.productId === "string" ? body.productId : "";
+      baselineSnapshot = productId ? await this.baselineSnapshotFor(productId) : null;
+      if (!baselineSnapshot) throw priceUnavailable();
     }
 
-    const quantity = toFiniteNumber(body.quantity);
-    const unitPrice = toFiniteNumber(body.unitPrice);
-    const feeAmount = body.feeAmount === undefined ? 0 : toFiniteNumber(body.feeAmount);
-
-    if (quantity === null || quantity <= 0) throw badRequest("Miktar sıfırdan büyük olmalıdır.");
-    if (unitPrice === null || unitPrice <= 0) {
-      throw badRequest("Birim fiyat sıfırdan büyük olmalıdır.");
-    }
-    if (feeAmount === null || feeAmount < 0) {
-      throw badRequest("İşçilik/komisyon negatif olamaz.");
-    }
-
-    const input: TransactionInput = {
-      productId,
-      side: body.side,
-      quantity,
-      unit: product.unit,
-      tradedAt: typeof body.tradedAt === "string" ? body.tradedAt : "",
-      unitPrice,
-      feeAmount,
-      note: typeof body.note === "string" ? body.note.slice(0, 280) : "",
-    };
-
-    const existing = await this.backend.listTransactions(ownScope(actor));
-    const result = validateTransaction(input, {
-      existingTransactions: existing,
-      editingTransactionId: options.editingTransactionId,
-    });
-
-    if (!result.ok) {
-      const firstError = Object.values(result.errors).find(Boolean);
+    const parsed = parseLedgerCommand(body, { baselineSnapshot });
+    if (!parsed.ok) {
+      const firstError = Object.values(parsed.errors).find(Boolean);
       throw badRequest(firstError ?? "İşlem verisi geçersiz.");
     }
-    return input;
+    return parsed.request;
   }
 
   /** Arka uç hatalarını HTTP hatalarına çevirir; iç detay sızdırmaz. */
   private toAppError(error: unknown): never {
-    if (error instanceof OversellError) {
-      throw badRequest("Satış miktarı elinizdeki miktarı aşamaz.");
-    }
-    if (error instanceof PortfolioNotProvisionedError) {
-      throw portfolioNotProvisioned();
-    }
+    if (error instanceof OversellError) throw oversell(error.available);
+    if (error instanceof IdempotencyConflictError) throw idempotencyConflict();
+    if (error instanceof LedgerEntryNotFoundError) throw notFound("İşlem bulunamadı.");
+    if (error instanceof LedgerEntryNotActiveError) throw conflict(error.message);
+    if (error instanceof LedgerAmountError) throw badRequest(error.message);
+    if (error instanceof PortfolioNotProvisionedError) throw portfolioNotProvisioned();
     if (error instanceof Error && /İşlem bulunamadı/.test(error.message)) {
       throw notFound("İşlem bulunamadı.");
     }
     throw error;
   }
 
-  async createTransaction(actor: UserActor, raw: unknown): Promise<Transaction> {
-    const input = await this.parseInput(actor, raw);
+  /** OPENING_BALANCE / BUY / SELL ekler. İdempotency anahtarı gövdeden (`clientRequestId`) gelir. */
+  async appendTransaction(actor: UserActor, raw: unknown): Promise<LedgerAppendResult> {
+    const request = await this.parseCommand(raw);
     try {
-      return await this.backend.createTransaction(ownScope(actor), input);
+      return await this.backend.appendLedgerEntry(ownScope(actor), request);
     } catch (error) {
       this.toAppError(error);
     }
   }
 
-  async updateTransaction(actor: UserActor, id: string, raw: unknown): Promise<Transaction> {
-    const input = await this.parseInput(actor, raw, { editingTransactionId: id });
+  /** "Sil": kayıt VOID olur, sebep ve tarih kaydedilir, pozisyon yeniden hesaplanır. */
+  async voidTransaction(actor: UserActor, entryId: string, rawReason: unknown): Promise<LedgerVoidResult> {
+    const reason =
+      typeof rawReason === "string" && rawReason.trim() !== ""
+        ? rawReason.trim().slice(0, VOID_REASON_MAX)
+        : "Kullanıcı iptal etti";
     try {
-      return await this.backend.updateTransaction(ownScope(actor), id, input);
+      return await this.backend.voidLedgerEntry(ownScope(actor), entryId, reason);
     } catch (error) {
       this.toAppError(error);
     }
   }
 
-  async deleteTransaction(actor: UserActor, id: string): Promise<void> {
+  /** "Düzenle": eski kayıt REPLACED olur, yerine yeni kayıt eklenir; tek işlem. */
+  async replaceTransaction(actor: UserActor, entryId: string, raw: unknown): Promise<LedgerReplaceResult> {
+    const request = await this.parseCommand(raw);
     try {
-      await this.backend.deleteTransaction(ownScope(actor), id);
+      return await this.backend.replaceLedgerEntry(ownScope(actor), entryId, request);
     } catch (error) {
       this.toAppError(error);
     }
   }
 
-  async clearTransactions(actor: UserActor): Promise<void> {
-    await this.backend.clearTransactions(ownScope(actor));
+  /** Tüm aktif kayıtları iptal eder (hard delete yok). */
+  async voidAllTransactions(actor: UserActor): Promise<number> {
+    try {
+      return await this.backend.voidAllLedgerEntries(ownScope(actor), "Kullanıcı tüm işlemleri iptal etti");
+    } catch (error) {
+      this.toAppError(error);
+    }
   }
 }

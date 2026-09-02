@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { dec } from "@/domain/accounting";
+
 import { GOLD_PRODUCTS } from "@/domain/catalog";
 import { MOCK_PROVIDER_META, MockPriceProvider } from "@/prices/mock-provider";
 import { isSnapshotStale } from "@/prices/types";
@@ -32,8 +34,10 @@ describe("MockPriceProvider", () => {
     const snapshot = await provider().getQuotes(ALL_IDS);
     expect(Object.keys(snapshot.quotes)).toHaveLength(ALL_IDS.length);
     for (const quote of Object.values(snapshot.quotes)) {
-      expect(quote.buyPrice).toBeGreaterThan(0);
-      expect(quote.buyPrice).toBeLessThan(quote.sellPrice);
+      expect(dec(quote.liquidationPrice).greaterThan(0)).toBe(true);
+      expect(dec(quote.liquidationPrice).lessThan(dec(quote.replacementPrice))).toBe(true);
+      // Ondalık dize: bilimsel gösterim veya kayan nokta artığı yok.
+      expect(quote.liquidationPrice).toMatch(/^\d+\.\d{2}$/);
     }
   });
 
@@ -42,9 +46,9 @@ describe("MockPriceProvider", () => {
     const gram = snapshot.quotes["gram-altin"];
     const bilezik = snapshot.quotes["bilezik-22-ayar"];
 
-    const gramSpread = (gram.sellPrice - gram.buyPrice) / gram.sellPrice;
-    const bilezikSpread = (bilezik.sellPrice - bilezik.buyPrice) / bilezik.sellPrice;
-    expect(bilezikSpread).toBeGreaterThan(gramSpread);
+    const spread = (quote: { liquidationPrice: string; replacementPrice: string }) =>
+      dec(quote.replacementPrice).minus(dec(quote.liquidationPrice)).div(dec(quote.replacementPrice));
+    expect(spread(bilezik).greaterThan(spread(gram))).toBe(true);
   });
 
   it("fiyat ürünün has altın karşılığıyla orantılıdır", async () => {
@@ -52,7 +56,7 @@ describe("MockPriceProvider", () => {
     const gram = snapshot.quotes["gram-altin"];
     const tam = snapshot.quotes["yeni-tam"];
     // Yeni tam 6.412 gr has içerir; fiyatı gram altından belirgin biçimde yüksektir.
-    expect(tam.buyPrice).toBeGreaterThan(gram.buyPrice * 6);
+    expect(dec(tam.liquidationPrice).greaterThan(dec(gram.liquidationPrice).times(6))).toBe(true);
   });
 
   it("aynı zaman diliminde deterministiktir", async () => {
@@ -68,7 +72,9 @@ describe("MockPriceProvider", () => {
     });
     const first = await provider().getQuotes(["gram-altin"]);
     const second = await later.getQuotes(["gram-altin"]);
-    expect(second.quotes["gram-altin"].buyPrice).not.toBe(first.quotes["gram-altin"].buyPrice);
+    expect(second.quotes["gram-altin"].liquidationPrice).not.toBe(
+      first.quotes["gram-altin"].liquidationPrice,
+    );
   });
 
   it("bilinmeyen ürün istendiğinde kısmi sonuç döner, uydurma fiyat üretmez", async () => {
@@ -91,14 +97,14 @@ describe("MockPriceProvider", () => {
     const quote = snapshot.quotes["gram-altin"];
     expect(Object.keys(quote).sort()).toEqual(
       [
-        "buyPrice",
+        "liquidationPrice",
         "currency",
         "fetchedAt",
         "market",
         "productId",
         "provider",
         "providerTimestamp",
-        "sellPrice",
+        "replacementPrice",
         "status",
       ].sort(),
     );

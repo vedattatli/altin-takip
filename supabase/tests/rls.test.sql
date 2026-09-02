@@ -20,7 +20,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(73);
+select plan(124);
 
 -- -----------------------------------------------------------------------------
 -- Yardımcılar
@@ -66,8 +66,8 @@ end;
 $$;
 
 -- Rol değiştirme yardımcıları her rolden çağrılabilmelidir (test kapsamı; rollback edilir).
-grant usage on schema tests to anon, authenticated;
-grant execute on all functions in schema tests to anon, authenticated;
+grant usage on schema tests to anon, authenticated, service_role;
+grant execute on all functions in schema tests to anon, authenticated, service_role;
 
 -- -----------------------------------------------------------------------------
 -- Test verisi (BFF / sahip bağlamında)
@@ -145,16 +145,15 @@ select is(
   'provision_missing_defaults idempotenttir: ikinci çağrı hiçbir şey yapmaz'
 );
 
--- Test işlemleri (tetikleyicinin oluşturduğu portföy kimlikleriyle)
-insert into public.transactions
-  (id, user_id, portfolio_id, product_id, side, quantity, unit, traded_at, unit_price, fee_amount)
-values
-  ('cccccccc-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
-   (select id from public.portfolios where user_id = '11111111-1111-1111-1111-111111111111'),
-   'gram-altin', 'buy', 10, 'gram', '2026-01-10', 5000, 0),
-  ('cccccccc-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222',
-   (select id from public.portfolios where user_id = '22222222-2222-2222-2222-222222222222'),
-   'gram-altin', 'buy', 4, 'gram', '2026-01-11', 5100, 0);
+-- Test işlemleri: kaynak gerçek DEFTERDİR; kayıtlar RPC üzerinden yazılır.
+do $$
+begin
+  perform public.create_transaction_checked('11111111-1111-1111-1111-111111111111',
+    'gram-altin', 'buy', 10, 'gram', '2026-01-10', 5000, 0, '');
+  perform public.create_transaction_checked('22222222-2222-2222-2222-222222222222',
+    'gram-altin', 'buy', 4, 'gram', '2026-01-11', 5100, 0, '');
+end;
+$$;
 
 insert into public.admin_audit_logs (admin_user_id, admin_username, target_user_id, target_username, action, success)
 values ('33333333-3333-3333-3333-333333333333', 'yoneticix',
@@ -450,6 +449,44 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$select public.ledger_append('11111111-1111-1111-1111-111111111111', '{}'::jsonb)$$,
+  '42501',
+  'permission denied for function ledger_append',
+  'authenticated defter RPC''sini (ledger_append) çağıramaz'
+);
+
+select throws_ok(
+  $$select public.ledger_void('11111111-1111-1111-1111-111111111111', gen_random_uuid(), 'x')$$,
+  '42501',
+  'permission denied for function ledger_void',
+  'authenticated defter RPC''sini (ledger_void) çağıramaz'
+);
+
+select is((select count(*)::int from public.portfolio_positions), 1,
+  'Kullanıcı A yalnızca kendi pozisyonunu görür (RLS)');
+
+select is(
+  (select count(*)::int from public.portfolio_positions where user_id = '22222222-2222-2222-2222-222222222222'),
+  0, 'Kullanıcı A, Kullanıcı B pozisyonunu göremez');
+
+select throws_ok(
+  $$insert into public.portfolio_positions (portfolio_id, user_id, product_id, quantity)
+    values ((select id from public.portfolios where user_id = '11111111-1111-1111-1111-111111111111'),
+            '11111111-1111-1111-1111-111111111111', 'gram-altin', 999)$$,
+  '42501',
+  'permission denied for table portfolio_positions',
+  'Kullanıcı A türetilmiş pozisyonu doğrudan yazamaz (GRANT katmanı)'
+);
+
+select throws_ok(
+  $$insert into public.price_snapshots (user_id, product_id, liquidation_price, replacement_price, provider, market, provider_status, provider_timestamp, fetched_at)
+    values ('11111111-1111-1111-1111-111111111111', 'gram-altin', 1, 1, 'x', 'x', 'ok', now(), now())$$,
+  '42501',
+  'permission denied for table price_snapshots',
+  'Kullanıcı A fiyat anlık görüntüsünü doğrudan yazamaz (GRANT katmanı)'
+);
+
+select throws_ok(
   $$select count(*) from public.app_sessions$$,
   '42501',
   'permission denied for table app_sessions',
@@ -709,6 +746,437 @@ select is(
   1,
   'Aktif oturumda hareketsizlik alanı kullanılmaz (null)'
 );
+
+
+-- =============================================================================
+-- 10. OTURUM POLİTİKASI (0008)
+-- =============================================================================
+
+select tests.become_service();
+
+select col_default_is('public', 'app_sessions', 'persistent', 'true',
+  'persistent varsayılanı true: mevcut kullanıcı oturumları kalıcı tercih verilmiş sayılır');
+
+select is(
+  (select persistent from public.app_sessions where id = 'dddddddd-0000-0000-0000-000000000001'),
+  true,
+  'Kurulumdaki (eski biçim) oturum kalıcı sayılır; geçersiz kılınmaz'
+);
+
+insert into public.app_sessions (id, user_id, token_hash, persistent, expires_at, absolute_expires_at, idle_expires_at)
+values ('dddddddd-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111',
+        'hareketsiz-dolan', false, now() + interval '7 hours', now() + interval '7 hours', now() - interval '1 minute');
+
+select is(public.purge_expired_sessions(), 1,
+  'Hareketsizliği dolan tarayıcı oturumu bakım temizliğiyle silinir');
+
+-- =============================================================================
+-- 11. MUHASEBE: YETKİLER (0009 / 0010)
+-- =============================================================================
+
+select ok(
+  (select bool_and(
+     has_function_privilege('service_role', f, 'execute')
+     and not has_function_privilege('anon', f, 'execute')
+     and not has_function_privilege('authenticated', f, 'execute'))
+   from unnest(array[
+     'public.ledger_append(uuid, jsonb)',
+     'public.ledger_void(uuid, uuid, text)',
+     'public.ledger_replace(uuid, uuid, jsonb)',
+     'public.ledger_void_all(uuid, text)',
+     'public.ledger_list(uuid)',
+     'public.positions_list(uuid)',
+     'public.ledger_verify(uuid)'
+   ]) as f),
+  'Defter RPC''leri yalnızca service_role tarafından çağrılabilir'
+);
+
+select ok(
+  (select bool_and(
+     not has_function_privilege('anon', f, 'execute')
+     and not has_function_privilege('authenticated', f, 'execute')
+     and not has_function_privilege('service_role', f, 'execute'))
+   from unnest(array[
+     'public.ledger_compute_amounts(text, text, numeric, numeric, numeric, numeric, numeric, numeric)',
+     'public.ledger_replay_product(uuid, text)',
+     'public.ledger_rebuild_position(uuid, text)',
+     'public.ledger_transaction_json(public.transactions)',
+     'public.guard_ledger_mutation()',
+     'public.reject_snapshot_mutation()'
+   ]) as f),
+  'Muhasebe yardımcıları ve tetikleyici fonksiyonları hiçbir role açık değildir'
+);
+
+select ok(
+  has_table_privilege('authenticated', 'public.price_snapshots', 'SELECT')
+  and not has_table_privilege('authenticated', 'public.price_snapshots', 'INSERT')
+  and not has_table_privilege('anon', 'public.price_snapshots', 'SELECT')
+  and has_table_privilege('service_role', 'public.price_snapshots', 'INSERT')
+  and not has_table_privilege('service_role', 'public.price_snapshots', 'UPDATE')
+  and not has_table_privilege('service_role', 'public.price_snapshots', 'DELETE'),
+  'price_snapshots: authenticated SELECT, service_role SELECT+INSERT; UPDATE/DELETE kimseye'
+);
+
+select ok(
+  has_table_privilege('authenticated', 'public.portfolio_positions', 'SELECT')
+  and not has_table_privilege('authenticated', 'public.portfolio_positions', 'INSERT')
+  and has_table_privilege('service_role', 'public.portfolio_positions', 'SELECT')
+  and not has_table_privilege('service_role', 'public.portfolio_positions', 'INSERT')
+  and not has_table_privilege('service_role', 'public.portfolio_positions', 'UPDATE')
+  and not has_table_privilege('service_role', 'public.portfolio_positions', 'DELETE'),
+  'portfolio_positions türetilmiş projeksiyonuna service_role bile doğrudan yazamaz'
+);
+
+-- service_role gerçek rolüyle dener (BFF bağlamı)
+select set_config('role', 'service_role', true);
+select throws_ok(
+  $$insert into public.portfolio_positions (portfolio_id, user_id, product_id, quantity)
+    values ((select id from public.portfolios where user_id = '44444444-4444-4444-4444-444444444444'),
+            '44444444-4444-4444-4444-444444444444', 'gram-altin', 1)$$,
+  '42501',
+  'permission denied for table portfolio_positions',
+  'service_role pozisyon tablosunu elle düzenleyemez; yalnızca RPC yeniden oluşturur'
+);
+select tests.become_service();
+
+-- =============================================================================
+-- 12. MUHASEBE: HESAPLAMA (kesin kabul örnekleri, Postgres motoru)
+-- =============================================================================
+
+create temp table if not exists tests_vars (key text primary key, value jsonb);
+
+-- ÖRNEK 1 — Kullanıcı C: 5×3.500, 5×4.200, 5×3.700
+do $$
+declare
+  c uuid := '44444444-4444-4444-4444-444444444444';
+  base jsonb := jsonb_build_object('kind', 'BUY', 'product_id', 'kulce-ozel-gramaj', 'unit', 'gram',
+    'pricing_input_mode', 'UNIT_PRICE', 'total_amount', null, 'fees', '0', 'workmanship', '0',
+    'cost_basis_origin', 'ACTUAL', 'note', '', 'client_request_id', null);
+begin
+  perform public.ledger_append(c, base || jsonb_build_object('quantity', '5', 'occurred_at', '2026-01-10', 'unit_price', '3500'));
+  perform public.ledger_append(c, base || jsonb_build_object('quantity', '5', 'occurred_at', '2026-01-11', 'unit_price', '4200'));
+  perform public.ledger_append(c, base || jsonb_build_object('quantity', '5', 'occurred_at', '2026-01-12', 'unit_price', '3700'));
+end;
+$$;
+
+select is(
+  (select public.ledger_num_text(quantity) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '15', 'ÖRNEK 1: miktar 15 gram');
+
+select is(
+  (select public.ledger_num_text(remaining_cost_basis) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '57000', 'ÖRNEK 1: toplam maliyet 57.000');
+
+select is(
+  (select public.ledger_num_text(average_cost) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '3800', 'ÖRNEK 1: ortalama maliyet 3.800');
+
+-- ÖRNEK 4 — satış 4 gram × 4.200
+do $$
+begin
+  perform public.ledger_append('44444444-4444-4444-4444-444444444444', jsonb_build_object(
+    'kind', 'SELL', 'product_id', 'kulce-ozel-gramaj', 'quantity', '4', 'unit', 'gram',
+    'occurred_at', '2026-02-01', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '4200',
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', null));
+end;
+$$;
+
+select is(
+  (select public.ledger_num_text(net_proceeds) from public.transactions
+   where user_id = '44444444-4444-4444-4444-444444444444' and transaction_kind = 'SELL'),
+  '16800', 'ÖRNEK 4: net satış geliri 16.800');
+
+select is(
+  (select public.ledger_num_text(realized_pnl) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '1600', 'ÖRNEK 4: gerçekleşmiş K/Z 1.600 (çıkarılan maliyet 15.200)');
+
+select is(
+  (select public.ledger_num_text(quantity) || '|' || public.ledger_num_text(remaining_cost_basis) || '|' || public.ledger_num_text(average_cost)
+   from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '11|41800|3800', 'ÖRNEK 4: kalan 11 gram, 41.800 TL; satış ortalamayı DEĞİŞTİRMEZ');
+
+-- Aşırı satış: RPC reddeder, defter değişmez
+select throws_ok(
+  $$select public.ledger_append('44444444-4444-4444-4444-444444444444', jsonb_build_object(
+    'kind', 'SELL', 'product_id', 'kulce-ozel-gramaj', 'quantity', '20', 'unit', 'gram',
+    'occurred_at', '2026-02-02', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '4200',
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', null))$$,
+  'P0001', NULL,
+  'Eldeki miktarı aşan satış ALTIN_OVERSELL ile reddedilir'
+);
+
+select is(
+  (select count(*)::int from public.transactions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj' and status = 'ACTIVE'),
+  4, 'Reddedilen satış deftere yazılmaz');
+
+-- ÖRNEK 5 — masraflar (Kullanıcı B, has-altin)
+do $$
+begin
+  perform public.ledger_append('22222222-2222-2222-2222-222222222222', jsonb_build_object(
+    'kind', 'BUY', 'product_id', 'has-altin', 'quantity', '10', 'unit', 'gram',
+    'occurred_at', '2026-01-15', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '5000',
+    'total_amount', null, 'fees', '100', 'workmanship', '500', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', null));
+end;
+$$;
+
+select is(
+  (select public.ledger_num_text(total_paid) || '|' || public.ledger_num_text(acquisition_unit_price)
+   from public.transactions where user_id = '22222222-2222-2222-2222-222222222222' and product_id = 'has-altin'),
+  '50600|5060', 'ÖRNEK 5: 50.000 + 500 işçilik + 100 komisyon = 50.600; ortalama 5.060');
+
+-- ÖRNEK 6 — toplam ödenen modu (Kullanıcı B, kulce-24-ayar)
+do $$
+begin
+  perform public.ledger_append('22222222-2222-2222-2222-222222222222', jsonb_build_object(
+    'kind', 'BUY', 'product_id', 'kulce-24-ayar', 'quantity', '10', 'unit', 'gram',
+    'occurred_at', '2026-01-16', 'pricing_input_mode', 'TOTAL_AMOUNT', 'unit_price', null,
+    'total_amount', '51200', 'fees', '0', 'workmanship', '300', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', null));
+end;
+$$;
+
+select is(
+  (select public.ledger_num_text(total_paid) || '|' || public.ledger_num_text(acquisition_unit_price) || '|' || public.ledger_num_text(gross_amount)
+   from public.transactions where user_id = '22222222-2222-2222-2222-222222222222' and product_id = 'kulce-24-ayar'),
+  '51200|5120|50900', 'ÖRNEK 6: toplam ödenen 51.200, ortalama 5.120; işçilik ikinci kez eklenmez');
+
+-- ÖRNEK 10 — decimal hassasiyeti (Kullanıcı B, altin-18-ayar)
+do $$
+declare
+  base jsonb := jsonb_build_object('kind', 'BUY', 'product_id', 'altin-18-ayar', 'unit', 'gram',
+    'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '5000.33', 'total_amount', null,
+    'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL', 'note', '', 'client_request_id', null);
+begin
+  perform public.ledger_append('22222222-2222-2222-2222-222222222222', base || jsonb_build_object('quantity', '0.1', 'occurred_at', '2026-01-17'));
+  perform public.ledger_append('22222222-2222-2222-2222-222222222222', base || jsonb_build_object('quantity', '0.2', 'occurred_at', '2026-01-18'));
+end;
+$$;
+
+select is(
+  (select public.ledger_num_text(quantity) || '|' || public.ledger_num_text(remaining_cost_basis)
+   from public.portfolio_positions
+   where user_id = '22222222-2222-2222-2222-222222222222' and product_id = 'altin-18-ayar'),
+  '0.3|1500.099', 'ÖRNEK 10: 0,1 + 0,2 = 0,3 gram; kayan nokta artığı yok');
+
+-- ÖRNEK 8 — idempotency
+do $$
+declare
+  payload jsonb := jsonb_build_object('kind', 'BUY', 'product_id', 'kulce-ozel-gramaj', 'quantity', '1', 'unit', 'gram',
+    'occurred_at', '2026-02-03', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '5000',
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', 'req-pgtap-000001');
+begin
+  insert into tests_vars values ('idem1', public.ledger_append('44444444-4444-4444-4444-444444444444', payload));
+  insert into tests_vars values ('idem2', public.ledger_append('44444444-4444-4444-4444-444444444444', payload));
+end;
+$$;
+
+select is(((select value from tests_vars where key = 'idem2')->>'replayed')::boolean, true,
+  'ÖRNEK 8: aynı istek kimliğiyle ikinci gönderim replay döner');
+
+select is(
+  (select value->'transaction'->>'id' from tests_vars where key = 'idem1'),
+  (select value->'transaction'->>'id' from tests_vars where key = 'idem2'),
+  'ÖRNEK 8: ikinci yanıt ilk işlemin kimliğini döner; tek kayıt oluşur');
+
+select is(
+  (select count(*)::int from public.transactions
+   where user_id = '44444444-4444-4444-4444-444444444444' and client_request_id = 'req-pgtap-000001'),
+  1, 'ÖRNEK 8: miktar bir kez artar');
+
+select throws_ok(
+  $$select public.ledger_append('44444444-4444-4444-4444-444444444444', jsonb_build_object(
+    'kind', 'BUY', 'product_id', 'kulce-ozel-gramaj', 'quantity', '2', 'unit', 'gram',
+    'occurred_at', '2026-02-03', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '5000',
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', 'req-pgtap-000001'))$$,
+  'P0003', NULL,
+  'ÖRNEK 8: aynı istek kimliği farklı içerikle gelirse conflict'
+);
+
+-- VOID: iptal hard delete değildir
+do $$
+declare
+  target uuid := (select (value->'transaction'->>'id')::uuid from tests_vars where key = 'idem1');
+begin
+  insert into tests_vars values ('void1', public.ledger_void('44444444-4444-4444-4444-444444444444', target, 'pgTAP iptal'));
+end;
+$$;
+
+select is(
+  (select status || '|' || void_reason from public.transactions
+   where client_request_id = 'req-pgtap-000001'),
+  'VOID|pgTAP iptal', 'İptal edilen kayıt VOID durumuna geçer, sebep saklanır, satır silinmez');
+
+select is(
+  (select public.ledger_num_text(quantity) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '11', 'İptal sonrası pozisyon yeniden hesaplanır');
+
+select throws_ok(
+  $$select public.ledger_void('44444444-4444-4444-4444-444444444444',
+      (select id from public.transactions where client_request_id = 'req-pgtap-000001'), 'tekrar')$$,
+  'P0005', NULL,
+  'İptal edilmiş kayıt yeniden iptal edilemez'
+);
+
+-- ÖRNEK 9 — geçmiş alışın iptali sonraki satışı negatife düşürüyorsa reddedilir
+do $$
+begin
+  perform public.ledger_append('44444444-4444-4444-4444-444444444444', jsonb_build_object(
+    'kind', 'SELL', 'product_id', 'kulce-ozel-gramaj', 'quantity', '9', 'unit', 'gram',
+    'occurred_at', '2026-02-04', 'pricing_input_mode', 'TOTAL_AMOUNT', 'unit_price', null,
+    'total_amount', '37800', 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', 'req-pgtap-sell-9'));
+end;
+$$;
+
+select throws_ok(
+  $$select public.ledger_void('44444444-4444-4444-4444-444444444444',
+      (select id from public.transactions where user_id = '44444444-4444-4444-4444-444444444444'
+         and transaction_kind = 'BUY' and traded_at = '2026-01-10' and status = 'ACTIVE'), 'geçmiş')$$,
+  'P0001', NULL,
+  'ÖRNEK 9: geçmiş alışın iptali sonraki satışı aşırıya düşürürse reddedilir'
+);
+
+select is(
+  (select status from public.transactions where user_id = '44444444-4444-4444-4444-444444444444'
+     and transaction_kind = 'BUY' and traded_at = '2026-01-10'),
+  'ACTIVE', 'ÖRNEK 9: reddedilen iptal defteri değiştirmez');
+
+-- REPLACE: 9 gramlık satış 8 gram olarak düzeltilir (tek işlem, ilişki korunur)
+do $$
+declare
+  old_id uuid := (select id from public.transactions where client_request_id = 'req-pgtap-sell-9');
+begin
+  insert into tests_vars values ('replace1', public.ledger_replace('44444444-4444-4444-4444-444444444444', old_id,
+    jsonb_build_object('kind', 'SELL', 'product_id', 'kulce-ozel-gramaj', 'quantity', '8', 'unit', 'gram',
+      'occurred_at', '2026-02-04', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '4200',
+      'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+      'note', 'düzeltme', 'client_request_id', 'req-pgtap-replace-1')));
+end;
+$$;
+
+select is(
+  (select status from public.transactions where client_request_id = 'req-pgtap-sell-9'),
+  'REPLACED', 'Düzeltilen kayıt REPLACED olur; silinmez');
+
+select is(
+  (select t.replaced_by_transaction_id from public.transactions t where t.client_request_id = 'req-pgtap-sell-9'),
+  (select id from public.transactions where client_request_id = 'req-pgtap-replace-1'),
+  'Eski kayıt yeni kayda, yeni kayıt eski kayda bağlanır');
+
+select is(
+  (select replaces_transaction_id from public.transactions where client_request_id = 'req-pgtap-replace-1'),
+  (select id from public.transactions where client_request_id = 'req-pgtap-sell-9'),
+  'Yeni kayıt neyi düzelttiğini taşır');
+
+select is(
+  (select public.ledger_num_text(quantity) from public.portfolio_positions
+   where user_id = '44444444-4444-4444-4444-444444444444' and product_id = 'kulce-ozel-gramaj'),
+  '3', 'Düzeltme sonrası pozisyon: 15 − 4 − 8 = 3 gram');
+
+-- Defter koruması: finansal alan güncellenemez, satır silinemez (sahip bağlamında bile)
+select throws_ok(
+  $$update public.transactions set quantity = 1 where client_request_id = 'req-pgtap-replace-1'$$,
+  '42501', NULL,
+  'Defter kaydının finansal alanı sahip bağlamında bile güncellenemez (tetikleyici)'
+);
+
+select throws_ok(
+  $$delete from public.transactions where client_request_id = 'req-pgtap-replace-1'$$,
+  '42501', NULL,
+  'Defter kaydı hard delete edilemez (tetikleyici)'
+);
+
+-- MARKET_BASELINE: sunucu anlık görüntüsü aynı işlemde saklanır ve değiştirilemez
+do $$
+begin
+  insert into tests_vars values ('baseline1', public.ledger_append('22222222-2222-2222-2222-222222222222', jsonb_build_object(
+    'kind', 'OPENING_BALANCE', 'product_id', 'yeni-ceyrek', 'quantity', '2', 'unit', 'adet',
+    'occurred_at', '2026-02-05', 'pricing_input_mode', 'MARKET_BASELINE', 'unit_price', null,
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'MARKET_BASELINE',
+    'note', '', 'client_request_id', null,
+    'baseline_snapshot', jsonb_build_object('liquidation_price', '11000', 'replacement_price', '11300',
+      'provider', 'mock', 'market', 'TEST', 'currency', 'TRY', 'provider_status', 'ok',
+      'is_real_market_data', false, 'provider_timestamp', now(), 'fetched_at', now()))));
+end;
+$$;
+
+select is(
+  (select value->'transaction'->>'totalPaid' from tests_vars where key = 'baseline1'),
+  '22000', 'MARKET_BASELINE: başlangıç maliyet bazı = miktar × bozdurma fiyatı');
+
+select is(
+  (select value->'transaction'->'priceSnapshot'->>'liquidationPrice' from tests_vars where key = 'baseline1'),
+  '11000', 'MARKET_BASELINE: anlık görüntü kayıtla birlikte döner');
+
+select is(
+  (select has_baseline from public.portfolio_positions
+   where user_id = '22222222-2222-2222-2222-222222222222' and product_id = 'yeni-ceyrek'),
+  true, 'MARKET_BASELINE: pozisyon "takip başlangıç değeri" olarak işaretlenir');
+
+select throws_ok(
+  $$update public.price_snapshots set liquidation_price = 1$$,
+  '42501', NULL,
+  'Fiyat anlık görüntüsü sonradan değiştirilemez'
+);
+
+select throws_ok(
+  $$delete from public.price_snapshots$$,
+  '42501', NULL,
+  'Fiyat anlık görüntüsü silinemez'
+);
+
+select throws_ok(
+  $$select public.ledger_append('22222222-2222-2222-2222-222222222222', jsonb_build_object(
+    'kind', 'OPENING_BALANCE', 'product_id', 'yeni-ceyrek', 'quantity', '1', 'unit', 'adet',
+    'occurred_at', '2026-02-05', 'pricing_input_mode', 'MARKET_BASELINE', 'unit_price', null,
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'MARKET_BASELINE',
+    'note', '', 'client_request_id', null,
+    'baseline_snapshot', jsonb_build_object('liquidation_price', '11000', 'replacement_price', '11300',
+      'provider', 'mock', 'market', 'TEST', 'currency', 'TRY', 'provider_status', 'stale',
+      'is_real_market_data', false, 'provider_timestamp', now(), 'fetched_at', now())))$$,
+  'P0004', NULL,
+  'Bayat/kullanılamaz fiyatla MARKET_BASELINE oluşturulamaz'
+);
+
+select throws_ok(
+  $$select public.ledger_append('22222222-2222-2222-2222-222222222222', jsonb_build_object(
+    'kind', 'BUY', 'product_id', 'yeni-ceyrek', 'quantity', '1.5', 'unit', 'adet',
+    'occurred_at', '2026-02-05', 'pricing_input_mode', 'UNIT_PRICE', 'unit_price', '11000',
+    'total_amount', null, 'fees', '0', 'workmanship', '0', 'cost_basis_origin', 'ACTUAL',
+    'note', '', 'client_request_id', null))$$,
+  '23514', NULL,
+  'Adet ürününe ondalık miktar girilemez (tetikleyici)'
+);
+
+-- Doğrulama: defter ↔ türetilmiş pozisyon
+select is(
+  (public.ledger_verify('44444444-4444-4444-4444-444444444444')->'mismatches'),
+  '[]'::jsonb, 'ledger_verify: Kullanıcı C için tutarsızlık yok');
+
+select is(
+  (public.ledger_verify('22222222-2222-2222-2222-222222222222')->'mismatches'),
+  '[]'::jsonb, 'ledger_verify: Kullanıcı B için tutarsızlık yok');
+
+select is(
+  (select p->>'averageCost' from jsonb_array_elements(public.positions_list('44444444-4444-4444-4444-444444444444')) p
+   where p->>'productId' = 'kulce-ozel-gramaj'),
+  '3800', 'positions_list: sayılar kanonik ondalık METİN olarak döner');
+
+select ok(
+  (select jsonb_array_length(public.ledger_list('44444444-4444-4444-4444-444444444444')) >= 7),
+  'ledger_list: VOID ve REPLACED kayıtlar dâhil tüm defter döner');
 
 select * from finish();
 

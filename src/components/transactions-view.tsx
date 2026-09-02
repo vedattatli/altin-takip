@@ -1,110 +1,197 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
+import {
+  COST_QUALITY_LABELS,
+  dec,
+  type LedgerCommand,
+  type LedgerEntry,
+} from "@/domain/accounting";
 import { requireProduct } from "@/domain/catalog";
-import { sortTransactions, transactionNetAmount } from "@/domain/portfolio";
-import type { Transaction, TransactionInput } from "@/domain/types";
-import { formatDate, formatMoney, formatQuantity } from "@/lib/format";
+import { formatDate, formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import { usePortfolio } from "@/state/portfolio-store";
-import { TransactionForm } from "./transaction-form";
-import { Alert, Card, EmptyState, SectionTitle, cx } from "./ui";
+import { BuyForm, OpeningBalanceForm, SellForm } from "./ledger-forms";
+import { Alert, Card, EmptyState, Field, SectionTitle, cx } from "./ui";
 
-function TransactionRow({
-  transaction,
+export type LedgerFormKind = "opening" | "buy" | "sell";
+
+const KIND_LABELS: Record<LedgerEntry["kind"], string> = {
+  OPENING_BALANCE: "Mevcut altın",
+  BUY: "Alış",
+  SELL: "Satış",
+};
+
+const STATUS_LABELS: Record<LedgerEntry["status"], string> = {
+  ACTIVE: "Aktif",
+  VOID: "İptal edildi",
+  REPLACED: "Düzeltildi",
+};
+
+function originLabel(entry: LedgerEntry): string | null {
+  if (entry.kind === "SELL") return null;
+  if (entry.costBasisOrigin === "ACTUAL") return COST_QUALITY_LABELS.ACTUAL;
+  if (entry.costBasisOrigin === "ESTIMATED") return COST_QUALITY_LABELS.ESTIMATED;
+  return COST_QUALITY_LABELS.BASELINE;
+}
+
+function LedgerRow({
+  entry,
   onEdit,
-  onDelete,
+  onVoid,
   busy,
 }: {
-  transaction: Transaction;
+  entry: LedgerEntry;
   onEdit: () => void;
-  onDelete: () => void;
+  onVoid: () => void;
   busy: boolean;
 }) {
-  const product = requireProduct(transaction.productId);
-  const isBuy = transaction.side === "buy";
-  const amount = transactionNetAmount(transaction);
+  const product = requireProduct(entry.productId);
+  const isSell = entry.kind === "SELL";
+  const isActive = entry.status === "ACTIVE";
+  const amount = isSell ? entry.netProceeds : entry.totalPaid;
+  const unitPrice = isSell ? entry.disposalUnitPrice : entry.acquisitionUnitPrice;
+  const origin = originLabel(entry);
+  const hasFees = !dec(entry.fees).isZero();
+  const hasWorkmanship = !dec(entry.workmanship).isZero();
 
   return (
-    <li className="border-b border-line px-4 py-3 last:border-b-0">
+    <li
+      className={cx("border-b border-line px-4 py-3 last:border-b-0", !isActive && "opacity-70")}
+      data-status={entry.status}
+    >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={cx("badge", isBuy ? "badge-positive" : "badge-negative")}>
-              {isBuy ? "Alış" : "Satış"}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span
+              className={cx(
+                "badge",
+                entry.kind === "SELL" ? "badge-negative" : entry.kind === "BUY" ? "badge-positive" : "badge-notice",
+              )}
+            >
+              {KIND_LABELS[entry.kind]}
             </span>
+            {!isActive ? <span className="badge">{STATUS_LABELS[entry.status]}</span> : null}
+            {origin ? <span className="badge">{origin}</span> : null}
             <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
           </div>
           <p className="tabular mt-1 text-xs text-muted">
-            {formatQuantity(transaction.quantity, transaction.unit)} ·{" "}
-            {formatMoney(transaction.unitPrice)}/{transaction.unit} · {formatDate(transaction.tradedAt)}
+            {formatQuantity(entry.quantity, entry.unit)}
+            {unitPrice ? ` · ${formatMoney(unitPrice)}/${entry.unit}` : ""} · {formatDate(entry.occurredAt)}
           </p>
-          {transaction.feeAmount > 0 ? (
+          {hasFees || hasWorkmanship ? (
             <p className="tabular mt-0.5 text-xs text-subtle">
-              İşçilik / komisyon: {formatMoney(transaction.feeAmount)}
+              {hasWorkmanship ? `İşçilik: ${formatMoney(entry.workmanship)}` : ""}
+              {hasWorkmanship && hasFees ? " · " : ""}
+              {hasFees ? `Masraf: ${formatMoney(entry.fees)}` : ""}
+              {entry.pricingInputMode === "TOTAL_AMOUNT" ? " (toplam tutarın içinde)" : ""}
             </p>
           ) : null}
-          {transaction.note ? (
-            <p className="mt-1 break-words text-xs text-subtle">{transaction.note}</p>
+          {entry.costBasisOrigin === "MARKET_BASELINE" && entry.priceSnapshot ? (
+            <p className="mt-0.5 text-xs text-subtle">
+              Başlangıç fiyatı: {formatMoney(entry.priceSnapshot.liquidationPrice)}/{entry.unit} ·{" "}
+              {entry.priceSnapshot.provider} · {formatDateTime(entry.priceSnapshot.providerTimestamp)} ·
+              gerçek tarihsel maliyet değildir
+            </p>
+          ) : null}
+          {entry.note ? <p className="mt-1 break-words text-xs text-subtle">{entry.note}</p> : null}
+          {!isActive ? (
+            <p className="mt-1 text-xs text-subtle">
+              {STATUS_LABELS[entry.status]}
+              {entry.voidedAt ? ` · ${formatDateTime(entry.voidedAt)}` : ""}
+              {entry.voidReason ? ` · ${entry.voidReason}` : ""}
+            </p>
+          ) : null}
+          {entry.replacesTransactionId ? (
+            <p className="mt-1 text-xs text-subtle">Bir önceki kaydın düzeltilmiş hâlidir.</p>
           ) : null}
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <p className="tabular text-sm font-semibold text-ink">{formatMoney(amount)}</p>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              className="btn btn-ghost px-2.5 py-1 text-xs"
-              onClick={onEdit}
-              disabled={busy}
-            >
-              Düzenle
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost px-2.5 py-1 text-xs text-negative"
-              onClick={onDelete}
-              disabled={busy}
-            >
-              Sil
-            </button>
-          </div>
+          <p className={cx("tabular text-sm font-semibold text-ink", !isActive && "line-through")}>
+            {amount ? formatMoney(amount) : "—"}
+          </p>
+          {isActive ? (
+            <div className="flex gap-1">
+              {entry.kind !== "OPENING_BALANCE" ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
+                  onClick={onEdit}
+                  disabled={busy}
+                >
+                  Düzelt
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs text-negative"
+                onClick={onVoid}
+                disabled={busy}
+              >
+                İptal et
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </li>
   );
 }
 
-export function TransactionsView({ initialFormOpen = false }: { initialFormOpen?: boolean }) {
-  const { transactions, addTransaction, editTransaction, removeTransaction, status } =
+export function TransactionsView({ initialForm = null }: { initialForm?: LedgerFormKind | null }) {
+  const { ledger, summary, appendTransaction, replaceTransaction, voidTransaction, status } =
     usePortfolio();
-  const [formOpen, setFormOpen] = useState(initialFormOpen);
-  const [editing, setEditing] = useState<Transaction | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
+  const [form, setForm] = useState<LedgerFormKind | null>(initialForm);
+  const [editing, setEditing] = useState<LedgerEntry | null>(null);
+  const [pendingVoid, setPendingVoid] = useState<LedgerEntry | null>(null);
+  const [voidReason, setVoidReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const ordered = useMemo(() => sortTransactions(transactions).reverse(), [transactions]);
+  function openForm(kind: LedgerFormKind, entry: LedgerEntry | null = null) {
+    setForm(kind);
+    setEditing(entry);
+    setNotice(null);
+    setError(null);
+  }
 
-  async function handleSubmit(input: TransactionInput) {
-    if (editing) {
-      await editTransaction(editing.id, input);
-      setNotice("İşlem güncellendi.");
-    } else {
-      await addTransaction(input);
-      setNotice("İşlem eklendi.");
-    }
-    setFormOpen(false);
+  function closeForm() {
+    setForm(null);
     setEditing(null);
   }
 
-  async function confirmDelete() {
-    if (!pendingDelete) return;
+  async function handleSubmit(command: LedgerCommand) {
+    if (editing) {
+      await replaceTransaction(editing.id, command);
+      setNotice("İşlem düzeltildi. Eski kayıt \"Düzeltildi\" olarak listede kalır.");
+    } else {
+      const result = await appendTransaction(command);
+      setNotice(
+        result.replayed
+          ? "Bu işlem zaten kaydedilmişti; ikinci kez oluşturulmadı."
+          : command.kind === "OPENING_BALANCE"
+            ? "Mevcut altın eklendi."
+            : command.kind === "BUY"
+              ? "Alış eklendi."
+              : "Satış eklendi.",
+      );
+    }
+    closeForm();
+  }
+
+  async function confirmVoid() {
+    if (!pendingVoid) return;
     setBusy(true);
+    setError(null);
     try {
-      await removeTransaction(pendingDelete.id);
-      setNotice("İşlem silindi.");
-      setPendingDelete(null);
+      await voidTransaction(pendingVoid.id, voidReason.trim());
+      setNotice("İşlem iptal edildi. Kayıt silinmedi; \"İptal edildi\" olarak listede kalır.");
+      setPendingVoid(null);
+      setVoidReason("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "İşlem iptal edilemedi.");
     } finally {
       setBusy(false);
     }
@@ -118,108 +205,98 @@ export function TransactionsView({ initialFormOpen = false }: { initialFormOpen?
     );
   }
 
+  const addButtons = form ? null : (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className="btn btn-secondary min-h-11" data-testid="add-opening" onClick={() => openForm("opening")}>
+        Mevcut Altını Ekle
+      </button>
+      <button type="button" className="btn btn-primary min-h-11" data-testid="add-buy" onClick={() => openForm("buy")}>
+        Yeni Alış Ekle
+      </button>
+      <button type="button" className="btn btn-secondary min-h-11" data-testid="add-sell" onClick={() => openForm("sell")}>
+        Satış Ekle
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       <SectionTitle
         title="İşlemler"
-        description="Eklediğiniz her alış ve satış burada listelenir."
-        action={
-          formOpen ? undefined : (
-            <button
-              type="button"
-              className="btn btn-primary"
-              data-testid="add-transaction"
-              onClick={() => {
-                setEditing(null);
-                setFormOpen(true);
-                setNotice(null);
-              }}
-            >
-              Altın Ekle
-            </button>
-          )
-        }
+        description="Defter kaynak gerçektir: kayıtlar silinmez, iptal edilir veya düzeltilir."
       />
+      {addButtons}
 
       {notice ? <Alert tone="success">{notice}</Alert> : null}
+      {error ? <Alert tone="danger">{error}</Alert> : null}
 
-      {formOpen ? (
-        <TransactionForm
-          transactions={transactions}
-          editing={editing}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setFormOpen(false);
-            setEditing(null);
-          }}
-        />
+      {form === "opening" ? (
+        <OpeningBalanceForm summary={summary} onSubmit={handleSubmit} onCancel={closeForm} />
+      ) : null}
+      {form === "buy" ? <BuyForm editing={editing} onSubmit={handleSubmit} onCancel={closeForm} /> : null}
+      {form === "sell" ? (
+        <SellForm summary={summary} editing={editing} onSubmit={handleSubmit} onCancel={closeForm} />
       ) : null}
 
-      {pendingDelete ? (
-        <Card className="border-negative-soft p-4">
-          <p className="text-sm font-semibold text-ink">İşlem silinsin mi?</p>
-          <p className="mt-1 text-sm text-muted">
-            {requireProduct(pendingDelete.productId).name} ·{" "}
-            {formatQuantity(pendingDelete.quantity, pendingDelete.unit)} ·{" "}
-            {formatDate(pendingDelete.tradedAt)}. Bu işlem geri alınamaz ve toplamlarınız yeniden
-            hesaplanır.
+      {pendingVoid ? (
+        <Card className="border-negative-soft space-y-3 p-4">
+          <p className="text-sm font-semibold text-ink">İşlem iptal edilsin mi?</p>
+          <p className="text-sm text-muted">
+            {requireProduct(pendingVoid.productId).name} ·{" "}
+            {formatQuantity(pendingVoid.quantity, pendingVoid.unit)} · {formatDate(pendingVoid.occurredAt)}.
+            Kayıt silinmez; &quot;İptal edildi&quot; olarak listede kalır ve toplamlar yeniden hesaplanır.
+            Bir alışın iptali sonraki bir satışı eldeki miktarın üstüne çıkarıyorsa iptal reddedilir.
           </p>
-          <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setPendingDelete(null)}
-              disabled={busy}
-            >
+          <Field label="Sebep" htmlFor="void-reason" hint="İsteğe bağlı.">
+            <input
+              id="void-reason"
+              className="control min-h-11"
+              maxLength={140}
+              value={voidReason}
+              onChange={(event) => setVoidReason(event.target.value)}
+            />
+          </Field>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn btn-secondary min-h-11" onClick={() => setPendingVoid(null)} disabled={busy}>
               Vazgeç
             </button>
             <button
               type="button"
-              className="btn btn-danger"
-              data-testid="confirm-delete"
-              onClick={() => void confirmDelete()}
+              className="btn btn-danger min-h-11"
+              data-testid="confirm-void"
+              onClick={() => void confirmVoid()}
               disabled={busy}
             >
-              {busy ? "Siliniyor…" : "Evet, sil"}
+              {busy ? "İptal ediliyor…" : "Evet, iptal et"}
             </button>
           </div>
         </Card>
       ) : null}
 
       <Card>
-        {ordered.length === 0 ? (
+        {ledger.length === 0 ? (
           <EmptyState
             title="Henüz altın eklenmedi"
-            description="İlk işleminizi eklediğinizde portföyünüz ve kâr/zarar hesabınız burada oluşmaya başlar."
+            description="Mevcut altınınızı ekleyin veya ilk alış işleminizi kaydedin; portföyünüz ve kâr/zarar hesabınız burada oluşmaya başlar."
             action={
-              formOpen ? undefined : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    setEditing(null);
-                    setFormOpen(true);
-                  }}
-                >
-                  Altın Ekle
+              form ? undefined : (
+                <button type="button" className="btn btn-primary min-h-11" onClick={() => openForm("opening")}>
+                  Mevcut Altını Ekle
                 </button>
               )
             }
           />
         ) : (
           <ul data-testid="transaction-list">
-            {ordered.map((transaction) => (
-              <TransactionRow
-                key={transaction.id}
-                transaction={transaction}
+            {ledger.map((entry) => (
+              <LedgerRow
+                key={entry.id}
+                entry={entry}
                 busy={busy}
-                onEdit={() => {
-                  setEditing(transaction);
-                  setFormOpen(true);
-                  setNotice(null);
-                }}
-                onDelete={() => {
-                  setPendingDelete(transaction);
+                onEdit={() => openForm(entry.kind === "SELL" ? "sell" : "buy", entry)}
+                onVoid={() => {
+                  setPendingVoid(entry);
+                  setVoidReason("");
                   setNotice(null);
                 }}
               />

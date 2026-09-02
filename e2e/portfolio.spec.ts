@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import {
   addPurchase,
+  addSale,
+  browserApi,
   createReadyUser,
   expectNoHorizontalOverflow,
   gotoReady,
@@ -21,13 +23,13 @@ test.describe("portföy akışı", () => {
     await createReadyUser(scopedUsername("bospanel"));
     await loginAsUser(page, scopedUsername("bospanel"));
 
-    await expect(page.getByTestId("stat-liquidation")).toHaveText(/0,00/);
-    await expect(page.getByTestId("stat-repurchase")).toHaveText(/0,00/);
-    await expect(page.getByTestId("stat-cost")).toHaveText(/0,00/);
-    await expect(page.getByTestId("stat-pnl")).toHaveText(/0,00/);
-
+    for (const id of ["stat-liquidation", "stat-repurchase", "stat-cost", "stat-unrealized", "stat-realized", "stat-total-pnl"]) {
+      await expect(page.getByTestId(id)).toHaveText(/0,00/);
+    }
     await expect(page.getByText("Henüz altın eklenmedi")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Altın Ekle" }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Mevcut Altını Ekle" }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Yeni Alış Ekle" }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Satış Ekle" }).first()).toBeVisible();
     await expect(page.getByTestId("holdings-list")).toHaveCount(0);
   });
 
@@ -35,7 +37,6 @@ test.describe("portföy akışı", () => {
     await createReadyUser(scopedUsername("fiyatkaynak"));
     await loginAsUser(page, scopedUsername("fiyatkaynak"));
 
-    // Tek satırlık şerit panelin altındadır; bilgiler yine de her zaman görünür.
     const strip = page.getByTestId("price-source");
     await expect(strip).toContainText("Fiyat kaynağı:");
     await expect(strip.getByText("Test Verisi", { exact: true })).toBeVisible();
@@ -43,12 +44,11 @@ test.describe("portföy akışı", () => {
     await expect(strip.getByText("TEST", { exact: true })).toBeVisible();
     await expect(strip).toContainText("Son fiyat:");
 
-    // Uzun açıklama katlanmış durur ama erişilebilir kalır.
     await strip.getByText("Bu fiyatlar hakkında").click();
     await expect(strip.getByText(/Gerçek piyasa fiyatı değildir/)).toBeVisible();
   });
 
-  test("altın eklenince toplamlar doğru hesaplanır ve yenilemede korunur", async ({ page }) => {
+  test("alış eklenince toplamlar doğru hesaplanır ve yenilemede korunur", async ({ page }) => {
     const username = scopedUsername("ekleme");
     await createReadyUser(username);
     await loginAsUser(page, username);
@@ -58,30 +58,154 @@ test.describe("portföy akışı", () => {
 
     await addPurchase(page, { product: "Gram Altın", quantity: "10", unitPrice: "5000" });
     await expect(page.getByTestId("transaction-list").getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByText("Alış eklendi.")).toBeVisible();
 
     await page.getByRole("link", { name: "Panel" }).first().click();
     await page.waitForURL("**/panel");
 
-    // Toplam maliyet birebir doğrulanır: 10 x 5.000 = 50.000 TL
+    // Elde kalan maliyet birebir doğrulanır: 10 x 5.000 = 50.000 TL
     await expect(page.getByTestId("stat-cost")).toHaveText(/50\.000,00/);
 
     const liquidation = parseMoney(await page.getByTestId("stat-liquidation").textContent());
     const repurchase = parseMoney(await page.getByTestId("stat-repurchase").textContent());
-
     expect(liquidation).toBeGreaterThan(0);
-    // Bozdurma değeri (piyasa ALIŞ) her zaman yeniden alım değerinden (piyasa SATIŞ) düşüktür.
     expect(liquidation).toBeLessThan(repurchase);
 
     await expect(page.getByTestId("holdings-list")).toContainText("Gram Altın");
-    await expect(page.getByText("Henüz altın eklenmedi")).toHaveCount(0);
+    await expect(page.getByTestId("cost-quality").first()).toHaveText("Gerçek maliyet");
+    await expect(page.getByText("Maliyet bazlı K/Z").first()).toBeVisible();
+    await expect(page.getByTestId("pnl-label-notice")).toHaveCount(0);
 
-    // Sayfa yenilendiğinde veriler korunur.
     await page.reload();
     await expect(page.getByTestId("stat-cost")).toHaveText(/50\.000,00/);
     await expect(page.getByTestId("holdings-list")).toContainText("Gram Altın");
   });
 
-  test("kayıt silinince toplamlar sıfırlanır", async ({ page }) => {
+  test("ÖRNEK 1 — ağırlıklı ortalama: 5×3.500 + 5×4.200 + 5×3.700", async ({ page }) => {
+    const username = scopedUsername("ornekbir");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "3500" });
+    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "4200" });
+    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "3700" });
+
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("stat-cost")).toHaveText(/57\.000,00/);
+    await expect(page.getByTestId("holdings-list")).toContainText("15 gram");
+    await expect(page.getByTestId("holdings-list")).toContainText("3.800,00");
+  });
+
+  test("ÖRNEK 4 — satış ortalamayı değiştirmez, gerçekleşmiş K/Z ayrı gösterilir", async ({ page }) => {
+    const username = scopedUsername("orneksatis");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await addPurchase(page, { product: "Gram Altın", quantity: "15", unitPrice: "3800" });
+    await addSale(page, { product: "Gram Altın", quantity: "4", unitPrice: "4200" });
+    await expect(page.getByText("Satış eklendi.")).toBeVisible();
+    await expect(page.getByTestId("transaction-list")).toContainText("Satış");
+
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("stat-cost")).toHaveText(/41\.800,00/);
+    await expect(page.getByTestId("stat-realized")).toHaveText(/\+₺?1\.600,00|1\.600,00/);
+    await expect(page.getByTestId("holdings-list")).toContainText("11 gram");
+    await expect(page.getByTestId("holdings-list")).toContainText("3.800,00");
+  });
+
+  test("ÖRNEK 5 — işçilik ve komisyon maliyete eklenir", async ({ page }) => {
+    const username = scopedUsername("masraf");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await addPurchase(page, { product: "Gram Altın", quantity: "10", unitPrice: "5000", workmanship: "500", fees: "100" });
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("stat-cost")).toHaveText(/50\.600,00/);
+    await expect(page.getByTestId("holdings-list")).toContainText("5.060,00");
+  });
+
+  test("mevcut altın: bugünden itibaren takip (MARKET_BASELINE) K/Z sıfırdan başlar", async ({ page }) => {
+    const username = scopedUsername("mevcutbaseline");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await page.getByTestId("add-opening").click();
+    await page.getByLabel("Altın türü").selectOption({ label: "Gram Altın" });
+    await page.getByLabel(/^Miktar/).fill("100");
+    await page.getByTestId("opening-next").click();
+
+    await expect(page.getByTestId("cost-method-MARKET_BASELINE")).toHaveAttribute("aria-checked", "true");
+    await page.getByTestId("opening-next").click();
+
+    const confirm = page.getByTestId("baseline-confirm");
+    await expect(confirm).toContainText("Bozdurma fiyatı");
+    await expect(confirm).toContainText("Yeniden alım fiyatı");
+    await expect(confirm).toContainText("mock · TEST");
+    await expect(confirm).toContainText("Fiyat zamanı");
+    await expect(confirm).toContainText("gerçek tarihsel alış maliyetiniz değildir");
+    const initialValue = parseMoney(await page.getByTestId("baseline-initial-value").textContent());
+    expect(initialValue).toBeGreaterThan(0);
+
+    await page.getByTestId("submit-opening").click();
+    await expect(page.getByText("Mevcut altın eklendi.")).toBeVisible();
+    await expect(page.getByTestId("transaction-list")).toContainText("Takip başlangıç değeri");
+    await expect(page.getByTestId("transaction-list")).toContainText("gerçek tarihsel maliyet değildir");
+
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("pnl-label-notice")).toContainText("Takip başlangıcından itibaren K/Z");
+    await expect(page.getByTestId("cost-quality").first()).toHaveText("Takip başlangıç değeri");
+    // Aynı fiyat dilimi içinde gerçekleşmemiş K/Z tam sıfırdır (30 sn'lik test fiyatı dilimi).
+    const unrealized = parseMoney(await page.getByTestId("stat-unrealized").textContent());
+    expect(Math.abs(unrealized)).toBeLessThan(initialValue * 0.05);
+  });
+
+  test("mevcut altın: gerçek maliyet (toplam) girişi", async ({ page }) => {
+    const username = scopedUsername("mevcutgercek");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await page.getByTestId("add-opening").click();
+    await page.getByLabel("Altın türü").selectOption({ label: "Yeni Çeyrek" });
+    await page.getByLabel(/^Miktar/).fill("14");
+    await page.getByTestId("opening-next").click();
+    await page.getByTestId("cost-method-ACTUAL").click();
+    await page.getByRole("radio", { name: "Toplam maliyet", exact: true }).click();
+    await page.getByLabel(/oplam maliyet \(TL\)/).fill("154600");
+    await page.getByTestId("opening-next").click();
+    await expect(page.getByText("11.042,86")).toBeVisible();
+    await page.getByTestId("submit-opening").click();
+
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("stat-cost")).toHaveText(/154\.600,00/);
+    await expect(page.getByTestId("cost-quality").first()).toHaveText("Gerçek maliyet");
+  });
+
+  test("mevcut altın: tahmini maliyet etiketi kalır", async ({ page }) => {
+    const username = scopedUsername("mevcuttahmin");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+
+    await page.getByTestId("add-opening").click();
+    await page.getByLabel(/^Miktar/).fill("3");
+    await page.getByTestId("opening-next").click();
+    await page.getByTestId("cost-method-ESTIMATED").click();
+    await page.getByLabel(/Tahmini ortalama birim maliyet/).fill("4000");
+    await page.getByTestId("opening-next").click();
+    await page.getByTestId("submit-opening").click();
+
+    await expect(page.getByTestId("transaction-list")).toContainText("Tahmini maliyet");
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("cost-quality").first()).toHaveText("Tahmini maliyet");
+    await expect(page.getByTestId("pnl-label-notice")).toBeVisible();
+  });
+
+  test("iptal hard delete değildir; kayıt 'İptal edildi' olarak kalır ve toplamlar sıfırlanır", async ({ page }) => {
     const username = scopedUsername("silme");
     await createReadyUser(username);
     await loginAsUser(page, username);
@@ -93,14 +217,39 @@ test.describe("portföy akışı", () => {
     await expect(page.getByTestId("stat-cost")).toHaveText(/20\.000,00/);
 
     await gotoReady(page, "/islemler");
-    await page.getByRole("button", { name: "Sil" }).first().click();
-    await expect(page.getByText("İşlem silinsin mi?")).toBeVisible();
-    await page.getByTestId("confirm-delete").click();
+    await page.getByRole("button", { name: "İptal et" }).first().click();
+    await expect(page.getByText("İşlem iptal edilsin mi?")).toBeVisible();
+    await page.getByLabel("Sebep").fill("Yanlış girdim");
+    await page.getByTestId("confirm-void").click();
 
-    await expect(page.getByText("İşlem silindi.")).toBeVisible();
+    await expect(page.getByText(/İşlem iptal edildi/)).toBeVisible();
+    await expect(page.getByTestId("transaction-list").getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByTestId("transaction-list")).toContainText("İptal edildi");
+    await expect(page.getByTestId("transaction-list")).toContainText("Yanlış girdim");
+
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/0,00/);
     await expect(page.getByText("Henüz altın eklenmedi")).toBeVisible();
+  });
+
+  test("düzeltme eski kaydı 'Düzeltildi' olarak bırakır, yeni kayıt ekler", async ({ page }) => {
+    const username = scopedUsername("duzenleme");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+
+    await gotoReady(page, "/islemler");
+    await addPurchase(page, { product: "Gram Altın", quantity: "2", unitPrice: "5000" });
+
+    await page.getByRole("button", { name: "Düzelt" }).first().click();
+    await page.getByLabel(/^Miktar/).fill("6");
+    await page.getByRole("button", { name: "Düzeltmeyi kaydet" }).click();
+
+    await expect(page.getByText(/İşlem düzeltildi/)).toBeVisible();
+    await expect(page.getByTestId("transaction-list").getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByTestId("transaction-list")).toContainText("Düzeltildi");
+
+    await gotoReady(page, "/panel");
+    await expect(page.getByTestId("stat-cost")).toHaveText(/30\.000,00/);
   });
 
   test("geçersiz miktar kabul edilmez", async ({ page }) => {
@@ -109,12 +258,12 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await page.getByTestId("add-transaction").click();
+    await page.getByTestId("add-buy").click();
     await page.getByLabel(/^Miktar/).fill("-5");
     await page.getByLabel(/^Birim alış fiyatı/).fill("5000");
-    await page.getByRole("button", { name: "İşlemi kaydet" }).click();
+    await page.getByTestId("submit-buy").click();
 
-    await expect(page.getByText("Miktar sıfırdan büyük olmalıdır.")).toBeVisible();
+    await expect(page.getByText(/negatif olamaz|sıfırdan büyük/)).toBeVisible();
     await expect(page.getByTestId("transaction-list")).toHaveCount(0);
   });
 
@@ -125,12 +274,7 @@ test.describe("portföy akışı", () => {
 
     await gotoReady(page, "/islemler");
     await addPurchase(page, { product: "Gram Altın", quantity: "3", unitPrice: "5000" });
-
-    await page.getByTestId("add-transaction").click();
-    await page.getByRole("radio", { name: "Satış" }).click();
-    await page.getByLabel(/^Miktar/).fill("10");
-    await page.getByLabel(/^Birim satış fiyatı/).fill("5500");
-    await page.getByRole("button", { name: "İşlemi kaydet" }).click();
+    await addSale(page, { product: "Gram Altın", quantity: "10", unitPrice: "5500" });
 
     await expect(page.getByText(/Satış miktarı elinizdeki miktarı aşamaz/)).toBeVisible();
   });
@@ -141,30 +285,81 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await page.getByTestId("add-transaction").click();
+    await page.getByTestId("add-buy").click();
     await page.getByLabel("Altın türü").selectOption({ label: "Yeni Çeyrek" });
     await page.getByLabel(/^Miktar/).fill("1,5");
     await page.getByLabel(/^Birim alış fiyatı/).fill("9000");
-    await page.getByRole("button", { name: "İşlemi kaydet" }).click();
+    await page.getByTestId("submit-buy").click();
 
-    await expect(page.getByText(/tam sayı olmalıdır/)).toBeVisible();
+    await expect(page.getByText(/tam sayı/)).toBeVisible();
   });
 
-  test("işlem düzenlenebilir", async ({ page }) => {
-    const username = scopedUsername("duzenleme");
+  test("aynı istek kimliğiyle yeniden gönderilen alış tek kayıt oluşturur", async ({ page }) => {
+    const username = scopedUsername("idempotent");
     await createReadyUser(username);
     await loginAsUser(page, username);
 
-    await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Gram Altın", quantity: "2", unitPrice: "5000" });
+    const body = {
+      kind: "BUY",
+      productId: "gram-altin",
+      quantity: "2",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5000",
+      clientRequestId: `req-e2e-${username.replace(/[^a-z0-9]/gi, "")}`,
+    };
+    const first = await browserApi<{ replayed: boolean; entry: { id: string } }>(page, "POST", "/api/transactions", body);
+    const second = await browserApi<{ replayed: boolean; entry: { id: string } }>(page, "POST", "/api/transactions", body);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.data?.replayed).toBe(true);
+    expect(second.data?.entry.id).toBe(first.data?.entry.id);
 
-    await page.getByRole("button", { name: "Düzenle" }).first().click();
-    await page.getByLabel(/^Miktar/).fill("6");
-    await page.getByRole("button", { name: "Değişiklikleri kaydet" }).click();
+    const conflict = await browserApi(page, "POST", "/api/transactions", { ...body, quantity: "3" });
+    expect(conflict.status).toBe(409);
 
-    await expect(page.getByText("İşlem güncellendi.")).toBeVisible();
+    const ledger = await browserApi<unknown[]>(page, "GET", "/api/transactions");
+    expect(ledger.data).toHaveLength(1);
+  });
+
+  test("API sayıları ondalık dize olarak taşır; kayan nokta artığı görünmez", async ({ page }) => {
+    const username = scopedUsername("decimalapi");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+
+    for (const quantity of ["0.1", "0.2"]) {
+      const created = await browserApi(page, "POST", "/api/transactions", {
+        kind: "BUY",
+        productId: "gram-altin",
+        quantity,
+        occurredAt: "2026-01-10",
+        pricingInputMode: "UNIT_PRICE",
+        unitPrice: "5000.33",
+      });
+      expect(created.status).toBe(201);
+    }
+    const summary = await browserApi<{ holdings: { position: { quantity: string } }[] }>(
+      page,
+      "GET",
+      "/api/portfolio/summary",
+    );
+    expect(summary.data?.holdings[0]?.position.quantity).toBe("0.3");
+    expect(JSON.stringify(summary.data)).not.toMatch(/0000000000/);
     await gotoReady(page, "/panel");
-    await expect(page.getByTestId("stat-cost")).toHaveText(/30\.000,00/);
+    await expect(page.getByTestId("holdings-list")).not.toContainText("0,30000000000000004");
+  });
+
+  test("GET uçları veri değiştirmez", async ({ page }) => {
+    const username = scopedUsername("getyanetkisiz");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    for (let index = 0; index < 3; index += 1) {
+      await browserApi(page, "GET", "/api/portfolio");
+      await browserApi(page, "GET", "/api/portfolio/summary");
+      await browserApi(page, "GET", "/api/transactions");
+    }
+    const ledger = await browserApi<unknown[]>(page, "GET", "/api/transactions");
+    expect(ledger.data).toHaveLength(0);
   });
 
   test("tüm ekranlarda yatay taşma yoktur", async ({ page }) => {
@@ -175,7 +370,7 @@ test.describe("portföy akışı", () => {
     await gotoReady(page, "/islemler");
     await addPurchase(page, { product: "Cumhuriyet Altını", quantity: "3", unitPrice: "38500" });
 
-    for (const path of ["/panel", "/islemler", "/ayarlar"]) {
+    for (const path of ["/panel", "/islemler", "/islemler?ekle=mevcut", "/islemler?ekle=satis", "/ayarlar"]) {
       await gotoReady(page, path);
       await expect(page.locator("main")).toBeVisible();
       await expectNoHorizontalOverflow(page);

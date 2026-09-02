@@ -1,4 +1,12 @@
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import type {
+  AccountingSummary,
+  LedgerAppendResult,
+  LedgerCommand,
+  LedgerEntry,
+  LedgerReplaceResult,
+  LedgerVoidResult,
+} from "@/domain/accounting/types";
+import type { PortfolioMeta } from "@/domain/types";
 import { apiFetch } from "@/lib/api-client";
 import type { PortfolioRepository, RepositoryKind } from "./types";
 
@@ -8,6 +16,7 @@ import type { PortfolioRepository, RepositoryKind } from "./types";
  * Veriler sunucudaki hesaba yazılır; aynı hesapla girilen her cihazda
  * aynı portföy görünür. İstemci hiçbir zaman doğrudan veritabanına
  * bağlanmaz; yalnızca oturum çerezi ile korunan API uçlarını çağırır.
+ * Özet (pozisyon + değerleme) SUNUCUDA hesaplanır; sayılar ondalık dizedir.
  */
 
 export class ServerPortfolioRepository implements PortfolioRepository {
@@ -26,29 +35,37 @@ export class ServerPortfolioRepository implements PortfolioRepository {
     });
   }
 
-  async listTransactions(): Promise<Transaction[]> {
-    return apiFetch<Transaction[]>("/api/transactions");
+  async getSummary(): Promise<AccountingSummary> {
+    return apiFetch<AccountingSummary>("/api/portfolio/summary");
   }
 
-  async createTransaction(input: TransactionInput): Promise<Transaction> {
-    return apiFetch<Transaction>("/api/transactions", {
+  async listLedger(): Promise<LedgerEntry[]> {
+    return apiFetch<LedgerEntry[]>("/api/transactions");
+  }
+
+  async appendTransaction(command: LedgerCommand): Promise<LedgerAppendResult> {
+    return apiFetch<LedgerAppendResult>("/api/transactions", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify(command),
     });
   }
 
-  async updateTransaction(id: string, input: TransactionInput): Promise<Transaction> {
-    return apiFetch<Transaction>(`/api/transactions/${encodeURIComponent(id)}`, {
+  async replaceTransaction(id: string, command: LedgerCommand): Promise<LedgerReplaceResult> {
+    return apiFetch<LedgerReplaceResult>(`/api/transactions/${encodeURIComponent(id)}`, {
       method: "PUT",
-      body: JSON.stringify(input),
+      body: JSON.stringify(command),
     });
   }
 
-  async deleteTransaction(id: string): Promise<void> {
-    await apiFetch<null>(`/api/transactions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  async voidTransaction(id: string, reason: string): Promise<LedgerVoidResult> {
+    return apiFetch<LedgerVoidResult>(`/api/transactions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason }),
+    });
   }
 
-  async clearTransactions(): Promise<void> {
-    await apiFetch<null>("/api/transactions", { method: "DELETE" });
+  async voidAll(): Promise<number> {
+    const result = await apiFetch<{ voided: number }>("/api/transactions", { method: "DELETE" });
+    return result?.voided ?? 0;
   }
 }

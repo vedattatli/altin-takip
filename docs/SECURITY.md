@@ -19,7 +19,12 @@
 | Sahte `X-Forwarded-For` ile hız sınırı atlatma | Başlık yalnızca güvenilir vekilde (`TRUSTED_PROXY_PROVIDER`) okunur; üç ayrı sayaç |
 | `Host` başlığıyla origin sahteciliği | Üretimde `APP_ORIGIN` zorunlu; başlıktan türetme yok (fail closed) |
 | Çok örnekli dağıtımda hız sınırının bölünmesi | Postgres tabanlı paylaşımlı sayaç; üretimde zorunlu |
-| Eşzamanlı isteklerle aşırı satış | Portföy satırı kilidiyle atomik Postgres RPC |
+| Eşzamanlı isteklerle aşırı satış | Portföy satırı + ürün advisory kilidiyle atomik Postgres RPC; her mutation defteri yeniden oynatır |
+| Çift tıklama / mobil ağ yeniden denemesi | `clientRequestId` idempotency: aynı içerik replay, farklı içerik 409 |
+| Pozisyon projeksiyonunun elle değiştirilmesi | `portfolio_positions`'a service_role bile yazamaz; yalnızca RPC yeniden oluşturur |
+| Sahte başlangıç fiyatı (MARKET_BASELINE) | İstemci fiyatı yok sayılır; sunucu sağlayıcısından alınır, anlık görüntü değiştirilemez |
+| Finansal kaydın sessizce silinmesi/değiştirilmesi | Defter append-only; hard delete ve finansal alan güncellemesi tetikleyiciyle reddedilir |
+| Uzun ömürlü admin oturumu | Admin için tercihten bağımsız 8 saat / 15 dk; kalıcı işaretli admin oturumu reddedilir |
 
 ## 2. Parola custody'si
 
@@ -74,11 +79,20 @@ normalizeUsername(girdi) + "@" + AUTH_INTERNAL_EMAIL_DOMAIN
 - Normalizasyon büyük/küçük harf ve Türkçe karakter farklarını ortadan kaldırdığı için
   `Ayşe`, `AYSE` ve `ayse` **aynı** hesaba karşılık gelir; farklı hesap açılamaz.
 
-## 4. Oturum yönetimi (kalıcı oturum modeli)
+## 4. Oturum yönetimi ("Bu cihazda oturumumu açık tut")
 
-Kullanıcılar sık sık yeniden giriş yapmaz. Cihaz türü seçimi, 15 dakikalık
-hareketsizlik zaman aşımı ve kısa mutlak süreler **kaldırılmıştır**; bütün
-cihazlarda aynı, sade ve kalıcı oturum kullanılır.
+Kalıcı oturum kullanıcı tercihine bağlıdır. Giriş ekranındaki tek kutu:
+
+| | Çerez | Sunucu sınırı |
+| --- | --- | --- |
+| İşaretli | kalıcı `__Host-` çerez | 180 gün kaydırmalı, ≤ 24 saatte bir yenileme, 7 günde bir kimlik yenileme |
+| İşaretsiz (varsayılan) | tarayıcı oturumu çerezi (kapanınca silinir) | 8 saat mutlak, 30 dk hareketsizlik (`idle_expires_at`, ≤ 60 sn'de bir yazılır) |
+| Admin | her zaman tarayıcı oturumu çerezi | tercihten bağımsız 8 saat mutlak, 15 dk hareketsizlik; asla kalıcı değil |
+
+Tercih tarayıcı deposuna yazılmaz; oturum kaydındaki `persistent` alanında tutulur (`0008`).
+Mevcut 180 günlük kullanıcı oturumları kalıcı sayılır ve geçersiz kılınmaz; mevcut admin
+oturumları migration ile güvenli sınıra çekilir. Aşağıdaki maddeler kalıcı (işaretli) oturumu
+anlatır; kalıcı olmayan oturumda süre uzatma ve kimlik yenileme yoktur.
 
 - Oturum kimliği kriptografik olarak rastgele 32 bayttır; **yalnızca SHA-256
   özeti** saklanır. Tarayıcıda yalnızca bu opak kimlik bulunur.
@@ -95,9 +109,10 @@ cihazlarda aynı, sade ve kalıcı oturum kullanılır.
   `commitSessionCookie`); sunucu süresi zaten uzatıldığı için gecikme güvenlik
   sınırını etkilemez.
 - Her istekte profil yeniden okunur; `status !== 'active'` ise oturum reddedilir.
-- **Hareketsizlik zaman aşımı YOKTUR.** 15 dakika, 1 saat veya 24 saat
+- **Kalıcı oturumda hareketsizlik zaman aşımı YOKTUR.** 15 dakika, 1 saat veya 24 saat
   hareketsizlik, sayfa yenileme, tarayıcı/PWA kapatıp açma veya cihazı yeniden
-  başlatma oturumu sonlandırmaz.
+  başlatma oturumu sonlandırmaz. Tarayıcı oturumunda (işaretsiz) ve admin oturumunda
+  hareketsizlik ve mutlak sınırlar SUNUCUDA uygulanır; istemcide sayaç yoktur.
 
 Oturumun zorunlu olarak sonlandığı durumlar:
 
@@ -145,7 +160,7 @@ sayaçtan** geçer; herhangi biri kilitliyse istek reddedilir:
 Politikalar: [`supabase/migrations/0002_rls.sql`](../supabase/migrations/0002_rls.sql)
 (yazma politikaları `0006` ile kaldırıldı)
 Grant'lar: [`supabase/migrations/0006_database_boundary.sql`](../supabase/migrations/0006_database_boundary.sql)
-Davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql) — `npm run test:db` (73 test)
+Davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql) — `npm run test:db` (124 test)
 
 > **Önemli:** RLS, BFF içinden yapılan `service_role` / secret key sorgularında
 > UYGULANMAZ. Politikalar ve grant'lar, Supabase Data API'ye kullanıcı JWT'siyle
@@ -231,7 +246,7 @@ Kayıtlar değiştirilemez ve silinemez: `UPDATE`/`DELETE` politikası tanımlan
 
 | Sınır | Etki | Plan |
 | --- | --- | --- |
-| Uzak (production) Supabase projesi henüz yok | Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında** (CLI + Docker, `supabase db reset` + 73 pgTAP + gerçek JWT sondası) doğrulandı; uzak projede henüz çalıştırılmadı | Uzak proje açıldığında aynı komutlar |
+| Uzak (production) Supabase projesi henüz yok | Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında** (CLI + Docker, `supabase db reset` + 124 pgTAP + gerçek JWT sondası) doğrulandı; uzak projede henüz çalıştırılmadı | Uzak proje açıldığında aynı komutlar |
 | `SupabaseAuthBackend` uçtan uca yalnızca yerel yığına karşı sondalandı | Oturum rotation/renewal SQL yolu birim ve pgTAP düzeyinde doğrulandı; tarayıcı E2E testleri yerel arka uçla koşar | Uzak projede entegrasyon testi |
 | CSP script-src satır içi koda izin verir | Next.js bootstrap script'i için gereklidir | Nonce tabanlı CSP (middleware ile) |
 | `purge_expired_sessions()` / `login_rate_limit_cleanup()` otomatik çalışmıyor | Süresi geçen satırlar birikir (erişim yine reddedilir) | `supabase/setup/maintenance-cron.sql` idempotent pg_cron kurulumu sağlar; **çalıştığı iddia edilmez**, panelden kurulmalı ve `cron.job_run_details` ile doğrulanmalıdır |
@@ -365,7 +380,9 @@ oturumlar güvenlik için kapatılır. `/api/auth/logout-all` da bu guard'ı kul
 | `last_seen_at` yazma sıklığı | en fazla 15 dakikada bir | `SESSION_TOUCH_INTERVAL_MS` |
 | Kimlik yenileme aralığı | 7 gün | `SESSION_ROTATION_INTERVAL_MS` |
 | Eski kimlik tolerans süresi | 60 sn | `SESSION_ROTATION_GRACE_MS` |
-| Hareketsizlik zaman aşımı | **yok** | — |
+| Hareketsizlik zaman aşımı (kalıcı oturum) | **yok** | — |
+| Tarayıcı oturumu (işaretsiz) | 8 saat mutlak, 30 dk hareketsizlik | `BROWSER_SESSION_ABSOLUTE_MS`, `BROWSER_SESSION_IDLE_MS` |
+| Admin oturumu | 8 saat mutlak, 15 dk hareketsizlik | `ADMIN_SESSION_ABSOLUTE_MS`, `ADMIN_SESSION_IDLE_MS` |
 
 `app_sessions` tablosunda `expires_at` (kaydırmalı bitiş), `renewed_at`,
 `rotated_at`, `previous_token_hash` / `previous_token_valid_until`,
@@ -543,7 +560,7 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
 ### 22.5 Doğrulama durumu (dürüst)
 
 - `npm run test:db`: yerel Supabase yığınında (CLI 2.116, Docker) `supabase db
-  reset` ile 0001→0007 temiz uygulandı; **73 pgTAP testinin tamamı geçti**.
+  reset` ile 0001→0010 temiz uygulandı; **124 pgTAP testinin tamamı geçti**.
   0006 iki kez uygulanarak idempotentlik doğrulandı.
 - `npm run test:data-api`: gerçek anon anahtarı ve yerel JWT secret'ıyla
   imzalanmış authenticated JWT ile PostgREST üzerinden 21 beklenti karşılandı
@@ -568,3 +585,28 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
   ayraçlıdır, arşiv yeniden açılıp her girişin CRC'si kaynakla karşılaştırılır,
   giriş sayısı manifestle eşleştirilir; `.git`, `node_modules`, `.next`,
   `.data`, `.env*` (örnek hariç), test çıktıları dışlanır.
+
+## 24. Muhasebe defteri sınırı (`0009` / `0010`)
+
+- **Finansal mutation yalnızca BFF + kontrollü RPC:** `ledger_append`, `ledger_void`,
+  `ledger_replace`, `ledger_void_all` SECURITY DEFINER'dır ve yalnızca `service_role`
+  çağırabilir; `ledger_list` / `positions_list` / `ledger_verify` de öyle. authenticated JWT
+  ile hiçbiri çağrılamaz (pgTAP + `npm run test:data-api`).
+- **Kullanıcı kimliği actor'dan gelir:** hiçbir uç gövdeden `userId` almaz; başka kullanıcının
+  işlem kimliği tahmin edilse bile `404` döner (kapsam dışı kayıt "yok" sayılır).
+- **Admin salt okur:** `AdminService` içinde BUY/SELL/OPENING_BALANCE/VOID/REPLACE metodu
+  yoktur (`tests/admin-service.test.ts` prototipi denetler); görüntüleme denetim kaydı üretir.
+- **Defter append-only:** finansal alanlar tetikleyiciyle değiştirilemez; hard delete yalnızca
+  hesap cascade'inde; iptal/düzeltme sebep ve tarihle kayıt altındadır (audit trail).
+- **Projeksiyon elle değişmez:** `portfolio_positions` tablosuna `service_role` dâhil hiçbir rol
+  INSERT/UPDATE/DELETE yapamaz; yalnızca RPC (sahip yetkisiyle) yeniden oluşturur.
+- **Fiyat anlık görüntüsü:** `price_snapshots` yalnızca sunucu fiyat sağlayıcısından yazılır;
+  istemci fiyat gönderemez; UPDATE/DELETE reddedilir. Bayat/kullanılamaz fiyatla başlangıç
+  oluşturulmaz.
+- **Idempotency:** `(user_id, client_request_id)` benzersiz; aynı içerik replay (200), farklı
+  içerik `409 idempotency_conflict`. Anahtar kullanıcı kapsamlıdır.
+- **Girdi sertleştirme:** miktar/tutar dizeleri sıkı desenle ayrıştırılır; NaN, Infinity,
+  bilimsel gösterim, aşırı büyük değer ve fazla ondalık reddedilir; birim istemciden alınmaz.
+- **Doğrulama durumu:** yerel Supabase yığınında 124 pgTAP testi, gerçek JWT sondası
+  (31 beklenti), `npm run accounting:smoke` (gerçek RPC yolu) ve `npm run accounting:verify`
+  geçti. Uzak proje yok.

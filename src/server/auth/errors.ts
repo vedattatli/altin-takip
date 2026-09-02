@@ -64,6 +64,35 @@ export function portfolioNotProvisioned(): AppError {
   );
 }
 
+/** Satış miktarı eldeki miktarı aşıyor (kronolojik herhangi bir anda). */
+export function oversell(available?: string): AppError {
+  return new AppError(
+    400,
+    available && available !== "0"
+      ? `Satış miktarı elinizdeki miktarı aşamaz. Satılabilir: ${available}.`
+      : "Satış miktarı elinizdeki miktarı aşamaz.",
+    "oversell",
+  );
+}
+
+/** Aynı istek kimliği farklı içerikle yeniden gönderildi. */
+export function idempotencyConflict(): AppError {
+  return new AppError(
+    409,
+    "Bu istek daha önce farklı bir içerikle işlenmiş. Lütfen sayfayı yenileyip tekrar deneyin.",
+    "idempotency_conflict",
+  );
+}
+
+/** Güncel, kullanılabilir fiyat yokken takip başlangıcı oluşturulamaz. */
+export function priceUnavailable(): AppError {
+  return new AppError(
+    409,
+    "Güncel fiyat verisi kullanılamıyor. Takip başlangıcı yalnızca geçerli bir fiyatla oluşturulabilir.",
+    "price_unavailable",
+  );
+}
+
 /** Origin / CSRF doğrulaması başarısız. */
 export function csrfRejected(message = "İstek doğrulanamadı. Sayfayı yenileyip tekrar deneyin."): AppError {
   return new AppError(403, message, "csrf_rejected");

@@ -106,7 +106,7 @@ test.describe("yönetim paneli", () => {
     await gotoReady(page, `/yonetim/${target.id}`);
 
     await expect(page.getByText("Kullanıcının portföyü")).toBeVisible();
-    await expect(page.getByText("Toplam maliyet")).toBeVisible();
+    await expect(page.getByText("Elde kalan maliyet")).toBeVisible();
     await expect(page.getByText("40.000,00")).toBeVisible();
     await expect(page.getByText(/Salt okunur görünüm/)).toBeVisible();
     await expectNoHorizontalOverflow(page);

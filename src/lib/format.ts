@@ -1,6 +1,17 @@
 import { appConfig } from "@/config/app.config";
+import { AccountingDecimal, dec } from "@/domain/accounting/decimal";
+
+/**
+ * Biçimlendirme — YALNIZCA gösterim.
+ *
+ * Para ve miktar değerleri ondalık DİZE olarak gelir. Burada önce decimal ile
+ * istenen basamağa yuvarlanır, sonra Intl ile biçimlendirilir; böylece
+ * 0,1 + 0,2 gibi ikili kayan nokta artıkları hiçbir ekranda görünmez.
+ */
 
 const LOCALE = appConfig.locale;
+
+export type NumericText = string | number;
 
 const currency = new Intl.NumberFormat(LOCALE, {
   style: "currency",
@@ -21,39 +32,71 @@ const percent = new Intl.NumberFormat(LOCALE, {
   maximumFractionDigits: 2,
 });
 
-export function formatMoney(value: number): string {
-  return currency.format(value);
+/** Gösterim için güvenli sayı: önce decimal ile yuvarlanır. */
+function displayNumber(value: NumericText, scale: number): number {
+  try {
+    return Number(dec(value).toDecimalPlaces(scale, AccountingDecimal.ROUND_HALF_UP).toFixed(scale));
+  } catch {
+    return Number.NaN;
+  }
+}
+
+export function signOf(value: NumericText): -1 | 0 | 1 {
+  try {
+    const d = dec(value);
+    if (d.isZero()) return 0;
+    return d.isNegative() ? -1 : 1;
+  } catch {
+    return 0;
+  }
+}
+
+export function formatMoney(value: NumericText): string {
+  const n = displayNumber(value, 2);
+  return Number.isNaN(n) ? "—" : currency.format(n);
 }
 
 /** Büyük özet rakamlarında kuruş göstermeden okunabilir biçim. */
-export function formatMoneyCompact(value: number): string {
-  return currencyCompact.format(value);
+export function formatMoneyCompact(value: NumericText): string {
+  const n = displayNumber(value, 0);
+  return Number.isNaN(n) ? "—" : currencyCompact.format(n);
 }
 
-export function formatQuantity(value: number, unit: "gram" | "adet"): string {
-  const digits = unit === "adet" ? 0 : 3;
+export function formatSignedMoney(value: NumericText): string {
+  const sign = signOf(value) > 0 ? "+" : "";
+  return `${sign}${formatMoney(value)}`;
+}
+
+export function formatQuantity(value: NumericText, unit: "gram" | "adet"): string {
+  const digits = unit === "adet" ? 0 : 6;
+  const n = displayNumber(value, digits);
+  if (Number.isNaN(n)) return `— ${unit}`;
   const formatted = new Intl.NumberFormat(LOCALE, {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
-  }).format(value);
+  }).format(n);
   return `${formatted} ${unit}`;
 }
 
-export function formatGrams(value: number): string {
+export function formatGrams(value: NumericText): string {
+  const n = displayNumber(value, 3);
+  if (Number.isNaN(n)) return "— gr";
   return `${new Intl.NumberFormat(LOCALE, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 3,
-  }).format(value)} gr`;
+  }).format(n)} gr`;
 }
 
-export function formatPercent(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${percent.format(value)}%`;
+/** Birim fiyat gösterimi: 2 ondalık, ancak küçük kesirler için 4 ondalığa kadar. */
+export function formatUnitPrice(value: NumericText): string {
+  return formatMoney(value);
 }
 
-export function formatSignedMoney(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${currency.format(value)}`;
+export function formatPercent(value: NumericText): string {
+  const n = displayNumber(value, 2);
+  if (Number.isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${percent.format(n)}%`;
 }
 
 export function formatDate(iso: string): string {
@@ -81,11 +124,4 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   if (hours < 24) return `${hours} saat önce`;
   const days = Math.round(hours / 24);
   return `${days} gün önce`;
-}
-
-/** Türkçe klavyede ondalık ayırıcı virgüldür; her iki biçimi de kabul ederiz. */
-export function parseDecimal(raw: string): number {
-  const normalized = raw.replace(/\s/g, "").replace(",", ".");
-  if (normalized === "") return Number.NaN;
-  return Number(normalized);
 }

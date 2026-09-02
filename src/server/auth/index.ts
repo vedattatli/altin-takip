@@ -129,6 +129,9 @@ export async function commitSessionCookie(): Promise<void> {
   const cache = sessionCacheStorage.getStore();
   if (!cache?.resolved || cache.ended || !cache.session || !cache.token) return;
 
+  // Tarayıcı oturumu / admin: çerez kalıcı değildir, yenileme yoktur; tazelenecek bir şey yok.
+  if (!cache.session.persistent) return;
+
   const rotatedToken = await getAuthService().rotateSessionIfDue(cache.session);
   if (!rotatedToken && !cache.session.renewed) return;
 
@@ -136,7 +139,7 @@ export async function commitSessionCookie(): Promise<void> {
   store.set(
     SESSION_COOKIE,
     rotatedToken ?? cache.token,
-    sessionCookieOptions(cache.session.expiresAt, await isSecureRequest()),
+    sessionCookieOptions(cache.session.expiresAt, await isSecureRequest(), true),
   );
 }
 

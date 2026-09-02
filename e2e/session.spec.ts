@@ -31,22 +31,53 @@ async function sessionCookie(context: import("@playwright/test").BrowserContext)
 }
 
 test.describe("giriş ekranı", () => {
-  test("cihaz türü sormaz ve 'beni hatırla' kutusu yoktur", async ({ page }) => {
+  test("cihaz türü sormaz; yalnızca 'oturumumu açık tut' kutusu vardır (varsayılan işaretsiz)", async ({ page }) => {
     await gotoReady(page, "/giris");
 
     await expect(page.getByRole("radio")).toHaveCount(0);
     await expect(page.getByText(/ortak cihaz/i)).toHaveCount(0);
     await expect(page.getByLabel(/beni hatırla/i)).toHaveCount(0);
-    await expect(page.getByText(/bir kez giriş yaparsınız/)).toBeVisible();
+    const keep = page.getByLabel(/oturumumu açık tut/);
+    await expect(keep).toBeVisible();
+    await expect(keep).not.toBeChecked();
     await expectNoHorizontalOverflow(page);
   });
 });
 
 test.describe("kalıcı oturum çerezi", () => {
-  test("çerez kalıcı, HttpOnly ve SameSite=Lax'tır", async ({ page, context }) => {
+  test("'oturumu açık tut' işaretsizse kalıcı çerez oluşmaz (tarayıcı oturumu)", async ({ page, context }) => {
+    const username = scopedUsername("gecicicerez");
+    await createReadyUser(username);
+    await loginAsUser(page, username, undefined, { keepSignedIn: false });
+
+    const cookie = await sessionCookie(context);
+    expect(cookie).toBeDefined();
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe("Lax");
+    // Oturum çerezi: son kullanma tarihi yok (Playwright -1 bildirir).
+    expect(cookie?.expires).toBe(-1);
+
+    const session = await browserApi<{ user: { username: string }; persistent: boolean }>(
+      page,
+      "GET",
+      "/api/auth/session",
+    );
+    expect(session.data?.persistent).toBe(false);
+  });
+
+  test("yönetici oturumu işaretli olsa bile kalıcı olmaz", async ({ page, context }) => {
+    await login(page, ADMIN.username, ADMIN.password, { keepSignedIn: true });
+    await page.waitForURL("**/panel");
+    const cookie = await sessionCookie(context);
+    expect(cookie?.expires).toBe(-1);
+    const session = await browserApi<{ persistent: boolean }>(page, "GET", "/api/auth/session");
+    expect(session.data?.persistent).toBe(false);
+  });
+
+  test("işaretliyse çerez kalıcı, HttpOnly ve SameSite=Lax'tır", async ({ page, context }) => {
     const username = scopedUsername("kalicicerez");
     await createReadyUser(username);
-    await loginAsUser(page, username);
+    await loginAsUser(page, username, undefined, { keepSignedIn: true });
 
     const cookie = await sessionCookie(context);
     expect(cookie).toBeDefined();
@@ -63,7 +94,7 @@ test.describe("kalıcı oturum çerezi", () => {
 
     const first = await browser.newContext();
     const page = await first.newPage();
-    await loginAsUser(page, username);
+    await loginAsUser(page, username, undefined, { keepSignedIn: true });
     // Kalıcı çerezler (oturum çerezleri değil) tarayıcı kapanınca korunur.
     const state = await first.storageState();
     await first.close();
@@ -260,11 +291,13 @@ test.describe("cihazlar arası aynı portföy", () => {
 
     await loginAsUser(page, username);
     const created = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY",
       productId: "gram-altin",
-      side: "buy",
-      quantity: 3,
-      tradedAt: "2026-01-10",
-      unitPrice: 5000,
+      quantity: "3",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5000",
+      clientRequestId: `req-e2e-${username}-1`,
     });
     expect(created.status).toBe(201);
 

@@ -4,13 +4,14 @@ import type { UserProfile } from "@/auth/types";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { UserPortfolioService } from "@/server/portfolio/user-portfolio-service";
 import { userActor } from "./actors";
+import { buyCommand } from "./helpers";
 
 /**
- * SIKI GİRDİ DOĞRULAMA (parseInput)
+ * SUNUCU TARAFI SIKI GİRDİ DOĞRULAMA (UserPortfolioService.appendTransaction)
  *
- * - side yalnızca "buy" | "sell"; başka değer sessizce alışa çevrilmez.
- * - productId katalogda olmalı; birim istemciden değil katalogdan alınır.
- * - Sayısal alanlar sonlu olmalı; NaN/Infinity/negatif/sıfır reddedilir.
+ * - kind yalnızca OPENING_BALANCE | BUY | SELL; başka değer sessizce çevrilmez.
+ * - productId katalogda olmalı; birim istemciden alınmaz.
+ * - Sayısal alanlar ondalık dize; NaN/Infinity/bilimsel/negatif/sıfır reddedilir.
  * Hepsi 400 bad_request döner; hiçbir durumda kayıt oluşmaz.
  */
 
@@ -20,28 +21,13 @@ let backend: LocalAuthBackend;
 let service: UserPortfolioService;
 let ayse: UserProfile;
 
-function valid(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    productId: "gram-altin",
-    side: "buy",
-    quantity: 2,
-    tradedAt: "2026-01-10",
-    unitPrice: 5000,
-    feeAmount: 0,
-    note: "",
-    ...overrides,
-  };
-}
-
-async function expectRejected(body: Record<string, unknown>, messagePart: string) {
-  await expect(service.createTransaction(userActor(ayse), body)).rejects.toMatchObject({
+async function expectRejected(body: unknown, messagePart: string, code = "bad_request") {
+  await expect(service.appendTransaction(userActor(ayse), body)).rejects.toMatchObject({
     status: 400,
-    code: "bad_request",
+    code,
     message: expect.stringContaining(messagePart),
   });
-  expect(await backend.listTransactions({ userId: ayse.id, origin: "self" } as never)).toHaveLength(
-    0,
-  );
+  expect(await service.listLedger(userActor(ayse))).toHaveLength(0);
 }
 
 beforeEach(async () => {
@@ -57,98 +43,100 @@ beforeEach(async () => {
 });
 
 describe("işlem türü", () => {
-  it("geçersiz veya eksik side reddedilir; alışa çevrilmez", async () => {
-    await expectRejected(valid({ side: "auto-buy" }), "alış veya satış");
-    await expectRejected(valid({ side: "BUY" }), "alış veya satış");
-    await expectRejected(valid({ side: undefined }), "alış veya satış");
-    await expectRejected(valid({ side: 1 }), "alış veya satış");
+  it("geçersiz veya eksik kind reddedilir; alışa çevrilmez", async () => {
+    await expectRejected({ ...buyCommand(), kind: "auto-buy" }, "İşlem türü");
+    await expectRejected({ ...buyCommand(), kind: "buy" }, "İşlem türü");
+    await expectRejected({ ...buyCommand(), kind: undefined }, "İşlem türü");
+    await expectRejected({ ...buyCommand(), kind: 1 }, "İşlem türü");
   });
 
-  it("buy ve sell kabul edilir", async () => {
-    const bought = await service.createTransaction(userActor(ayse), valid({ quantity: 5 }));
-    expect(bought.side).toBe("buy");
-    const sold = await service.createTransaction(
-      userActor(ayse),
-      valid({ side: "sell", quantity: 1 }),
-    );
-    expect(sold.side).toBe("sell");
+  it("eski 'side' alanı kabul edilmez", async () => {
+    const { kind: _kind, ...legacy } = buyCommand();
+    await expectRejected({ ...legacy, side: "buy" }, "İşlem türü");
   });
 });
 
 describe("ürün ve birim", () => {
   it("katalogda olmayan ürün reddedilir", async () => {
-    await expectRejected(valid({ productId: "bitcoin" }), "geçerli bir altın türü");
-    await expectRejected(valid({ productId: "" }), "geçerli bir altın türü");
-    await expectRejected(valid({ productId: 42 }), "geçerli bir altın türü");
+    await expectRejected(buyCommand({ productId: "bitcoin" }), "geçerli bir altın türü");
+    await expectRejected(buyCommand({ productId: "" }), "geçerli bir altın türü");
+    await expectRejected({ ...buyCommand(), productId: 42 }, "geçerli bir altın türü");
   });
 
   it("birim istemciden değil katalogdan alınır", async () => {
-    const created = await service.createTransaction(
-      userActor(ayse),
-      valid({ productId: "gram-altin", unit: "adet" }),
-    );
-    expect(created.unit).toBe("gram");
-
-    const piece = await service.createTransaction(
-      userActor(ayse),
-      valid({ productId: "yeni-ceyrek", quantity: 3, unit: "gram" }),
-    );
-    expect(piece.unit).toBe("adet");
+    const created = await service.appendTransaction(userActor(ayse), { ...buyCommand(), unit: "adet" });
+    expect(created.entry.unit).toBe("gram");
+    const piece = await service.appendTransaction(userActor(ayse), {
+      ...buyCommand({ productId: "yeni-ceyrek", quantity: "3", unitPrice: "11000" }),
+      unit: "gram",
+    });
+    expect(piece.entry.unit).toBe("adet");
   });
 });
 
 describe("sayısal alanlar", () => {
-  it("NaN, Infinity ve sayı olmayan değerler reddedilir", async () => {
-    await expectRejected(valid({ quantity: Number.NaN }), "Miktar");
-    await expectRejected(valid({ quantity: Number.POSITIVE_INFINITY }), "Miktar");
-    await expectRejected(valid({ quantity: "abc" }), "Miktar");
-    await expectRejected(valid({ quantity: {} }), "Miktar");
-    await expectRejected(valid({ unitPrice: Number.NaN }), "Birim fiyat");
-    await expectRejected(valid({ unitPrice: "" }), "Birim fiyat");
-    await expectRejected(valid({ feeAmount: Number.NEGATIVE_INFINITY }), "komisyon");
+  it("NaN, Infinity, bilimsel gösterim ve sayı olmayan değerler reddedilir", async () => {
+    await expectRejected({ ...buyCommand(), quantity: Number.NaN }, "Miktar");
+    await expectRejected({ ...buyCommand(), quantity: Number.POSITIVE_INFINITY }, "Miktar");
+    await expectRejected(buyCommand({ quantity: "1e3" }), "Miktar");
+    await expectRejected(buyCommand({ quantity: "abc" }), "Miktar");
+    await expectRejected({ ...buyCommand(), quantity: {} }, "Miktar");
+    await expectRejected(buyCommand({ unitPrice: "NaN" }), "sayı");
+    await expectRejected(buyCommand({ unitPrice: "" }), "zorunlu");
+    await expectRejected(buyCommand({ fees: "-1" }), "negatif");
   });
 
   it("sıfır ve negatif miktar / fiyat reddedilir", async () => {
-    await expectRejected(valid({ quantity: 0 }), "Miktar sıfırdan büyük");
-    await expectRejected(valid({ quantity: -1 }), "Miktar sıfırdan büyük");
-    await expectRejected(valid({ unitPrice: 0 }), "Birim fiyat sıfırdan büyük");
-    await expectRejected(valid({ unitPrice: -5000 }), "Birim fiyat sıfırdan büyük");
-    await expectRejected(valid({ feeAmount: -1 }), "negatif olamaz");
+    await expectRejected(buyCommand({ quantity: "0" }), "sıfırdan büyük");
+    await expectRejected(buyCommand({ quantity: "-1" }), "negatif");
+    await expectRejected(buyCommand({ unitPrice: "0" }), "sıfırdan büyük");
+    await expectRejected(buyCommand({ unitPrice: "-5000" }), "negatif");
   });
 
-  it("sayı biçimli dizeler kabul edilir ve normalize edilir", async () => {
-    const created = await service.createTransaction(
+  it("aşırı büyük değer reddedilir", async () => {
+    await expectRejected(buyCommand({ unitPrice: "9999999999999" }), "çok büyük");
+  });
+
+  it("virgüllü Türkçe biçim kabul edilir ve normalize edilir", async () => {
+    const created = await service.appendTransaction(
       userActor(ayse),
-      valid({ quantity: "2.5", unitPrice: "5100", feeAmount: "10" }),
+      buyCommand({ quantity: "2,5", unitPrice: "5.100,50", fees: "10" }),
     );
-    expect(created.quantity).toBe(2.5);
-    expect(created.unitPrice).toBe(5100);
-    expect(created.feeAmount).toBe(10);
+    expect(created.entry.quantity).toBe("2.5");
+    expect(created.entry.grossAmount).toBe("12751.25");
+    expect(created.entry.totalPaid).toBe("12761.25");
   });
 
-  it("feeAmount verilmezse 0 kabul edilir", async () => {
-    const body = valid();
-    delete body.feeAmount;
-    const created = await service.createTransaction(userActor(ayse), body);
-    expect(created.feeAmount).toBe(0);
+  it("adet ürününde ondalık miktar reddedilir", async () => {
+    await expectRejected(buyCommand({ productId: "yeni-ceyrek", quantity: "1.5", unitPrice: "11000" }), "tam sayı");
   });
 });
 
 describe("gövde biçimi", () => {
   it("nesne olmayan gövde reddedilir", async () => {
     for (const body of [null, "x", 42, []]) {
-      await expect(service.createTransaction(userActor(ayse), body)).rejects.toMatchObject({
-        status: 400,
-      });
+      await expect(service.appendTransaction(userActor(ayse), body)).rejects.toMatchObject({ status: 400 });
     }
   });
 
-  it("not alanı 280 karakterle sınırlanır ve dize değilse boş kabul edilir", async () => {
-    const long = "a".repeat(400);
-    const created = await service.createTransaction(userActor(ayse), valid({ note: long }));
-    expect(created.note).toHaveLength(280);
+  it("not alanı 280 karakterle sınırlanır", async () => {
+    await expectRejected(buyCommand({ note: "a".repeat(400) }), "280");
+    const created = await service.appendTransaction(userActor(ayse), { ...buyCommand(), note: 123 });
+    expect(created.entry.note).toBe("");
+  });
 
-    const noNote = await service.createTransaction(userActor(ayse), valid({ note: 123 }));
-    expect(noNote.note).toBe("");
+  it("MARKET_BASELINE için istemcinin gönderdiği fiyat yok sayılır; sunucu fiyatı kullanılır", async () => {
+    const result = await service.appendTransaction(userActor(ayse), {
+      kind: "OPENING_BALANCE",
+      productId: "gram-altin",
+      quantity: "10",
+      costMethod: "MARKET_BASELINE",
+      liquidationPrice: "1",
+      costAmount: "1",
+    });
+    expect(result.entry.costBasisOrigin).toBe("MARKET_BASELINE");
+    expect(result.entry.priceSnapshot?.provider).toBe("mock");
+    expect(result.entry.priceSnapshot?.liquidationPrice).not.toBe("1");
+    expect(result.entry.totalPaid).not.toBe("10");
   });
 });

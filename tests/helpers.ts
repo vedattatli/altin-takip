@@ -1,51 +1,144 @@
-import { getProduct, GOLD_PRODUCTS, requireProduct } from "@/domain/catalog";
-import type { Transaction, TransactionInput } from "@/domain/types";
-import { MockPriceProvider } from "@/prices/mock-provider";
-import type { PriceSnapshot } from "@/prices/types";
+import {
+  resolveLedgerAmounts,
+  type BuyCommand,
+  type LedgerEntry,
+  type OpeningBalanceCommand,
+  type SellCommand,
+} from "@/domain/accounting";
+import { GOLD_PRODUCTS, requireProduct } from "@/domain/catalog";
+import { MOCK_PROVIDER_META, MockPriceProvider } from "@/prices/mock-provider";
+import type { PriceQuote, PriceSnapshot } from "@/prices/types";
 
 let counter = 0;
 
-export function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
+/**
+ * Test defter kaydı üretir. Tutarlar gerçek motorla (resolveLedgerAmounts)
+ * hesaplanır; böylece testler kendi kendini tutarlı biçimde kurar.
+ */
+export function makeEntry(
+  overrides: Partial<LedgerEntry> & { unitPrice?: string; totalAmount?: string } = {},
+): LedgerEntry {
   counter += 1;
   const productId = overrides.productId ?? "gram-altin";
   const product = requireProduct(productId);
-  const timestamp = new Date(2026, 0, 1, 12, 0, counter).toISOString();
+  const kind = overrides.kind ?? "BUY";
+  const quantity = overrides.quantity ?? "1";
+  const mode = overrides.pricingInputMode ?? "UNIT_PRICE";
+  const timestamp = new Date(Date.UTC(2026, 0, 1, 12, 0, counter)).toISOString();
 
+  const amounts = resolveLedgerAmounts({
+    kind,
+    quantity,
+    pricingInputMode: mode,
+    unitPrice: overrides.unitPrice ?? (mode === "UNIT_PRICE" ? "5000" : null),
+    totalAmount: overrides.totalAmount ?? null,
+    fees: overrides.fees ?? "0",
+    workmanship: overrides.workmanship ?? "0",
+    baselineSnapshot:
+      mode === "MARKET_BASELINE"
+        ? {
+            productId,
+            liquidationPrice: overrides.unitPrice ?? "5000",
+            replacementPrice: overrides.unitPrice ?? "5000",
+            provider: "mock",
+            market: "TEST",
+            currency: "TRY",
+            providerStatus: "ok",
+            isRealMarketData: false,
+            providerTimestamp: timestamp,
+            fetchedAt: timestamp,
+          }
+        : null,
+  });
+
+  const { unitPrice: _u, totalAmount: _t, ...rest } = overrides;
   return {
     id: overrides.id ?? `tx-${counter}`,
     portfolioId: "portfolio-1",
     productId,
-    side: "buy",
-    quantity: 1,
+    kind,
+    quantity,
     unit: product.unit,
-    tradedAt: "2026-01-15",
-    unitPrice: 5000,
-    feeAmount: 0,
+    occurredAt: overrides.occurredAt ?? "2026-01-15",
+    pricingInputMode: mode,
+    ...amounts,
+    costBasisOrigin: overrides.costBasisOrigin ?? (mode === "MARKET_BASELINE" ? "MARKET_BASELINE" : "ACTUAL"),
+    priceSnapshotId: null,
+    priceSnapshot: null,
     note: "",
+    status: "ACTIVE",
+    voidedAt: null,
+    voidReason: null,
+    replacesTransactionId: null,
+    replacedByTransactionId: null,
+    clientRequestId: null,
+    ledgerSequence: counter,
     createdAt: timestamp,
     updatedAt: timestamp,
-    ...overrides,
+    ...rest,
   };
 }
 
-export function makeInput(overrides: Partial<TransactionInput> = {}): TransactionInput {
-  const productId = overrides.productId ?? "gram-altin";
-  // Doğrulama testleri bilerek katalogda olmayan kimlik de gönderebilir.
-  const product = getProduct(productId);
+export function buyCommand(overrides: Partial<BuyCommand> = {}): BuyCommand {
   return {
-    productId,
-    side: "buy",
-    quantity: 1,
-    unit: product?.unit ?? "gram",
-    tradedAt: "2026-01-15",
-    unitPrice: 5000,
-    feeAmount: 0,
-    note: "",
+    kind: "BUY",
+    productId: "gram-altin",
+    quantity: "1",
+    occurredAt: "2026-01-15",
+    pricingInputMode: "UNIT_PRICE",
+    unitPrice: "5000",
     ...overrides,
   };
 }
 
-/** Testlerde sabit zamanlı, deterministik fiyat anlık görüntüsü. */
+export function sellCommand(overrides: Partial<SellCommand> = {}): SellCommand {
+  return {
+    kind: "SELL",
+    productId: "gram-altin",
+    quantity: "1",
+    occurredAt: "2026-01-20",
+    pricingInputMode: "UNIT_PRICE",
+    unitPrice: "5200",
+    ...overrides,
+  };
+}
+
+export function openingCommand(overrides: Partial<OpeningBalanceCommand> = {}): OpeningBalanceCommand {
+  return {
+    kind: "OPENING_BALANCE",
+    productId: "gram-altin",
+    quantity: "10",
+    costMethod: "ACTUAL",
+    costInputMode: "AVERAGE_UNIT_COST",
+    costAmount: "5000",
+    ...overrides,
+  };
+}
+
+/** Belirli ürünler için sabit fiyatlı anlık görüntü. */
+export function snapshotWith(
+  prices: Record<string, { liquidation: string; replacement: string }>,
+  options: { fetchedAt?: string; status?: PriceQuote["status"] } = {},
+): PriceSnapshot {
+  const fetchedAt = options.fetchedAt ?? new Date().toISOString();
+  const quotes: Record<string, PriceQuote> = {};
+  for (const [productId, price] of Object.entries(prices)) {
+    quotes[productId] = {
+      productId,
+      liquidationPrice: price.liquidation,
+      replacementPrice: price.replacement,
+      currency: "TRY",
+      market: "TEST",
+      provider: "mock",
+      providerTimestamp: fetchedAt,
+      fetchedAt,
+      status: options.status ?? "ok",
+    };
+  }
+  return { provider: MOCK_PROVIDER_META, quotes, fetchedAt, status: "ok", error: null };
+}
+
+/** Testlerde sabit zamanlı, deterministik fiyat anlık görüntüsü (mock sağlayıcı). */
 export async function fixedSnapshot(timestamp = Date.parse("2026-02-01T10:00:00Z")): Promise<PriceSnapshot> {
   const provider = new MockPriceProvider({
     now: () => timestamp,

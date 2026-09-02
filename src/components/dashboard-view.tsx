@@ -3,7 +3,13 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import type { Holding } from "@/domain/portfolio";
+import {
+  COST_QUALITY_DESCRIPTIONS,
+  COST_QUALITY_LABELS,
+  dec,
+  PNL_LABELS,
+  type HoldingView,
+} from "@/domain/accounting";
 import {
   formatGrams,
   formatMoney,
@@ -14,6 +20,8 @@ import {
 import { usePortfolio } from "@/state/portfolio-store";
 import { PriceSourceLine } from "./price-source-line";
 import { Card, DeltaValue, EmptyState, SectionTitle, cx } from "./ui";
+
+const PRICE_UNAVAILABLE = "Fiyat verisi kullanılamıyor";
 
 function StatCard({
   label,
@@ -45,39 +53,77 @@ function StatCard({
   );
 }
 
-function HoldingRow({ holding }: { holding: Holding }) {
-  const { product, quantity, costBasis, liquidationValue, unrealizedPnL, unrealizedPnLPercent } =
-    holding;
+function CostQualityBadge({ holding }: { holding: HoldingView }) {
+  const quality = holding.costQuality;
+  if (quality === "NONE") return null;
+  return (
+    <span
+      className={cx("badge", quality === "ACTUAL" ? "badge-positive" : "badge-notice")}
+      title={COST_QUALITY_DESCRIPTIONS[quality]}
+      data-testid="cost-quality"
+    >
+      {COST_QUALITY_LABELS[quality]}
+    </span>
+  );
+}
+
+function HoldingRow({ holding }: { holding: HoldingView }) {
+  const { product, position, quote } = holding;
+  const priced = holding.priceAvailable && holding.liquidationValue !== null;
 
   return (
-    <li className="border-b border-line px-4 py-3 last:border-b-0">
+    <li className="border-b border-line px-4 py-3 last:border-b-0" data-testid="holding-row">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
-          <p className="mt-0.5 text-xs text-muted">
-            {formatQuantity(quantity, product.unit)} · {formatGrams(holding.pureGoldGrams)} has
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
+            <CostQualityBadge holding={holding} />
+          </div>
+          <p className="tabular mt-0.5 text-xs text-muted">
+            {formatQuantity(position.quantity, product.unit)} · {formatGrams(holding.pureGoldGrams)} has
           </p>
+          <p className="tabular mt-0.5 text-xs text-muted">
+            Ortalama takip maliyeti: {position.averageCost ? formatMoney(position.averageCost) : "—"}/{product.unit} ·
+            Kalan maliyet: {formatMoney(position.remainingCostBasis)}
+          </p>
+          {quote ? (
+            <p className="tabular mt-0.5 text-xs text-subtle">
+              Bozdurma: {formatMoney(quote.liquidationPrice)}/{product.unit} · Yeniden alım:{" "}
+              {formatMoney(quote.replacementPrice)}/{product.unit}
+            </p>
+          ) : null}
+          {holding.costQuality === "MIXED" ? (
+            <p className="mt-0.5 text-xs text-subtle">{COST_QUALITY_DESCRIPTIONS.MIXED}</p>
+          ) : null}
         </div>
         <div className="shrink-0 text-right">
           <p className="tabular text-sm font-semibold text-ink">
-            {liquidationValue === null ? "Fiyat yok" : formatMoney(liquidationValue)}
+            {priced ? formatMoney(holding.liquidationValue!) : PRICE_UNAVAILABLE}
           </p>
-          <p className="tabular mt-0.5 text-xs text-muted">Maliyet {formatMoney(costBasis)}</p>
+          {priced ? (
+            <p className="tabular mt-0.5 text-xs text-muted">Yeniden alım {formatMoney(holding.replacementValue!)}</p>
+          ) : null}
         </div>
       </div>
-      {unrealizedPnL !== null ? (
+      {priced && holding.unrealizedPnl !== null ? (
         <p className="mt-1.5 text-xs">
           <DeltaValue
-            value={unrealizedPnL}
-            formatted={formatSignedMoney(unrealizedPnL)}
-            suffix={unrealizedPnLPercent !== null ? formatPercent(unrealizedPnLPercent) : undefined}
+            value={holding.unrealizedPnl}
+            formatted={formatSignedMoney(holding.unrealizedPnl)}
+            suffix={holding.unrealizedPnlPercent !== null ? formatPercent(holding.unrealizedPnlPercent) : undefined}
           />
+          <span className="ml-1 text-subtle">gerçekleşmemiş</span>
         </p>
       ) : (
         <p className="mt-1.5 text-xs text-muted">
-          Bu ürün için fiyat alınamadı; değerlemeye dâhil edilmedi.
+          Bu ürün için kullanılabilir fiyat yok; değerleme ve gerçekleşmemiş K/Z hesaplanmadı.
         </p>
       )}
+      {!dec(position.realizedPnl).isZero() ? (
+        <p className="tabular mt-0.5 text-xs text-muted">
+          Gerçekleşmiş: <DeltaValue value={position.realizedPnl} formatted={formatSignedMoney(position.realizedPnl)} />
+        </p>
+      ) : null}
     </li>
   );
 }
@@ -86,14 +132,31 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   const { summary, snapshot, status, error, isOnline, repository, refreshPrices, portfolio } =
     usePortfolio();
 
-  const addButton = onAdd ? (
-    <button type="button" className="btn btn-primary" onClick={onAdd}>
-      Altın Ekle
-    </button>
+  const base = addHref ?? "/islemler";
+  const actionButtons = onAdd ? (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
+        Mevcut Altını Ekle
+      </button>
+      <button type="button" className="btn btn-primary min-h-11" onClick={onAdd}>
+        Yeni Alış Ekle
+      </button>
+      <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
+        Satış Ekle
+      </button>
+    </div>
   ) : (
-    <Link href={addHref ?? "/islemler?yeni=1"} className="btn btn-primary">
-      Altın Ekle
-    </Link>
+    <div className="flex flex-wrap gap-2">
+      <Link href={`${base}?ekle=mevcut`} className="btn btn-secondary min-h-11">
+        Mevcut Altını Ekle
+      </Link>
+      <Link href={`${base}?ekle=alis`} className="btn btn-primary min-h-11">
+        Yeni Alış Ekle
+      </Link>
+      <Link href={`${base}?ekle=satis`} className="btn btn-secondary min-h-11">
+        Satış Ekle
+      </Link>
+    </div>
   );
 
   if (status === "loading") {
@@ -114,6 +177,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   }
 
   const isEmpty = summary.positionCount === 0;
+  const priceOk = summary.priceStatus === "ok";
+  // Portföy boşsa bütün değerler 0 TL gösterilir; fiyat yoksa ve pozisyon varsa "kullanılamıyor".
+  const valuation = (value: string) => (isEmpty || priceOk ? formatMoney(value) : PRICE_UNAVAILABLE);
+  const pnlText = PNL_LABELS[summary.pnlLabel];
 
   return (
     <div className="space-y-5">
@@ -122,48 +189,83 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           {portfolio?.name ?? "Portföyüm"}
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Bozdurma değeri piyasanın alış fiyatına, yeniden alım değeri satış fiyatına göre
-          hesaplanır.
+          Bozdurma değeri kuyumcunun alış fiyatına, yeniden alım değeri kuyumcunun satış fiyatına
+          göre hesaplanır. Maliyet yöntemi: ürün bazlı hareketli ağırlıklı ortalama.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          label="Toplam bozdurma değeri"
-          value={formatMoney(summary.totalLiquidationValue)}
-          hint="Bugün bozdurursanız yaklaşık eline geçecek tutar"
+          label="Tahmini bozdurma değeri"
+          value={valuation(summary.totalLiquidationValue)}
+          hint="Bugün bozdurursanız yaklaşık elinize geçecek tutar (test fiyatı)"
           emphasis
           testId="stat-liquidation"
         />
         <StatCard
-          label="Toplam yeniden alım değeri"
-          value={formatMoney(summary.totalRepurchaseValue)}
+          label="Yeniden alım değeri"
+          value={valuation(summary.totalReplacementValue)}
           hint="Aynı miktarı bugün almanın yaklaşık maliyeti"
           testId="stat-repurchase"
         />
         <StatCard
-          label="Toplam maliyet"
-          value={formatMoney(summary.totalCostBasis)}
-          hint="İşçilik ve komisyon dâhil"
+          label="Elde kalan maliyet"
+          value={formatMoney(summary.totalRemainingCostBasis)}
+          hint="Elde kalan altınların maliyet bazı (masraflar dâhil)"
           testId="stat-cost"
         />
         <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Kâr / Zarar</p>
-          <p data-testid="stat-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
-            <DeltaValue
-              value={summary.totalUnrealizedPnL}
-              formatted={formatSignedMoney(summary.totalUnrealizedPnL)}
-            />
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmemiş K/Z</p>
+          <p data-testid="stat-unrealized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+            {isEmpty || priceOk ? (
+              <DeltaValue value={summary.totalUnrealizedPnl} formatted={formatSignedMoney(summary.totalUnrealizedPnl)} />
+            ) : (
+              <span className="text-muted">{PRICE_UNAVAILABLE}</span>
+            )}
           </p>
           <p className="mt-1 text-xs text-muted">
-            {summary.totalUnrealizedPnLPercent === null
-              ? "Gerçekleşmemiş kâr/zarar"
-              : `Gerçekleşmemiş · ${formatPercent(summary.totalUnrealizedPnLPercent)}`}
+            {summary.totalUnrealizedPnlPercent !== null && priceOk
+              ? `${pnlText} · ${formatPercent(summary.totalUnrealizedPnlPercent)}`
+              : pnlText}
           </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmiş K/Z</p>
+          <p data-testid="stat-realized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+            <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
+          </p>
+          <p className="mt-1 text-xs text-muted">Satışlardan oluşan sonuç; portföy değerine eklenmez.</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z</p>
+          <p data-testid="stat-total-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+            {isEmpty || priceOk ? (
+              <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
+            ) : (
+              <span className="text-muted">{PRICE_UNAVAILABLE}</span>
+            )}
+          </p>
+          <p className="mt-1 text-xs text-muted">Gerçekleşmiş + gerçekleşmemiş · {pnlText}</p>
         </Card>
       </div>
 
-      {summary.hasMissingPrices ? (
+      {summary.hasEstimatedOrBaseline ? (
+        <div
+          className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]"
+          data-testid="pnl-label-notice"
+        >
+          <span className="font-semibold">{PNL_LABELS.SINCE_TRACKING_START}:</span> portföyde takip
+          başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış
+          maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır.
+        </div>
+      ) : null}
+
+      {!isEmpty && !priceOk ? (
+        <div className="rounded-[var(--radius)] border border-negative-soft bg-negative-soft px-3.5 py-3 text-sm text-negative">
+          {PRICE_UNAVAILABLE}: fiyat yok, geçersiz veya bayat. Güncel değer ve gerçekleşmemiş K/Z
+          hesaplanmış gibi gösterilmez; başka ürünün fiyatından tahmin yapılmaz.
+        </div>
+      ) : summary.hasMissingPrices ? (
         <div className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]">
           Bazı ürünler için fiyat alınamadı. Bu pozisyonlar (maliyet{" "}
           {formatMoney(summary.unpricedCostBasis)}) toplam değerlemeye dâhil edilmedi.
@@ -178,19 +280,19 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               ? undefined
               : `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
           }
-          action={isEmpty ? undefined : addButton}
+          action={isEmpty ? undefined : actionButtons}
         />
         <Card>
           {isEmpty ? (
             <EmptyState
               title="Henüz altın eklenmedi"
-              description="Portföyünüz boş. İlk altın işleminizi ekleyin; toplam maliyetiniz, bozdurma değeriniz ve kâr/zararınız otomatik hesaplansın."
-              action={addButton}
+              description="Portföyünüz boş. Mevcut altınınızı ekleyin veya ilk alışınızı kaydedin; elde kalan maliyet, bozdurma değeri ve kâr/zarar otomatik hesaplansın."
+              action={actionButtons}
             />
           ) : (
             <ul data-testid="holdings-list">
               {summary.holdings
-                .filter((holding) => holding.quantity > 0)
+                .filter((holding) => dec(holding.position.quantity).greaterThan(0))
                 .map((holding) => (
                   <HoldingRow key={holding.product.id} holding={holding} />
                 ))}
@@ -199,21 +301,6 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         </Card>
       </section>
 
-      {summary.totalRealizedPnL !== 0 ? (
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
-            Gerçekleşmiş kâr / zarar
-          </p>
-          <p className="mt-1.5 text-lg">
-            <DeltaValue
-              value={summary.totalRealizedPnL}
-              formatted={formatSignedMoney(summary.totalRealizedPnL)}
-            />
-          </p>
-          <p className="mt-1 text-xs text-muted">Satış işlemlerinden bugüne kadar oluşan sonuç.</p>
-        </Card>
-      ) : null}
-
       {/* Fiyat kaynağı bilgisi ekranın ortasında yer kaplamaz; altta tek satırdır. */}
       <PriceSourceLine
         snapshot={snapshot}
@@ -221,6 +308,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         isOnline={isOnline}
         onRefresh={() => void refreshPrices()}
       />
+      <p className="text-xs leading-relaxed text-subtle">
+        Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girdiğiniz verilere ve
+        bilgilendirme amaçlı fiyatlara dayalı bir portföy takip aracıdır.
+      </p>
     </div>
   );
 }

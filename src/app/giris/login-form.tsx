@@ -10,10 +10,10 @@ import { Alert, Field } from "@/components/ui";
 /**
  * Giriş formu.
  *
- * YALNIZCA kullanıcı adı ve parola sorulur. E-posta, telefon, tek kullanımlık
- * kod, sihirli bağlantı, cihaz türü seçimi, "beni hatırla" kutusu veya kayıt
- * bağlantısı YOKTUR: oturum her cihazda zaten kalıcıdır ve yalnızca kullanıcı
- * çıkış yapınca kapanır.
+ * Kullanıcı adı, parola ve tek bir tercih: "Bu cihazda oturumumu açık tut".
+ * E-posta, telefon, tek kullanımlık kod, sihirli bağlantı, cihaz türü seçimi
+ * veya kayıt bağlantısı YOKTUR. Tercih tarayıcı deposuna yazılmaz; sunucudaki
+ * oturum kaydında tutulur. Yöneticiler için sunucu tercihi yok sayar.
  * Hata mesajı "kullanıcı yok" ile "parola yanlış" ayrımını yapmaz.
  */
 export function LoginForm() {
@@ -21,6 +21,8 @@ export function LoginForm() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // Güvenli varsayılan: işaretsiz -> tarayıcı oturumu (kapanınca biter).
+  const [keepSignedIn, setKeepSignedIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hydrated = useHydrated();
@@ -33,7 +35,7 @@ export function LoginForm() {
     try {
       const result = await apiFetch<{ user: { mustChangePassword: boolean } }>(
         "/api/auth/login",
-        { method: "POST", body: JSON.stringify({ username, password }) },
+        { method: "POST", body: JSON.stringify({ username, password, keepSignedIn }) },
       );
       router.replace(result.user.mustChangePassword ? "/parola-degistir" : "/panel");
       router.refresh();
@@ -93,9 +95,22 @@ export function LoginForm() {
         </div>
       </Field>
 
-      <p className="text-xs leading-relaxed text-subtle">
-        Bu cihazda bir kez giriş yaparsınız; siz çıkış yapana kadar oturumunuz açık kalır.
-      </p>
+      <label className="flex items-start gap-2.5 text-sm text-muted">
+        <input
+          type="checkbox"
+          name="keepSignedIn"
+          className="mt-0.5 h-4 w-4"
+          checked={keepSignedIn}
+          onChange={(event) => setKeepSignedIn(event.target.checked)}
+        />
+        <span>
+          <span className="font-medium text-ink">Bu cihazda oturumumu açık tut</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-subtle">
+            İşaretlerseniz siz çıkış yapana kadar oturumunuz açık kalır. İşaretlemezseniz
+            tarayıcıyı kapatınca veya 30 dakika hareketsiz kalınca oturum sona erer.
+          </span>
+        </span>
+      </label>
 
       <button type="submit" className="btn btn-primary w-full" disabled={busy || !hydrated}>
         {busy ? "Giriş yapılıyor…" : "Giriş yap"}

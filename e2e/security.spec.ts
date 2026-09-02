@@ -34,11 +34,12 @@ test.describe("geçici parola sunucu koruması", () => {
     }
 
     const created = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY",
       productId: "gram-altin",
-      side: "buy",
-      quantity: 1,
-      tradedAt: "2026-01-10",
-      unitPrice: 5000,
+      quantity: "1",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5000",
     });
     expect(created.status).toBe(403);
   });
@@ -247,35 +248,37 @@ test.describe("kullanıcı verisi izolasyonu (API)", () => {
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
     await loginAsUser(pageB, userB);
-    const createdB = await browserApi<{ id: string }>(pageB, "POST", "/api/transactions", {
+    const createdB = await browserApi<{ entry: { id: string } }>(pageB, "POST", "/api/transactions", {
+      kind: "BUY",
       productId: "gram-altin",
-      side: "buy",
-      quantity: 4,
-      tradedAt: "2026-01-10",
-      unitPrice: 5000,
+      quantity: "4",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5000",
     });
     expect(createdB.status).toBe(201);
-    const transactionId = createdB.data!.id;
+    const transactionId = createdB.data!.entry.id;
     await contextB.close();
 
-    // A oturumuyla B'nin kaydına erişmeye çalışılır.
+    // A oturumuyla B'nin kaydına erişmeye çalışılır (kimlik tahmini).
     await loginAsUser(page, userA);
 
     const listed = await browserApi<{ id: string }[]>(page, "GET", "/api/transactions");
     expect(listed.status).toBe(200);
     expect(listed.data).toHaveLength(0);
 
-    const updated = await browserApi(page, "PUT", `/api/transactions/${transactionId}`, {
+    const replaced = await browserApi(page, "PUT", `/api/transactions/${transactionId}`, {
+      kind: "BUY",
       productId: "gram-altin",
-      side: "buy",
-      quantity: 999,
-      tradedAt: "2026-01-10",
-      unitPrice: 1,
+      quantity: "999",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "1",
     });
-    expect(updated.status).toBe(404);
+    expect(replaced.status).toBe(404);
 
-    const deleted = await browserApi(page, "DELETE", `/api/transactions/${transactionId}`);
-    expect(deleted.status).toBe(404);
+    const voided = await browserApi(page, "DELETE", `/api/transactions/${transactionId}`, { reason: "x" });
+    expect(voided.status).toBe(404);
   });
 
   test("normal kullanıcı yönetim uçlarına erişemez", async ({ page }) => {

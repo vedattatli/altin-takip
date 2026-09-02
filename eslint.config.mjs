@@ -20,6 +20,11 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // CommonJS Node ön yükleme kancaları (-r ile yüklenir); ESM/TS import kuralları uygulanmaz.
+    files: ["scripts/**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   globalIgnores([
     ".next/**",
     "out/**",

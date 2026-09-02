@@ -163,7 +163,7 @@ describe("giriş ekranı: tek ve kalıcı oturum modeli", () => {
     expect(form).not.toMatch(/deviceMode/);
   });
 
-  it('"beni hatırla" seçeneği bulunmaz (oturum zaten kalıcıdır)', () => {
+  it('"beni hatırla" ifadesi bulunmaz; tek tercih "oturumumu açık tut" kutusudur', () => {
     expect(form).not.toMatch(/beni hatırla/i);
     expect(form).not.toMatch(/rememberMe|remember_me/);
   });
@@ -176,7 +176,7 @@ describe("giriş ekranı: tek ve kalıcı oturum modeli", () => {
   it("istemcide hareketsizlik sayacı veya otomatik çıkış yoktur", () => {
     for (const file of SOURCE_FILES) {
       const source = readCode(file);
-      expect(source, file).not.toMatch(/zaman-asimi|IDLE_TIMEOUT|idleTimeoutMs|DeviceGuard/);
+      expect(source, file).not.toMatch(/zaman-asimi|SHARED_DEVICE_IDLE|DeviceGuard|beforeinstallprompt/);
     }
   });
 });

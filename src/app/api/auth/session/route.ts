@@ -12,7 +12,8 @@ export const GET = apiRoute(async () => {
   const session = await getSessionContext();
   return ok({
     user: session ? toSessionUser(session.profile) : null,
-    // Kaydırmalı bitiş zamanı; kullanıcı aktif oldukça sessizce ileri alınır.
+    // Kalıcı oturumda kaydırmalı bitiş; tarayıcı oturumunda mutlak bitiş.
     expiresAt: session?.expiresAt ?? null,
+    persistent: session?.persistent ?? null,
   });
 });

@@ -11,40 +11,50 @@ import {
   type ReactNode,
 } from "react";
 
-import { GOLD_PRODUCTS } from "@/domain/catalog";
-import { buildPortfolio, EMPTY_SUMMARY, type PortfolioSummary } from "@/domain/portfolio";
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
-import { getPriceProvider, type PriceSnapshot } from "@/prices";
+import {
+  EMPTY_SUMMARY,
+  type AccountingSummary,
+  type LedgerAppendResult,
+  type LedgerCommand,
+  type LedgerEntry,
+  type LedgerReplaceResult,
+  type LedgerVoidResult,
+} from "@/domain/accounting";
+import type { PortfolioMeta } from "@/domain/types";
+import type { PriceSnapshot } from "@/prices/types";
 import { createRepository, type PortfolioRepository, type StorageMode } from "@/storage";
 
 /**
  * Portföy durumu.
  *
  * Depolama katmanı arayüzden soyutlanmıştır: aynı bileşenler hem hesap
- * (sunucu) hem de demo (IndexedDB) modunda çalışır.
+ * (sunucu) hem de demo (IndexedDB) modunda çalışır. Özet (pozisyon +
+ * değerleme) depodan gelir; hesap modunda SUNUCU hesaplar. Her mutation
+ * sonrasında defter ve özet yeniden okunur; istemci kendi başına toplam
+ * hesaplamaz.
  */
 
 interface PortfolioContextValue {
   mode: StorageMode;
   repository: PortfolioRepository;
   portfolio: PortfolioMeta | null;
-  transactions: Transaction[];
-  summary: PortfolioSummary;
+  ledger: LedgerEntry[];
+  summary: AccountingSummary;
   snapshot: PriceSnapshot | null;
   status: "loading" | "ready" | "error";
   error: string | null;
   isOnline: boolean;
+  refresh: () => Promise<void>;
   refreshPrices: () => Promise<void>;
-  addTransaction: (input: TransactionInput) => Promise<Transaction>;
-  editTransaction: (id: string, input: TransactionInput) => Promise<Transaction>;
-  removeTransaction: (id: string) => Promise<void>;
+  appendTransaction: (command: LedgerCommand) => Promise<LedgerAppendResult>;
+  replaceTransaction: (id: string, command: LedgerCommand) => Promise<LedgerReplaceResult>;
+  voidTransaction: (id: string, reason: string) => Promise<LedgerVoidResult>;
   renamePortfolio: (patch: { name?: string; displayName?: string }) => Promise<void>;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 const PRICE_REFRESH_MS = 60_000;
-const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
 
 export function PortfolioProvider({
   mode,
@@ -55,8 +65,8 @@ export function PortfolioProvider({
 }) {
   const repository = useMemo(() => createRepository(mode), [mode]);
   const [portfolio, setPortfolio] = useState<PortfolioMeta | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [snapshot, setSnapshot] = useState<PriceSnapshot | null>(null);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [summary, setSummary] = useState<AccountingSummary>(EMPTY_SUMMARY);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
@@ -69,29 +79,41 @@ export function PortfolioProvider({
     };
   }, []);
 
+  /** Değerleme yenilemesi: fiyat + pozisyon özeti depodan yeniden okunur. */
   const refreshPrices = useCallback(async () => {
-    const next = await getPriceProvider().getQuotes(ALL_PRODUCT_IDS);
-    if (mounted.current) setSnapshot(next);
-  }, []);
+    try {
+      const next = await repository.getSummary();
+      if (mounted.current) setSummary(next);
+    } catch {
+      // Fiyat/özet yenilenemezse mevcut özet korunur; kullanıcı "Yenile" ile tekrar deneyebilir.
+    }
+  }, [repository]);
 
-  // İlk yükleme: portföy + işlemler + fiyatlar.
+  /** Defter + özet birlikte yenilenir (her mutation sonrası). */
+  const refresh = useCallback(async () => {
+    const [rows, next] = await Promise.all([repository.listLedger(), repository.getSummary()]);
+    if (!mounted.current) return;
+    setLedger(rows);
+    setSummary(next);
+  }, [repository]);
+
+  // İlk yükleme: portföy + defter + özet.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setStatus("loading");
       try {
-        const [meta, rows] = await Promise.all([
+        const [meta, rows, next] = await Promise.all([
           repository.getPortfolio(),
-          repository.listTransactions(),
+          repository.listLedger(),
+          repository.getSummary(),
         ]);
         if (cancelled) return;
         setPortfolio(meta);
-        setTransactions(rows);
-        await refreshPrices();
-        if (!cancelled) {
-          setError(null);
-          setStatus("ready");
-        }
+        setLedger(rows);
+        setSummary(next);
+        setError(null);
+        setStatus("ready");
       } catch (cause) {
         if (cancelled) return;
         setError(cause instanceof Error ? cause.message : "Veriler yüklenemedi.");
@@ -101,7 +123,7 @@ export function PortfolioProvider({
     return () => {
       cancelled = true;
     };
-  }, [repository, refreshPrices]);
+  }, [repository]);
 
   // Fiyatları düzenli tazele.
   useEffect(() => {
@@ -121,30 +143,31 @@ export function PortfolioProvider({
     };
   }, []);
 
-  const addTransaction = useCallback(
-    async (input: TransactionInput) => {
-      const created = await repository.createTransaction(input);
-      setTransactions((current) => [...current, created]);
-      return created;
+  const appendTransaction = useCallback(
+    async (command: LedgerCommand) => {
+      const result = await repository.appendTransaction(command);
+      await refresh();
+      return result;
     },
-    [repository],
+    [repository, refresh],
   );
 
-  const editTransaction = useCallback(
-    async (id: string, input: TransactionInput) => {
-      const updated = await repository.updateTransaction(id, input);
-      setTransactions((current) => current.map((tx) => (tx.id === id ? updated : tx)));
-      return updated;
+  const replaceTransaction = useCallback(
+    async (id: string, command: LedgerCommand) => {
+      const result = await repository.replaceTransaction(id, command);
+      await refresh();
+      return result;
     },
-    [repository],
+    [repository, refresh],
   );
 
-  const removeTransaction = useCallback(
-    async (id: string) => {
-      await repository.deleteTransaction(id);
-      setTransactions((current) => current.filter((tx) => tx.id !== id));
+  const voidTransaction = useCallback(
+    async (id: string, reason: string) => {
+      const result = await repository.voidTransaction(id, reason);
+      await refresh();
+      return result;
     },
-    [repository],
+    [repository, refresh],
   );
 
   const renamePortfolio = useCallback(
@@ -155,42 +178,38 @@ export function PortfolioProvider({
     [repository],
   );
 
-  const summary = useMemo(
-    () => (transactions.length === 0 ? EMPTY_SUMMARY : buildPortfolio(transactions, snapshot)),
-    [transactions, snapshot],
-  );
-
   const value = useMemo<PortfolioContextValue>(
     () => ({
       mode,
       repository,
       portfolio,
-      transactions,
+      ledger,
       summary,
-      snapshot,
+      snapshot: summary.snapshot,
       status,
       error,
       isOnline,
+      refresh,
       refreshPrices,
-      addTransaction,
-      editTransaction,
-      removeTransaction,
+      appendTransaction,
+      replaceTransaction,
+      voidTransaction,
       renamePortfolio,
     }),
     [
       mode,
       repository,
       portfolio,
-      transactions,
+      ledger,
       summary,
-      snapshot,
       status,
       error,
       isOnline,
+      refresh,
       refreshPrices,
-      addTransaction,
-      editTransaction,
-      removeTransaction,
+      appendTransaction,
+      replaceTransaction,
+      voidTransaction,
       renamePortfolio,
     ],
   );

@@ -1,19 +1,34 @@
 /**
- * KALICI OTURUM MODELİ
+ * OTURUM MODELİ — kullanıcı tercihine bağlı
  *
- * Bütün cihazlarda aynı, sade ve kalıcı oturum kullanılır:
- *  - Tarayıcıda yalnızca rastgele, opak bir oturum kimliği (HttpOnly çerez) bulunur.
- *  - Oturum "kaydırmalı" (rolling) ömürlüdür: kullanıcı aktif oldukça bitiş
- *    zamanı sessizce ileri taşınır; süresiz aktif kullanım mümkündür.
- *  - Oturum kimliği belirli aralıklarla sessizce yenilenir (rotation); hiç
- *    bitmeyen ve hiç değişmeyen jeton yoktur.
- *  - Hareketsizlik zaman aşımı, cihaz türü seçimi veya otomatik çıkış YOKTUR.
- *  - Oturum yalnızca kullanıcının açık çıkışıyla ya da güvenlik olaylarıyla
- *    (parola sıfırlama, pasifleştirme, yönetici iptali, hesap silme) kapanır.
+ * Tarayıcıda yalnızca rastgele, opak bir oturum kimliği (HttpOnly çerez) bulunur.
+ *
+ *  A. "Bu cihazda oturumumu açık tut" İŞARETLİ (persistent):
+ *     - kalıcı çerez, 180 gün kaydırmalı ömür (bitiş ≤ 24 saatte bir ileri alınır),
+ *     - kimlik 7 günde bir sessizce yenilenir (60 sn tolerans),
+ *     - yalnızca açık çıkış veya güvenlik olayıyla kapanır.
+ *  B. İŞARETSİZ (tarayıcı oturumu):
+ *     - tarayıcı oturumu çerezi (kapanınca silinir),
+ *     - sunucuda en fazla 8 saat mutlak ömür ve 30 dakika hareketsizlik.
+ *  C. ADMIN hesapları: tercihten bağımsız en fazla 8 saat mutlak, 15 dakika
+ *     hareketsizlik; asla kalıcı değil.
+ *
+ * Tercih localStorage/sessionStorage'a yazılmaz; oturum kaydında (persistent) tutulur.
  */
 
-/** Kaydırmalı oturum ömrü: son yenilemeden itibaren 180 gün. */
+/** Kalıcı oturum: kaydırmalı ömür, son yenilemeden itibaren 180 gün. */
 export const SESSION_ROLLING_LIFETIME_MS = 180 * 24 * 60 * 60 * 1000;
+
+/** Tarayıcı oturumu (tercih işaretsiz): mutlak üst sınır 8 saat. */
+export const BROWSER_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+/** Tarayıcı oturumu: hareketsizlik sınırı 30 dakika. */
+export const BROWSER_SESSION_IDLE_MS = 30 * 60 * 1000;
+/** Admin: mutlak üst sınır 8 saat (tercihten bağımsız). */
+export const ADMIN_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+/** Admin: hareketsizlik sınırı 15 dakika. */
+export const ADMIN_SESSION_IDLE_MS = 15 * 60 * 1000;
+/** Kalıcı olmayan oturumda hareketsizlik penceresi en fazla bu sıklıkta yazılır. */
+export const NON_PERSISTENT_TOUCH_INTERVAL_MS = 60 * 1000;
 
 /**
  * Bitiş zamanı bu aralıktan sık ileri alınmaz. Her istekte veritabanına yazmak
@@ -41,6 +56,8 @@ export interface SessionSummary {
   expiresAt: string;
   /** Kaba, kullanıcı dostu tanım (örn. "Chrome · Windows"). Ham User-Agent SAKLANMAZ. */
   deviceLabel: string;
+  /** "Oturumu açık tut" ile açılmış kalıcı oturum mu? */
+  persistent: boolean;
   /** İsteği yapan oturumun kendisi mi? */
   current: boolean;
 }

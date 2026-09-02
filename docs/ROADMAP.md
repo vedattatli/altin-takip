@@ -55,7 +55,7 @@
   `SUPABASE_SECRET_KEY` tercihli anahtar, saf Node ZIP paketleyici (`/` yollar,
   CRC + manifest doğrulaması), idempotent pg_cron bakım dosyası.
 - **Gerçek veritabanı doğrulaması:** yerel Supabase yığını (CLI + Docker) ile
-  temiz DB'ye 0001→0007 uygulandı; 73 pgTAP testi ve gerçek JWT'li Data API
+  temiz DB'ye 0001→0007 uygulandı; 73 pgTAP testi (Sprint 1 sonrası 0001→0010, 124 test) ve gerçek JWT'li Data API
   sondası (21 beklenti) geçti. Uzak proje henüz yok.
 - **Kalıcı oturum modeli (`0007_persistent_sessions.sql`):** cihaz türü seçimi ve
   15 dk hareketsizlik çıkışı kaldırıldı; 180 gün kaydırmalı ömür, ≤ 24 saatte bir
@@ -65,13 +65,30 @@
 
 ---
 
-## Sprint 1 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
+### Sprint 1 — altın portföy muhasebe motoru
+
+- **Oturum politikası:** "Bu cihazda oturumumu açık tut" kutusu; işaretliyse 180 gün
+  kaydırmalı kalıcı oturum, işaretsizse tarayıcı oturumu çerezi + 8 saat / 30 dk; admin
+  her zaman 8 saat / 15 dk (`0008_session_policy.sql`). Mevcut kullanıcı oturumları korundu.
+- **Muhasebe modeli:** ürün bazlı hareketli ağırlıklı ortalama maliyet; append-only işlem
+  defteri kaynak gerçek; `OPENING_BALANCE` (ACTUAL / ESTIMATED / MARKET_BASELINE), `BUY`
+  (birim fiyat + masraf veya toplam ödenen), `SELL` (birim fiyat veya net tahsilat);
+  VOID / REPLACE; idempotency; decimal.js + `numeric`; ondalık dize API
+  (`0009_portfolio_accounting.sql`, `0010_accounting_rpc.sql`, `docs/ACCOUNTING_MODEL.md`).
+- **Arayüz:** altı kart (bozdurma, yeniden alım, elde kalan maliyet, gerçekleşmemiş,
+  gerçekleşmiş, toplam K/Z), Mevcut Altını Ekle / Yeni Alış / Satış akışları, maliyet
+  kalite rozetleri, "Takip başlangıcından itibaren K/Z" etiketi, iptal/düzeltme kayıtlarının
+  görünürlüğü.
+- **Doğrulama:** 388 birim testi (kabul örnekleri + özellik testleri), 124 pgTAP, gerçek JWT
+  sondası (31), `accounting:verify`, `accounting:smoke`, Playwright.
+
+## Sprint 2 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
 kapatmaktır.
 
-1. Uzak Supabase projesi aç, `0001` → `0007` migration'larını sırayla uygula.
+1. Uzak Supabase projesi aç, `0001` → `0010` migration'larını sırayla uygula.
 2. Aynı projeye karşı `npm run test:db` mantığını (pgTAP) ve `npm run test:data-api`
    sondasını çalıştır (sonda için proje URL / anahtar / JWT secret ortam değişkenleri).
 3. `npm run admin:create` ile gerçek yönetici hesabını oluştur; gerekirse `npm run admin:repair`.
@@ -83,7 +100,7 @@ kapatmaktır.
    `cron.job_run_details` ile çalıştığını doğrula.
 7. Yerel geliştirme arka ucunu CI'da devre dışı bırakan bir kontrol ekle.
 
-## Sprint 2 — Kalan güvenlik işleri
+## Sprint 2b — Kalan güvenlik işleri
 
 - Nonce tabanlı CSP (satır içi script izni kaldırılsın).
 - Başarısız giriş denemeleri için ayrı güvenlik olay kaydı (audit'ten bağımsız).
@@ -109,6 +126,8 @@ kapatmaktır.
 - Ürün bazlı detay ekranı ve işlem geçmişi filtreleri.
 - CSV/Excel dışa aktarma (kullanıcının kendi verisi).
 - Birden fazla portföy (örn. "Birikim", "Çeyrekler").
+- Muhasebe genişletmeleri: `TRANSFER_IN` / `TRANSFER_OUT` / `ADJUSTMENT` işlem türleri
+  (tasarım hazır, bu sprintte eklenmedi). FIFO/XIRR/TWR/vergi muhasebesi bilinçli olarak yok.
 - Hedef takibi ("100 gram has altına ulaş").
 - Yönetici için toplu kullanıcı oluşturma.
 

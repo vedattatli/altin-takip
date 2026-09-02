@@ -12,6 +12,7 @@ import {
 } from "@/auth/types";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
 import { apiFetch } from "@/lib/api-client";
+import { COST_QUALITY_LABELS, dec, PNL_LABELS } from "@/domain/accounting";
 import {
   formatDateTime,
   formatGrams,
@@ -44,7 +45,8 @@ export function AdminUserDetail({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmUsername, setConfirmUsername] = useState("");
 
-  const { summary, transactions, canEdit } = initial;
+  const { summary, ledger, canEdit } = initial;
+  const activeCount = ledger.filter((entry) => entry.status === "ACTIVE").length;
 
   async function run<T>(action: () => Promise<T>, successMessage: string): Promise<T | null> {
     setError(null);
@@ -294,7 +296,7 @@ export function AdminUserDetail({
               <Alert tone="danger" title="Bu işlem geri alınamaz">
                 <p>
                   <span className="font-semibold">{user.username}</span> hesabı ve buna bağlı{" "}
-                  <span className="font-semibold">portföy kaydı ile {transactions.length} işlem</span>{" "}
+                  <span className="font-semibold">portföy kaydı ile {ledger.length} işlem</span>{" "}
                   kalıcı olarak silinecek. Verileri korumak istiyorsanız silme yerine{" "}
                   <span className="font-semibold">pasifleştirme</span> kullanın.
                 </p>
@@ -391,30 +393,34 @@ export function AdminUserDetail({
         />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card className="p-3.5">
-            <p className="text-xs text-subtle">Toplam maliyet</p>
+            <p className="text-xs text-subtle">Elde kalan maliyet</p>
             <p className="tabular mt-1 text-base font-semibold text-ink">
-              {formatMoney(summary.totalCostBasis)}
+              {formatMoney(summary.totalRemainingCostBasis)}
             </p>
           </Card>
           <Card className="p-3.5">
             <p className="text-xs text-subtle">Bozdurma değeri</p>
             <p className="tabular mt-1 text-base font-semibold text-ink">
-              {formatMoney(summary.totalLiquidationValue)}
+              {summary.priceStatus === "ok" || summary.positionCount === 0
+                ? formatMoney(summary.totalLiquidationValue)
+                : "Fiyat verisi kullanılamıyor"}
             </p>
           </Card>
           <Card className="p-3.5">
             <p className="text-xs text-subtle">Yeniden alım</p>
             <p className="tabular mt-1 text-base font-semibold text-ink">
-              {formatMoney(summary.totalRepurchaseValue)}
+              {summary.priceStatus === "ok" || summary.positionCount === 0
+                ? formatMoney(summary.totalReplacementValue)
+                : "Fiyat verisi kullanılamıyor"}
             </p>
           </Card>
           <Card className="p-3.5">
-            <p className="text-xs text-subtle">Kâr / Zarar</p>
+            <p className="text-xs text-subtle">{PNL_LABELS[summary.pnlLabel]}</p>
             <p className="mt-1 text-base">
-              <DeltaValue
-                value={summary.totalUnrealizedPnL}
-                formatted={formatSignedMoney(summary.totalUnrealizedPnL)}
-              />
+              <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
+            </p>
+            <p className="tabular mt-0.5 text-xs text-subtle">
+              Gerçekleşmiş {formatSignedMoney(summary.totalRealizedPnl)}
             </p>
           </Card>
         </div>
@@ -427,7 +433,7 @@ export function AdminUserDetail({
           ) : (
             <ul>
               {summary.holdings
-                .filter((holding) => holding.quantity > 0)
+                .filter((holding) => dec(holding.position.quantity).greaterThan(0))
                 .map((holding) => (
                   <li
                     key={holding.product.id}
@@ -435,15 +441,19 @@ export function AdminUserDetail({
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-ink">
-                        {holding.product.name}
+                        {holding.product.name}{" "}
+                        {holding.costQuality !== "NONE" ? (
+                          <span className="badge ml-1">{COST_QUALITY_LABELS[holding.costQuality]}</span>
+                        ) : null}
                       </p>
                       <p className="text-xs text-muted">
-                        {formatQuantity(holding.quantity, holding.product.unit)} ·{" "}
-                        {formatGrams(holding.pureGoldGrams)} has
+                        {formatQuantity(holding.position.quantity, holding.product.unit)} ·{" "}
+                        {formatGrams(holding.pureGoldGrams)} has · ort. maliyet{" "}
+                        {holding.position.averageCost ? formatMoney(holding.position.averageCost) : "—"}
                       </p>
                     </div>
                     <p className="tabular shrink-0 text-sm font-semibold text-ink">
-                      {holding.liquidationValue === null
+                      {holding.liquidationValue === null || !holding.priceAvailable
                         ? "Fiyat yok"
                         : formatMoney(holding.liquidationValue)}
                     </p>
@@ -451,6 +461,10 @@ export function AdminUserDetail({
                 ))}
             </ul>
           )}
+          <p className="border-t border-line px-4 py-2 text-xs text-subtle">
+            {ledger.length} defter kaydı ({activeCount} aktif). Yönetici bu kayıtları yalnızca görüntüler;
+            kullanıcı adına alış, satış, iptal veya düzeltme yapamaz.
+          </p>
         </Card>
       </section>
     </div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { signOf } from "@/lib/format";
 
 /** Sınıf birleştirici — koşullu sınıflar için. */
 export function cx(...values: (string | false | null | undefined)[]): string {
@@ -173,13 +174,13 @@ export function DeltaValue({
   suffix,
   className,
 }: {
-  value: number;
+  value: string | number;
   formatted: string;
   suffix?: string;
   className?: string;
 }) {
-  const tone =
-    value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-muted";
+  const sign = signOf(value);
+  const tone = sign > 0 ? "text-positive" : sign < 0 ? "text-negative" : "text-muted";
   return (
     <span className={cx("tabular font-semibold", tone, className)}>
       {formatted}

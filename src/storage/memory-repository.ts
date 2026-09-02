@@ -1,11 +1,23 @@
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import type {
+  AccountingSummary,
+  LedgerAppendResult,
+  LedgerCommand,
+  LedgerEntry,
+  LedgerReplaceResult,
+  LedgerVoidResult,
+} from "@/domain/accounting/types";
+import type { PortfolioMeta } from "@/domain/types";
 import {
-  createId,
-  defaultPortfolio,
-  nowISO,
-  type PortfolioRepository,
-  type RepositoryKind,
-} from "./types";
+  localAppend,
+  localReplace,
+  localSnapshot,
+  localSummary,
+  localVoid,
+  localVoidAll,
+  sortLedgerDesc,
+  type LocalLedgerState,
+} from "./local-ledger";
+import { defaultPortfolio, nowISO, type PortfolioRepository, type RepositoryKind } from "./types";
 
 /**
  * Bellek içi depo. Testler ve sunucu tarafı yardımcıları için.
@@ -17,7 +29,7 @@ export class MemoryPortfolioRepository implements PortfolioRepository {
   readonly syncsAcrossDevices = false;
 
   private portfolio: PortfolioMeta;
-  private transactions: Transaction[] = [];
+  private state: LocalLedgerState = { entries: [], nextSequence: 1 };
 
   constructor(portfolio: PortfolioMeta = defaultPortfolio()) {
     this.portfolio = portfolio;
@@ -37,40 +49,42 @@ export class MemoryPortfolioRepository implements PortfolioRepository {
     return { ...this.portfolio };
   }
 
-  async listTransactions(): Promise<Transaction[]> {
-    return this.transactions.map((tx) => ({ ...tx }));
+  async getSummary(): Promise<AccountingSummary> {
+    return localSummary(this.state.entries, await localSnapshot());
   }
 
-  async createTransaction(input: TransactionInput): Promise<Transaction> {
-    const timestamp = nowISO();
-    const transaction: Transaction = {
-      ...input,
-      id: createId(),
-      portfolioId: this.portfolio.id,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+  async listLedger(): Promise<LedgerEntry[]> {
+    return sortLedgerDesc(this.state.entries);
+  }
+
+  private commit(entries: LedgerEntry[]): void {
+    this.state = {
+      entries,
+      nextSequence: entries.reduce((max, entry) => Math.max(max, entry.ledgerSequence), 0) + 1,
     };
-    this.transactions.push(transaction);
-    return { ...transaction };
   }
 
-  async updateTransaction(id: string, input: TransactionInput): Promise<Transaction> {
-    const index = this.transactions.findIndex((tx) => tx.id === id);
-    if (index === -1) throw new Error("İşlem bulunamadı.");
-    const updated: Transaction = {
-      ...this.transactions[index],
-      ...input,
-      updatedAt: nowISO(),
-    };
-    this.transactions[index] = updated;
-    return { ...updated };
+  async appendTransaction(command: LedgerCommand): Promise<LedgerAppendResult> {
+    const { result, entries } = await localAppend(this.state, this.portfolio.id, command);
+    this.commit(entries);
+    return result;
   }
 
-  async deleteTransaction(id: string): Promise<void> {
-    this.transactions = this.transactions.filter((tx) => tx.id !== id);
+  async replaceTransaction(id: string, command: LedgerCommand): Promise<LedgerReplaceResult> {
+    const { result, entries } = await localReplace(this.state, this.portfolio.id, id, command);
+    this.commit(entries);
+    return result;
   }
 
-  async clearTransactions(): Promise<void> {
-    this.transactions = [];
+  async voidTransaction(id: string, reason: string): Promise<LedgerVoidResult> {
+    const { result, entries } = localVoid(this.state, id, reason);
+    this.commit(entries);
+    return result;
+  }
+
+  async voidAll(): Promise<number> {
+    const { count, entries } = localVoidAll(this.state);
+    this.commit(entries);
+    return count;
   }
 }

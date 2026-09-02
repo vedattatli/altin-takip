@@ -14,7 +14,19 @@ Ek komutlar:
 npm run test:db
 ```
 
-(Supabase CLI + Docker; temiz veritabanına 0001→0007 uygular, 73 pgTAP testi koşar.)
+(Supabase CLI + Docker; temiz veritabanına 0001→0010 uygular, 124 pgTAP testi koşar.)
+
+```bash
+npm run accounting:verify
+```
+
+(Defteri yeniden oynatır, türetilmiş pozisyonlarla karşılaştırır; tutarsızlıkta başarısız.)
+
+```bash
+npm run accounting:smoke
+```
+
+(Yalnızca yerel Supabase: gerçek RPC yolundan kabul örnekleri.)
 
 ```bash
 npm run test:data-api
@@ -60,7 +72,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
 | 2.1 | Alış ve satış fiyatları ters kullanılmaz | `tests/portfolio.test.ts` → "bozdurma değeri ALIŞ, yeniden alım değeri SATIŞ fiyatıyla hesaplanır" |
-| 2.2 | Her üründe `buyPrice < sellPrice` | `tests/prices.test.ts` → "her ürün için alış fiyatı satış fiyatından düşüktür" |
+| 2.2 | Her üründe `liquidationPrice < replacementPrice` (bozdurma < yeniden alım) | `tests/prices.test.ts` → "her ürün için alış fiyatı satış fiyatından düşüktür" |
 | 2.3 | Alış/satış birbirinden türetilmez | `tests/prices.test.ts` → "alış ve satış birbirinden türetilmez; makas kategoriye göre değişir" |
 | 2.4 | Mock fiyatlar gerçek fiyat gibi etiketlenmez (kompakt şeritte de) | `tests/prices.test.ts` → "mock fiyatları gerçek piyasa verisi gibi etiketlemez"<br>`e2e/portfolio.spec.ts` → "fiyat kaynağı test verisi olarak etiketlenir" |
 | 2.5 | Sağlayıcı hatasında başka piyasaya sessiz geçiş yapılmaz | `tests/prices.test.ts` → "sağlayıcı çalışmadığında başka piyasaya sessizce geçmez" |
@@ -153,7 +165,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | --- | --- | --- |
 | 10.1 | Hiçbir EXE/MSI/BAT/eklenti/native yardımcı yok | `tests/deployment-surface.test.ts` → "yerel kurulum gerektiren bileşen yoktur" |
 | 10.2 | PWA kurulumu isteğe bağlı; hiçbir özellik ona bağlı değil | `tests/deployment-surface.test.ts` → "PWA kurulumu isteğe bağlıdır"<br>`e2e/session.spec.ts` → "kurulu PWA olmadan tüm ekranlar çalışır" |
-| 10.3 | Giriş ekranı cihaz türü SORMAZ, "beni hatırla" yok | `tests/deployment-surface.test.ts` → "giriş ekranı: tek ve kalıcı oturum modeli"<br>`e2e/session.spec.ts` → "cihaz türü sormaz ve 'beni hatırla' kutusu yoktur" |
+| 10.3 | Giriş ekranı cihaz türü SORMAZ; tek tercih "oturumumu açık tut" (varsayılan işaretsiz) | `tests/deployment-surface.test.ts` → "cihaz türü seçimi SUNMAZ"<br>`e2e/session.spec.ts` → "cihaz türü sormaz; yalnızca 'oturumumu açık tut' kutusu vardır" |
 | 10.4 | Oturum çerezi kalıcı, HttpOnly, SameSite=Lax | `tests/session-cookie.test.ts`<br>`e2e/session.spec.ts` → "çerez kalıcı, HttpOnly ve SameSite=Lax'tır" |
 | 10.5 | İstemcide hareketsizlik sayacı / otomatik çıkış yok | `tests/deployment-surface.test.ts` → "istemcide hareketsizlik sayacı veya otomatik çıkış yoktur" |
 | 10.6 | Servis çalışanı yalnızca üretimde; cihaz türüne bakmaz | `tests/deployment-surface.test.ts` → "servis çalışanı yalnızca üretim derlemesinde kaydedilir" |
@@ -206,7 +218,8 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
-| 15.1 | 15 dk, 1 saat, 24 saat (ve 179 gün) hareketsizlik kullanıcıyı çıkarmaz | `tests/persistent-session.test.ts` → "hareketsizlik oturumu kapatmaz"<br>`e2e/session.spec.ts` → "15 dk, 1 saat ve 24 saat hareketsizlik kullanıcıyı çıkarmaz" |
+| 15.0 | "Oturumu açık tut" işaretsizse kalıcı çerez oluşmaz; 8 saat / 30 dk; admin 8 saat / 15 dk | `tests/session-policy.test.ts`; `e2e/session.spec.ts` → "'oturumu açık tut' işaretsizse kalıcı çerez oluşmaz", "yönetici oturumu işaretli olsa bile kalıcı olmaz" |
+| 15.1 | (İşaretli) 15 dk, 1 saat, 24 saat (ve 179 gün) hareketsizlik kullanıcıyı çıkarmaz | `tests/persistent-session.test.ts` → "hareketsizlik oturumu kapatmaz"<br>`e2e/session.spec.ts` → "15 dk, 1 saat ve 24 saat hareketsizlik kullanıcıyı çıkarmaz" |
 | 15.2 | Tarayıcı kapatılıp açıldığında kalıcı çerezle oturum devam eder | `e2e/session.spec.ts` → "tarayıcı kapatılıp yeniden açıldığında oturum devam eder" |
 | 15.3 | Kaydırmalı yenileme bitişi güvenli biçimde uzatır | `tests/persistent-session.test.ts` → "kaydırmalı yenileme"<br>`e2e/session.spec.ts` → "uzun aradan sonra bitiş zamanı sessizce ileri alınır" |
 | 15.4 | Yenileme her API çağrısında DB yazmaz | `tests/persistent-session.test.ts` → "her API çağrısında veritabanına YAZILMAZ"<br>`e2e/session.spec.ts` → "her API çağrısı veritabanına yazmaz" |
@@ -272,8 +285,8 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 ## 20. Veritabanı yetki sınırı ve RLS testleri (pgTAP + gerçek JWT)
 
-`supabase/tests/rls.test.sql` — **73 test**. Çalıştırma: `npm run test:db`
-(Supabase CLI + Docker; `supabase db reset` ile 0001→0007 temiz uygulanır).
+`supabase/tests/rls.test.sql` — **124 test**. Çalıştırma: `npm run test:db`
+(Supabase CLI + Docker; `supabase db reset` ile 0001→0010 temiz uygulanır).
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
@@ -298,7 +311,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 > Çıkış kodları: `0` geçti, `1` başarısız, **`2` çalıştırılamadı** (CLI veya
 > Docker yok). Komut ortam uygun değilse testleri çalıştırılmış gibi
-> raporlamaz. Son koşum: yerel Supabase yığınında 73/73 geçti; uzak proje yok.
+> raporlamaz. Son koşum: yerel Supabase yığınında 124/124 geçti; uzak proje yok.
 
 ## 21. Temiz kaynak paketi
 
@@ -312,3 +325,30 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop.png`
 (`e2e/screenshots.spec.ts` tarafından üretilir).
+
+## 22. Muhasebe motoru (Sprint 1)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 22.1 | ÖRNEK 1 — ağırlıklı ortalama (15 g, 57.000, 3.800; 4.100 → 61.500, +4.500) | `tests/accounting.test.ts` → "ÖRNEK 1"; pgTAP "ÖRNEK 1"; `e2e/portfolio.spec.ts` → "ÖRNEK 1" |
+| 22.2 | ÖRNEK 2 — market baseline + alış (526.000 / 5.009,52…; Karışık maliyet; K/Z 0'dan başlar) | `tests/accounting.test.ts` → "ÖRNEK 2"; `e2e/portfolio.spec.ts` → "bugünden itibaren takip" |
+| 22.3 | ÖRNEK 3 — çeyrek (14 adet, 154.600, 11.042,857…) | `tests/accounting.test.ts` → "ÖRNEK 3"; `e2e/portfolio.spec.ts` → "gerçek maliyet (toplam)" |
+| 22.4 | ÖRNEK 4 — satış ortalamayı değiştirmez; realized/unrealized ayrı; toplam 4.900 | `tests/accounting.test.ts` → "ÖRNEK 4"; pgTAP "ÖRNEK 4"; `e2e/portfolio.spec.ts` → "ÖRNEK 4" |
+| 22.5 | ÖRNEK 5 — masraflar maliyete eklenir (50.600 / 5.060) | `tests/accounting.test.ts`; pgTAP; E2E "ÖRNEK 5" |
+| 22.6 | ÖRNEK 6 — toplam ödenen modu; işçilik ikinci kez eklenmez | `tests/accounting.test.ts`; pgTAP "ÖRNEK 6" |
+| 22.7 | ÖRNEK 7 — eşzamanlı iki 7 g satış 10 g'ı aşamaz | `tests/integrity.test.ts` → "ÖRNEK 7"; Postgres satır kilidi (`0010`) |
+| 22.8 | ÖRNEK 8 — idempotency: tek işlem, replay, farklı içerik conflict | `tests/integrity.test.ts` → "ÖRNEK 8"; pgTAP "ÖRNEK 8"; E2E "aynı istek kimliği"; `accounting:smoke` |
+| 22.9 | ÖRNEK 9 — geçmiş alış iptali sonraki satışı aşırıya düşürürse reddedilir | `tests/integrity.test.ts` → "ÖRNEK 9"; pgTAP "ÖRNEK 9" |
+| 22.10 | ÖRNEK 10 — 0,1 + 0,2 = 0,3; kayan nokta artığı yok | `tests/accounting.test.ts` → "ÖRNEK 10"; pgTAP; E2E "ondalık dize" |
+| 22.11 | Yeni kullanıcı boş portföyle başlar; örnek varlık yok | `tests/accounting.test.ts` → "boş portföy"; E2E "yeni hesap tamamen boş açılır" |
+| 22.12 | OPENING_BALANCE snapshot'ı sonradan değişmez; stale fiyatla oluşturulamaz | pgTAP "MARKET_BASELINE" bloğu; `tests/commands.test.ts` |
+| 22.13 | Pozisyon sıfırlanınca maliyet artığı kalmaz; adet ürününe ondalık girilemez; 6 ondalık gram | `tests/accounting.test.ts` → "pozisyon kuralları"; `tests/commands.test.ts` |
+| 22.14 | Farklı ürünlerin maliyetleri karışmaz; geçmiş değişince sonraki durum yeniden hesaplanır | `tests/accounting.test.ts`; `tests/integrity.test.ts` → "geçmiş tarihli işlem" |
+| 22.15 | Void hard delete olmaz; düzeltme eski kaydı REPLACED yapar | `tests/integrity.test.ts` → "void / replacement"; E2E "iptal hard delete değildir", "düzeltme" |
+| 22.16 | Admin yalnız okur; User A, User B işlem ID'siyle işlem yapamaz | `tests/admin-service.test.ts`; `tests/authorization-matrix.test.ts`; `e2e/security.spec.ts` |
+| 22.17 | GET uçları veri değiştirmez; CSRF'siz mutation reddedilir | E2E "GET uçları veri değiştirmez"; `e2e/security.spec.ts` → CSRF bloğu |
+| 22.18 | Dashboard realized/unrealized karıştırmaz; baseline varsa "Takip başlangıcından itibaren" etiketi | `tests/accounting.test.ts` → ÖRNEK 2/4; E2E "bugünden itibaren takip" |
+| 22.19 | Mock fiyat gerçek fiyat gibi etiketlenmez | `tests/prices.test.ts`; E2E "fiyat kaynağı test verisi" |
+| 22.20 | Özellik testleri: miktar negatif olmaz, sıfırda maliyet sıfır, satış ortalamayı korur, bölünmüş alış = toplu alış, replay deterministik | `tests/accounting.test.ts` → "özellik testleri" |
+| 22.21 | Defter ↔ projeksiyon tutarlılığı | `npm run accounting:verify`; pgTAP "ledger_verify" |
+| 22.22 | 390/768/1440 px görünümleri geçer | Playwright projeleri; E2E "tüm ekranlarda yatay taşma yoktur" |

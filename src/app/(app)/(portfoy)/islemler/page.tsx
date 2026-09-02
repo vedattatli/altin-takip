@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 
-import { TransactionsView } from "@/components/transactions-view";
+import { TransactionsView, type LedgerFormKind } from "@/components/transactions-view";
 
 export const metadata: Metadata = { title: "İşlemler" };
+
+const FORM_BY_PARAM: Record<string, LedgerFormKind> = {
+  mevcut: "opening",
+  alis: "buy",
+  satis: "sell",
+  // Eski bağlantı: ?yeni=1 -> yeni alış
+  "1": "buy",
+};
 
 export default async function TransactionsPage({
   searchParams,
@@ -10,5 +18,7 @@ export default async function TransactionsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  return <TransactionsView initialFormOpen={params.yeni === "1"} />;
+  const raw = params.ekle ?? params.yeni;
+  const key = Array.isArray(raw) ? raw[0] : raw;
+  return <TransactionsView initialForm={key ? (FORM_BY_PARAM[key] ?? null) : null} />;
 }

@@ -1,6 +1,16 @@
 import type { AdminAuditLog, UserProfile, UserRole, UserStatus } from "@/auth/types";
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import type {
+  LedgerAppendRequest,
+  LedgerAppendResult,
+  LedgerEntry,
+  LedgerReplaceResult,
+  LedgerVoidResult,
+  ProductPosition,
+} from "@/domain/accounting/types";
+import type { PortfolioMeta } from "@/domain/types";
 import type { DataScope } from "./actor";
+
+export type { LedgerAppendResult, LedgerReplaceResult, LedgerVoidResult };
 
 /**
  * Kimlik doğrulama + veri arka ucu sözleşmesi.
@@ -17,6 +27,10 @@ import type { DataScope } from "./actor";
  *
  * Yetkilendirme, denetim kaydı ve iş kuralları arka uçta DEĞİL, servis
  * katmanında (AuthService / AdminService / UserPortfolioService) uygulanır.
+ *
+ * İŞLEM DEFTERİ KAYNAK GERÇEKTİR
+ * Finansal veri yalnızca eklenir (append) ya da durumu değişir (VOID/REPLACED);
+ * hard delete yoktur. Pozisyonlar defterden yeniden oynatılarak türetilir.
  */
 
 export interface CreateUserRequest {
@@ -24,6 +38,16 @@ export interface CreateUserRequest {
   displayName: string;
   temporaryPassword: string;
   role: UserRole;
+}
+
+/** Oturum ömür politikası (giriş anında belirlenir, oturum kaydına yazılır). */
+export interface SessionPolicy {
+  /** true: kalıcı çerez + 180 gün kaydırmalı ömür. false: tarayıcı oturumu çerezi. */
+  persistent: boolean;
+  /** Kalıcı olmayan oturumda hareketsizlik sınırı (ms). Kalıcıda null. */
+  idleTimeoutMs: number | null;
+  /** Mutlak ömür (ms). Kalıcıda kaydırmalı ömür, kalıcı olmayanda sabit üst sınır. */
+  absoluteLifetimeMs: number;
 }
 
 /** Yeni oluşturulan oturum. `token` yalnızca çereze yazılır; sunucuda özeti saklanır. */
@@ -34,19 +58,25 @@ export interface SessionRecord {
   expiresAt: string;
   createdAt: string;
   deviceLabel: string;
+  persistent: boolean;
 }
 
 /** Çözülmüş oturum: profil ve süre bilgileri. */
 export interface ResolvedSession {
   sessionId: string;
   profile: UserProfile;
-  /** Kaydırmalı bitiş zamanı (ISO). */
+  /** Etkin bitiş zamanı (ISO): kalıcıda kaydırmalı, kalıcı olmayanda mutlak. */
   expiresAt: string;
+  /** Kalıcı olmayan oturumda hareketsizlik bitişi; kalıcıda null. */
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
+  persistent: boolean;
   lastSeenAt: string;
   /** Bitiş zamanının en son ileri alındığı an. */
   renewedAt: string;
   /** Oturum kimliğinin en son yenilendiği an. */
   rotatedAt: string;
+  createdAt: string;
   deviceLabel: string;
 }
 
@@ -55,6 +85,7 @@ export interface SessionTouch {
   lastSeenAt: string;
   expiresAt?: string;
   renewedAt?: string;
+  idleExpiresAt?: string;
 }
 
 /** Yönetici ve kullanıcı ekranları için güvenli oturum özeti (ham IP / UA YOK). */
@@ -64,6 +95,7 @@ export interface StoredSessionSummary {
   lastSeenAt: string;
   expiresAt: string;
   deviceLabel: string;
+  persistent: boolean;
 }
 
 /** Portföy provisioning eksik. GET yolu veri oluşturmaz; onarım gerekir. */
@@ -78,11 +110,45 @@ export class PortfolioNotProvisionedError extends Error {
 export class OversellError extends Error {
   constructor(
     readonly productId: string,
-    readonly available: number,
+    readonly available: string,
   ) {
     super("Satış miktarı elinizdeki miktarı aşamaz.");
     this.name = "OversellError";
   }
+}
+
+/** Aynı idempotency anahtarı farklı içerikle geldi. Servis katmanı 409'a çevirir. */
+export class IdempotencyConflictError extends Error {
+  constructor(readonly clientRequestId: string) {
+    super("Aynı istek kimliği farklı bir işlem içeriğiyle daha önce kullanılmış.");
+    this.name = "IdempotencyConflictError";
+  }
+}
+
+/** Kayıt bulunamadı ya da bu kapsamda değil. Servis katmanı 404'e çevirir. */
+export class LedgerEntryNotFoundError extends Error {
+  constructor(readonly entryId: string) {
+    super("İşlem bulunamadı.");
+    this.name = "LedgerEntryNotFoundError";
+  }
+}
+
+/** Yalnızca AKTİF kayıt iptal edilebilir / düzeltilebilir. Servis 409'a çevirir. */
+export class LedgerEntryNotActiveError extends Error {
+  constructor(readonly entryId: string) {
+    super("Bu işlem zaten iptal edilmiş veya düzeltilmiş.");
+    this.name = "LedgerEntryNotActiveError";
+  }
+}
+
+export interface LedgerVerifyResult {
+  checked: number;
+  mismatches: {
+    productId: string;
+    field: string;
+    stored: string | null;
+    recomputed: string | null;
+  }[];
 }
 
 export interface AuthBackend {
@@ -101,15 +167,20 @@ export interface AuthBackend {
   verifyPasswordForUser(userId: string, password: string): Promise<boolean>;
   setPassword(userId: string, newPassword: string): Promise<void>;
 
-  // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
-  createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord>;
+  // --- Oturum ---
+  createSession(
+    userId: string,
+    now: number,
+    deviceLabel: string,
+    policy: SessionPolicy,
+  ): Promise<SessionRecord>;
   /**
-   * Jetonu çözer. Süresi geçen, iptal edilen veya sahibi pasif olan oturum
-   * reddedilir. Yakın zamanda yenilenmiş kimliğin ESKİ hâli, kısa bir
-   * tolerans süresi boyunca kabul edilir (uçuştaki istekler düşmesin diye).
+   * Jetonu çözer. Süresi geçen (hareketsizlik veya mutlak), iptal edilen veya
+   * sahibi pasif olan oturum reddedilir. Yakın zamanda yenilenmiş kimliğin
+   * ESKİ hâli, kısa bir tolerans süresi boyunca kabul edilir.
    */
   resolveSession(token: string, now: number): Promise<ResolvedSession | null>;
-  /** last_seen / bitiş zamanını yazar. Çağıran taraf sıklığı sınırlar. */
+  /** last_seen / bitiş zamanlarını yazar. Çağıran taraf sıklığı sınırlar. */
   touchSession(sessionId: string, patch: SessionTouch): Promise<void>;
   /**
    * Oturum kimliğini yeniler: yeni jeton üretir, eski jetonu `graceMs`
@@ -152,7 +223,7 @@ export interface AuthBackend {
    */
   provisionMissingDefaults(): Promise<number>;
 
-  // --- Portföy verisi (DataScope ile korunur) ---
+  // --- Portföy (DataScope ile korunur) ---
   /**
    * Portföyü OKUR; yoksa PortfolioNotProvisionedError fırlatır.
    * Bu metot hiçbir koşulda veri OLUŞTURMAZ.
@@ -162,10 +233,27 @@ export interface AuthBackend {
     scope: DataScope,
     patch: { name?: string; displayName?: string },
   ): Promise<PortfolioMeta>;
-  listTransactions(scope: DataScope): Promise<Transaction[]>;
-  /** Aşırı satış kontrolü ATOMİK yapılır; eşzamanlı istekler kuralı bozamaz. */
-  createTransaction(scope: DataScope, input: TransactionInput): Promise<Transaction>;
-  updateTransaction(scope: DataScope, id: string, input: TransactionInput): Promise<Transaction>;
-  deleteTransaction(scope: DataScope, id: string): Promise<void>;
-  clearTransactions(scope: DataScope): Promise<void>;
+
+  // --- İşlem defteri (append-only; hard delete YOK) ---
+  /** Bütün kayıtlar (ACTIVE, VOID, REPLACED). Salt okuma; hiçbir şey yazmaz. */
+  listLedger(scope: DataScope): Promise<LedgerEntry[]>;
+  /** Türetilmiş pozisyonlar. Salt okuma; hiçbir şey yazmaz. */
+  listPositions(scope: DataScope): Promise<ProductPosition[]>;
+  /**
+   * Yeni defter kaydı ekler; pozisyonu aynı işlem içinde atomik olarak yeniden
+   * oluşturur; negatif miktarı engeller; idempotency anahtarını uygular.
+   */
+  appendLedgerEntry(scope: DataScope, request: LedgerAppendRequest): Promise<LedgerAppendResult>;
+  /** Kaydı VOID yapar (hard delete yok); sonraki satış negatife düşerse reddeder. */
+  voidLedgerEntry(scope: DataScope, entryId: string, reason: string): Promise<LedgerVoidResult>;
+  /** Kaydı REPLACED yapar ve yerine yeni kayıt ekler; tek işlem. */
+  replaceLedgerEntry(
+    scope: DataScope,
+    entryId: string,
+    request: LedgerAppendRequest,
+  ): Promise<LedgerReplaceResult>;
+  /** Tüm aktif kayıtları VOID yapar. Döndürülen sayı iptal edilen kayıt adedidir. */
+  voidAllLedgerEntries(scope: DataScope, reason: string): Promise<number>;
+  /** Defteri yeniden oynatıp türetilmiş pozisyonlarla karşılaştırır. */
+  verifyLedger(scope: DataScope): Promise<LedgerVerifyResult>;
 }

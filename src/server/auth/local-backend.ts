@@ -1,25 +1,41 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { normalizeUsername } from "@/auth/username";
 import {
-  SESSION_ROLLING_LIFETIME_MS,
   TEST_OVERRIDE_TOKEN,
   type AdminAuditLog,
   type UserProfile,
   type UserStatus,
 } from "@/auth/types";
-import { requireProduct } from "@/domain/catalog";
-import { findNegativeHolding } from "@/domain/portfolio";
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import {
+  LedgerOversellError,
+  replayLedger,
+  replayProduct,
+  resolveLedgerAmounts,
+  type LedgerAppendRequest,
+  type LedgerEntry,
+  type PriceSnapshotRecord,
+  type ProductPosition,
+} from "@/domain/accounting";
+import { getProduct } from "@/domain/catalog";
+import type { PortfolioMeta } from "@/domain/types";
 import type { DataScope } from "./actor";
 import {
+  IdempotencyConflictError,
+  LedgerEntryNotActiveError,
+  LedgerEntryNotFoundError,
   OversellError,
   PortfolioNotProvisionedError,
   type AuthBackend,
   type CreateUserRequest,
+  type LedgerAppendResult,
+  type LedgerReplaceResult,
+  type LedgerVerifyResult,
+  type LedgerVoidResult,
   type ResolvedSession,
+  type SessionPolicy,
   type SessionRecord,
   type SessionTouch,
   type StoredSessionSummary,
@@ -53,7 +69,7 @@ interface StoredUser {
   passwordHash: string;
 }
 
-/** Kalıcı oturum kaydı. Çerezdeki jetonun kendisi değil, özeti saklanır. */
+/** Oturum kaydı. Çerezdeki jetonun kendisi değil, özeti saklanır. */
 interface StoredSession {
   id: string;
   tokenHash: string;
@@ -63,13 +79,28 @@ interface StoredSession {
   userId: string;
   /** Kaba cihaz tanımı; ham User-Agent veya IP saklanmaz. */
   deviceLabel: string;
+  /** true: "oturumumu açık tut" (kalıcı çerez, kaydırmalı ömür). false: tarayıcı oturumu. */
+  persistent: boolean;
   createdAt: string;
   lastSeenAt: string;
   renewedAt: string;
   rotatedAt: string;
-  /** Kaydırmalı bitiş zamanı. */
+  /** Etkin bitiş: kalıcıda kaydırmalı, kalıcı olmayanda mutlak. */
   expiresAt: string;
+  /** Kalıcı olmayan oturumda hareketsizlik bitişi. */
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
   revokedAt: string | null;
+}
+
+/** Defter kaydı + sahibi. Değiştirilmez; yalnızca durumu değişir. */
+interface StoredLedgerEntry extends LedgerEntry {
+  userId: string;
+  requestHash: string | null;
+}
+
+interface StoredSnapshot extends PriceSnapshotRecord {
+  userId: string;
 }
 
 interface StoredPortfolio extends PortfolioMeta {
@@ -82,10 +113,14 @@ interface StoreShape {
   sessions: StoredSession[];
   audit: AdminAuditLog[];
   portfolios: StoredPortfolio[];
-  transactions: (Transaction & { userId: string })[];
+  /** İşlem defteri (append-only). */
+  ledger: StoredLedgerEntry[];
+  snapshots: StoredSnapshot[];
+  /** Deterministik sıralama için artan defter sırası. */
+  ledgerSequence: number;
 }
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 
 function emptyStore(): StoreShape {
   return {
@@ -94,7 +129,68 @@ function emptyStore(): StoreShape {
     sessions: [],
     audit: [],
     portfolios: [],
-    transactions: [],
+    ledger: [],
+    snapshots: [],
+    ledgerSequence: 0,
+  };
+}
+
+/** Eski (0.6) düz işlem kaydı biçimi — deftere taşınır. */
+interface LegacyTransaction {
+  id: string;
+  userId: string;
+  portfolioId: string;
+  productId: string;
+  side: "buy" | "sell";
+  quantity: number;
+  unit: "gram" | "adet";
+  tradedAt: string;
+  unitPrice: number;
+  feeAmount: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function legacyToLedger(row: LegacyTransaction, sequence: number): StoredLedgerEntry {
+  const quantity = String(row.quantity);
+  const unitPrice = String(row.unitPrice);
+  const fees = String(row.feeAmount ?? 0);
+  const amounts = resolveLedgerAmounts({
+    kind: row.side === "sell" ? "SELL" : "BUY",
+    quantity,
+    pricingInputMode: "UNIT_PRICE",
+    unitPrice,
+    totalAmount: null,
+    fees,
+    workmanship: "0",
+    baselineSnapshot: null,
+  });
+  return {
+    id: row.id,
+    userId: row.userId,
+    portfolioId: row.portfolioId,
+    productId: row.productId,
+    kind: row.side === "sell" ? "SELL" : "BUY",
+    quantity,
+    unit: row.unit,
+    occurredAt: row.tradedAt,
+    pricingInputMode: "UNIT_PRICE",
+    ...amounts,
+    costBasisOrigin: "ACTUAL",
+    priceSnapshotId: null,
+    priceSnapshot: null,
+    note: row.note ?? "",
+    status: "ACTIVE",
+    voidedAt: null,
+    voidReason: null,
+    replacesTransactionId: null,
+    replacedByTransactionId: null,
+    clientRequestId: null,
+    requestHash: null,
+    ledgerSequence: sequence,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -180,11 +276,32 @@ export class LocalAuthBackend implements AuthBackend {
   private read(): StoreShape {
     if (!this.filePath || !existsSync(this.filePath)) return emptyStore();
     try {
-      const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoreShape>;
+      const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoreShape> & {
+        transactions?: LegacyTransaction[];
+      };
       const merged: StoreShape = { ...emptyStore(), ...parsed, version: STORE_VERSION };
-      // Eski sürümün cihaz modlu / hareketsizlik süreli oturumları taşınmaz;
-      // kullanıcı bir kez yeniden giriş yapar ve kalıcı oturum alır.
-      if ((parsed.version ?? 0) < STORE_VERSION) merged.sessions = [];
+      const version = parsed.version ?? 0;
+      if (version < 3) {
+        // Çok eski oturum kayıtları taşınmaz; kullanıcı yeniden giriş yapar.
+        merged.sessions = [];
+      } else if (version < 4) {
+        // 0.6 oturumları "kalıcı tercih verilmiş" kabul edilir; geçersiz kılınmaz.
+        merged.sessions = merged.sessions.map((session) => ({
+          ...session,
+          persistent: session.persistent ?? true,
+          idleExpiresAt: session.idleExpiresAt ?? null,
+          absoluteExpiresAt: session.absoluteExpiresAt ?? session.expiresAt,
+        }));
+      }
+      if (version < 4 && Array.isArray(parsed.transactions) && merged.ledger.length === 0) {
+        // Düz işlem kayıtları deftere taşınır (ACTUAL / UNIT_PRICE).
+        const sorted = [...parsed.transactions].sort((a, b) =>
+          a.tradedAt === b.tradedAt ? a.createdAt.localeCompare(b.createdAt) : a.tradedAt.localeCompare(b.tradedAt),
+        );
+        merged.ledger = sorted.map((row, index) => legacyToLedger(row, index + 1));
+        merged.ledgerSequence = sorted.length;
+      }
+      delete (merged as { transactions?: unknown }).transactions;
       return merged;
     } catch {
       return emptyStore();
@@ -260,14 +377,21 @@ export class LocalAuthBackend implements AuthBackend {
     return user;
   }
 
-  // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
+  // --- Oturum (politika: kalıcı / tarayıcı oturumu / admin) ---
 
-  async createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord> {
+  async createSession(
+    userId: string,
+    now: number,
+    deviceLabel: string,
+    policy: SessionPolicy,
+  ): Promise<SessionRecord> {
     this.refresh();
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
     const timestamp = new Date(now).toISOString();
-    const expiresAt = new Date(now + SESSION_ROLLING_LIFETIME_MS).toISOString();
+    const expiresAt = new Date(now + policy.absoluteLifetimeMs).toISOString();
+    const idleExpiresAt =
+      policy.idleTimeoutMs === null ? null : new Date(now + policy.idleTimeoutMs).toISOString();
 
     this.store.sessions.push({
       id,
@@ -276,15 +400,18 @@ export class LocalAuthBackend implements AuthBackend {
       previousTokenValidUntil: null,
       userId,
       deviceLabel,
+      persistent: policy.persistent,
       createdAt: timestamp,
       lastSeenAt: timestamp,
       renewedAt: timestamp,
       rotatedAt: timestamp,
       expiresAt,
+      idleExpiresAt,
+      absoluteExpiresAt: expiresAt,
       revokedAt: null,
     });
     this.write();
-    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel };
+    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel, persistent: policy.persistent };
   }
 
   /** Güncel özet veya tolerans süresi dolmamış eski özet ile eşleşen oturum. */
@@ -303,8 +430,10 @@ export class LocalAuthBackend implements AuthBackend {
     const session = this.findSessionByTokenHash(hashToken(token), now);
     if (!session || session.revokedAt !== null) return null;
 
-    // Hareketsizlik sınırı YOKTUR; yalnızca kaydırmalı bitiş zamanı kontrol edilir.
-    if (Date.parse(session.expiresAt) <= now) {
+    const idleExpired = session.idleExpiresAt !== null && Date.parse(session.idleExpiresAt) <= now;
+    const expired =
+      Date.parse(session.expiresAt) <= now || Date.parse(session.absoluteExpiresAt) <= now;
+    if (idleExpired || expired) {
       this.store.sessions = this.store.sessions.filter((candidate) => candidate.id !== session.id);
       this.write();
       return null;
@@ -317,9 +446,13 @@ export class LocalAuthBackend implements AuthBackend {
       sessionId: session.id,
       profile: toProfile(user),
       expiresAt: session.expiresAt,
+      idleExpiresAt: session.idleExpiresAt,
+      absoluteExpiresAt: session.absoluteExpiresAt,
+      persistent: session.persistent,
       lastSeenAt: session.lastSeenAt,
       renewedAt: session.renewedAt,
       rotatedAt: session.rotatedAt,
+      createdAt: session.createdAt,
       deviceLabel: session.deviceLabel,
     };
   }
@@ -329,8 +462,12 @@ export class LocalAuthBackend implements AuthBackend {
     const session = this.store.sessions.find((candidate) => candidate.id === sessionId);
     if (!session || session.revokedAt !== null) return;
     session.lastSeenAt = patch.lastSeenAt;
-    if (patch.expiresAt) session.expiresAt = patch.expiresAt;
+    if (patch.expiresAt) {
+      session.expiresAt = patch.expiresAt;
+      if (session.persistent) session.absoluteExpiresAt = patch.expiresAt;
+    }
     if (patch.renewedAt) session.renewedAt = patch.renewedAt;
+    if (patch.idleExpiresAt) session.idleExpiresAt = patch.idleExpiresAt;
     this.write();
   }
 
@@ -390,7 +527,8 @@ export class LocalAuthBackend implements AuthBackend {
         (session) =>
           session.userId === userId &&
           session.revokedAt === null &&
-          Date.parse(session.expiresAt) > now,
+          Date.parse(session.expiresAt) > now &&
+          (session.idleExpiresAt === null || Date.parse(session.idleExpiresAt) > now),
       )
       .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))
       .map((session) => ({
@@ -399,6 +537,7 @@ export class LocalAuthBackend implements AuthBackend {
         lastSeenAt: session.lastSeenAt,
         expiresAt: session.expiresAt,
         deviceLabel: session.deviceLabel,
+        persistent: session.persistent,
       }));
   }
 
@@ -406,7 +545,11 @@ export class LocalAuthBackend implements AuthBackend {
     this.refresh();
     const before = this.store.sessions.length;
     this.store.sessions = this.store.sessions.filter(
-      (session) => session.revokedAt === null && Date.parse(session.expiresAt) > now,
+      (session) =>
+        session.revokedAt === null &&
+        Date.parse(session.expiresAt) > now &&
+        Date.parse(session.absoluteExpiresAt) > now &&
+        (session.idleExpiresAt === null || Date.parse(session.idleExpiresAt) > now),
     );
     const removed = before - this.store.sessions.length;
     if (removed > 0) this.write();
@@ -506,7 +649,9 @@ export class LocalAuthBackend implements AuthBackend {
     this.store.users = this.store.users.filter((user) => user.id !== userId);
     this.store.sessions = this.store.sessions.filter((session) => session.userId !== userId);
     this.store.portfolios = this.store.portfolios.filter((row) => row.userId !== userId);
-    this.store.transactions = this.store.transactions.filter((row) => row.userId !== userId);
+    // Hesap silme: cascade — defter ve anlık görüntüler de gider (tek hard delete durumu).
+    this.store.ledger = this.store.ledger.filter((row) => row.userId !== userId);
+    this.store.snapshots = this.store.snapshots.filter((row) => row.userId !== userId);
     this.write();
   }
 
@@ -580,116 +725,265 @@ export class LocalAuthBackend implements AuthBackend {
     return portfolio;
   }
 
-  async listTransactions(scope: DataScope): Promise<Transaction[]> {
-    this.refresh();
-    return this.store.transactions
-      .filter((row) => row.userId === scope.userId)
-      .map(({ userId: _ignored, ...tx }) => tx);
+  // --- İşlem defteri (append-only; hard delete YOK) ---
+
+  private userLedger(userId: string): LedgerEntry[] {
+    return this.store.ledger
+      .filter((row) => row.userId === userId)
+      .map(({ userId: _ignored, requestHash: _hash, ...entry }) => entry);
   }
 
-  /**
-   * Birim tutarlılığı ve aşırı satış kontrolü.
-   * Kontrol ile yazma arasına başka bir isteğin girmesi serialize() ile engellenir.
-   */
-  private assertConsistent(rows: Transaction[], input: TransactionInput): void {
-    const product = requireProduct(input.productId);
-    if (input.unit !== product.unit) {
+  private static requestHashOf(request: LedgerAppendRequest): string {
+    const { clientRequestId: _id, baselineSnapshot: _snap, ...rest } = request;
+    const canonical = JSON.stringify(
+      Object.fromEntries(Object.entries(rest).sort(([a], [b]) => (a < b ? -1 : 1))),
+    );
+    return createHash("sha256").update(canonical).digest("hex");
+  }
+
+  private positionOf(entries: readonly LedgerEntry[], productId: string): ProductPosition {
+    try {
+      return replayProduct(entries, productId);
+    } catch (error) {
+      if (error instanceof LedgerOversellError) {
+        throw new OversellError(error.productId, error.available);
+      }
+      throw error;
+    }
+  }
+
+  async listLedger(scope: DataScope): Promise<LedgerEntry[]> {
+    this.refresh();
+    return this.userLedger(scope.userId).sort((a, b) => {
+      if (a.occurredAt !== b.occurredAt) return a.occurredAt < b.occurredAt ? 1 : -1;
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+      return b.ledgerSequence - a.ledgerSequence;
+    });
+  }
+
+  async listPositions(scope: DataScope): Promise<ProductPosition[]> {
+    this.refresh();
+    const positions = replayLedger(this.userLedger(scope.userId));
+    return [...positions.values()].sort((a, b) => (a.productId < b.productId ? -1 : 1));
+  }
+
+  /** Deftere kayıt yazar. Çağıran taraf serialize() içinde olmalıdır. */
+  private buildEntry(
+    scope: DataScope,
+    portfolioId: string,
+    request: LedgerAppendRequest,
+    options: { replacesTransactionId?: string | null } = {},
+  ): { entry: StoredLedgerEntry; snapshot: StoredSnapshot | null } {
+    const product = getProduct(request.productId);
+    if (!product) throw new Error(`Bilinmeyen altın ürünü: ${request.productId}`);
+    if (request.unit !== product.unit) {
       throw new Error(`${product.name} için birim "${product.unit}" olmalıdır.`);
     }
-    const negative = findNegativeHolding(rows);
-    if (negative) {
-      const bought = rows
-        .filter((row) => row.productId === negative.productId && row.side === "buy")
-        .reduce((sum, row) => sum + row.quantity, 0);
-      const sold = rows
-        .filter((row) => row.productId === negative.productId && row.side === "sell")
-        .reduce((sum, row) => sum + row.quantity, 0);
-      throw new OversellError(negative.productId, Math.max(0, bought - sold + input.quantity));
+
+    let snapshot: StoredSnapshot | null = null;
+    if (request.costBasisOrigin === "MARKET_BASELINE") {
+      if (request.kind !== "OPENING_BALANCE" || !request.baselineSnapshot) {
+        throw new Error("Piyasa başlangıcı yalnızca mevcut altın için ve fiyat anlık görüntüsüyle kullanılabilir.");
+      }
+      if (request.baselineSnapshot.providerStatus !== "ok") {
+        throw new Error("Fiyat verisi kullanılamıyor; takip başlangıcı oluşturulamaz.");
+      }
+      snapshot = {
+        ...request.baselineSnapshot,
+        id: randomUUID(),
+        createdAt: this.nowISO(),
+        userId: scope.userId,
+      };
     }
+
+    const amounts = resolveLedgerAmounts(request);
+    const timestamp = this.nowISO();
+    this.store.ledgerSequence += 1;
+
+    const { userId: _ignored, ...snapshotRecord } = snapshot ?? ({} as StoredSnapshot);
+    const entry: StoredLedgerEntry = {
+      id: randomUUID(),
+      userId: scope.userId,
+      portfolioId,
+      productId: request.productId,
+      kind: request.kind,
+      quantity: request.quantity,
+      unit: product.unit,
+      occurredAt: request.occurredAt,
+      pricingInputMode: request.pricingInputMode,
+      ...amounts,
+      costBasisOrigin: request.costBasisOrigin,
+      priceSnapshotId: snapshot?.id ?? null,
+      priceSnapshot: snapshot ? (snapshotRecord as PriceSnapshotRecord) : null,
+      note: request.note,
+      status: "ACTIVE",
+      voidedAt: null,
+      voidReason: null,
+      replacesTransactionId: options.replacesTransactionId ?? null,
+      replacedByTransactionId: null,
+      clientRequestId: request.clientRequestId,
+      requestHash: LocalAuthBackend.requestHashOf(request),
+      ledgerSequence: this.store.ledgerSequence,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    return { entry, snapshot };
   }
 
-  async createTransaction(scope: DataScope, input: TransactionInput): Promise<Transaction> {
+  private replayResult(userId: string, request: LedgerAppendRequest): LedgerAppendResult | null {
+    if (!request.clientRequestId) return null;
+    const existing = this.store.ledger.find(
+      (row) => row.userId === userId && row.clientRequestId === request.clientRequestId,
+    );
+    if (!existing) return null;
+    if (existing.requestHash !== LocalAuthBackend.requestHashOf(request)) {
+      throw new IdempotencyConflictError(request.clientRequestId);
+    }
+    const { userId: _ignored, requestHash: _hash, ...entry } = existing;
+    return {
+      entry,
+      position: this.positionOf(this.userLedger(userId), existing.productId),
+      replayed: true,
+    };
+  }
+
+  async appendLedgerEntry(scope: DataScope, request: LedgerAppendRequest): Promise<LedgerAppendResult> {
     return this.serialize(scope.userId, async () => {
       const portfolio = await this.getPortfolio(scope);
       this.refresh();
-      const timestamp = this.nowISO();
-      const transaction: Transaction = {
-        ...input,
-        id: randomUUID(),
-        portfolioId: portfolio.id,
-        createdAt: timestamp,
-        updatedAt: timestamp,
+
+      const replayed = this.replayResult(scope.userId, request);
+      if (replayed) return replayed;
+
+      const { entry, snapshot } = this.buildEntry(scope, portfolio.id, request);
+      const { userId: _ignored, requestHash: _hash, ...plain } = entry;
+      // Negatif miktar kontrolü: kronolojik HER an (geçmiş tarihli kayıt dâhil).
+      const position = this.positionOf([...this.userLedger(scope.userId), plain], request.productId);
+
+      if (snapshot) this.store.snapshots.push(snapshot);
+      this.store.ledger.push(entry);
+      this.write();
+      return { entry: plain, position, replayed: false };
+    });
+  }
+
+  private requireActiveEntry(userId: string, entryId: string): StoredLedgerEntry {
+    const row = this.store.ledger.find((candidate) => candidate.id === entryId && candidate.userId === userId);
+    // Başkasına ait veya olmayan kayıt AYNI hatayı verir (kimlik tahmini bilgi sızdırmaz).
+    if (!row) throw new LedgerEntryNotFoundError(entryId);
+    if (row.status !== "ACTIVE") throw new LedgerEntryNotActiveError(entryId);
+    return row;
+  }
+
+  async voidLedgerEntry(scope: DataScope, entryId: string, reason: string): Promise<LedgerVoidResult> {
+    return this.serialize(scope.userId, () => {
+      this.refresh();
+      const row = this.requireActiveEntry(scope.userId, entryId);
+      const voidedAt = this.nowISO();
+      const candidate: StoredLedgerEntry = {
+        ...row,
+        status: "VOID",
+        voidedAt,
+        voidReason: reason.slice(0, 140),
+        updatedAt: voidedAt,
       };
 
-      const existing = this.store.transactions
-        .filter((row) => row.userId === scope.userId)
-        .map(({ userId: _ignored, ...tx }) => tx);
-      this.assertConsistent([...existing, transaction], input);
+      // Geçmiş bir alışın iptali sonraki satışı negatife düşürüyorsa TÜMÜ reddedilir; defter değişmez.
+      const projected = this.userLedger(scope.userId).map((entry) =>
+        entry.id === entryId ? stripStored(candidate) : entry,
+      );
+      const position = this.positionOf(projected, row.productId);
 
-      this.store.transactions.push({ ...transaction, userId: scope.userId });
+      Object.assign(row, candidate);
       this.write();
-      return transaction;
+      return { entry: stripStored(row), position };
     });
   }
 
-  async updateTransaction(
+  async replaceLedgerEntry(
     scope: DataScope,
-    id: string,
-    input: TransactionInput,
-  ): Promise<Transaction> {
+    entryId: string,
+    request: LedgerAppendRequest,
+  ): Promise<LedgerReplaceResult> {
     return this.serialize(scope.userId, async () => {
+      const portfolio = await this.getPortfolio(scope);
       this.refresh();
-      const row = this.store.transactions.find(
-        (candidate) => candidate.id === id && candidate.userId === scope.userId,
-      );
-      if (!row) throw new Error("İşlem bulunamadı.");
+      const row = this.store.ledger.find((candidate) => candidate.id === entryId && candidate.userId === scope.userId);
+      if (!row) throw new LedgerEntryNotFoundError(entryId);
 
-      const updated = { ...row, ...input, updatedAt: this.nowISO() };
-      const projected = this.store.transactions
-        .filter((candidate) => candidate.userId === scope.userId)
-        .map((candidate) => (candidate.id === id ? updated : candidate))
-        .map(({ userId: _ignored, ...tx }) => tx);
-      this.assertConsistent(projected, input);
+      // Idempotent tekrar
+      if (request.clientRequestId) {
+        const existing = this.store.ledger.find(
+          (candidate) => candidate.userId === scope.userId && candidate.clientRequestId === request.clientRequestId,
+        );
+        if (existing) {
+          if (existing.replacesTransactionId !== entryId) {
+            throw new IdempotencyConflictError(request.clientRequestId);
+          }
+          const replayed = this.replayResult(scope.userId, request)!;
+          return { voided: stripStored(row), entry: replayed.entry, positions: [replayed.position] };
+        }
+      }
 
-      Object.assign(row, updated);
+      if (row.status !== "ACTIVE") throw new LedgerEntryNotActiveError(entryId);
+
+      const { entry: created, snapshot } = this.buildEntry(scope, portfolio.id, request, {
+        replacesTransactionId: entryId,
+      });
+      const voidedAt = this.nowISO();
+      const replaced: StoredLedgerEntry = {
+        ...row,
+        status: "REPLACED",
+        voidedAt,
+        voidReason: "Düzeltildi",
+        replacedByTransactionId: created.id,
+        updatedAt: voidedAt,
+      };
+
+      const projected = [
+        ...this.userLedger(scope.userId).map((entry) => (entry.id === entryId ? stripStored(replaced) : entry)),
+        stripStored(created),
+      ];
+      const positions = [this.positionOf(projected, row.productId)];
+      if (created.productId !== row.productId) {
+        positions.push(this.positionOf(projected, created.productId));
+      }
+
+      Object.assign(row, replaced);
+      if (snapshot) this.store.snapshots.push(snapshot);
+      this.store.ledger.push(created);
       this.write();
-      const { userId: _unused, ...transaction } = updated;
-      return transaction;
+      return { voided: stripStored(row), entry: stripStored(created), positions };
     });
   }
 
-  async deleteTransaction(scope: DataScope, id: string): Promise<void> {
+  async voidAllLedgerEntries(scope: DataScope, reason: string): Promise<number> {
     return this.serialize(scope.userId, () => {
       this.refresh();
-
-      // Başkasına ait veya olmayan kayıt SESSİZCE başarılı sayılmaz.
-      const exists = this.store.transactions.some(
-        (row) => row.id === id && row.userId === scope.userId,
-      );
-      if (!exists) throw new Error("İşlem bulunamadı.");
-
-      const remaining = this.store.transactions
-        .filter((row) => row.userId === scope.userId && row.id !== id)
-        .map(({ userId: _ignored, ...tx }) => tx);
-
-      // Bir alışın silinmesi sonraki satışları geçersiz kılıyorsa engellenir.
-      const negative = findNegativeHolding(remaining);
-      if (negative) throw new OversellError(negative.productId, 0);
-
-      this.store.transactions = this.store.transactions.filter(
-        (row) => !(row.id === id && row.userId === scope.userId),
-      );
-      this.write();
+      const timestamp = this.nowISO();
+      let count = 0;
+      for (const row of this.store.ledger) {
+        if (row.userId !== scope.userId || row.status !== "ACTIVE") continue;
+        row.status = "VOID";
+        row.voidedAt = timestamp;
+        row.voidReason = reason.slice(0, 140);
+        row.updatedAt = timestamp;
+        count += 1;
+      }
+      if (count > 0) this.write();
+      return count;
     });
   }
 
-  async clearTransactions(scope: DataScope): Promise<void> {
-    return this.serialize(scope.userId, () => {
-      this.refresh();
-      this.store.transactions = this.store.transactions.filter(
-        (row) => row.userId !== scope.userId,
-      );
-      this.write();
-    });
+  async verifyLedger(scope: DataScope): Promise<LedgerVerifyResult> {
+    this.refresh();
+    // Yerel arka uçta pozisyon her zaman defterden türetilir; ayrı projeksiyon yoktur.
+    const positions = replayLedger(this.userLedger(scope.userId));
+    return { checked: positions.size, mismatches: [] };
   }
+}
+
+function stripStored(row: StoredLedgerEntry): LedgerEntry {
+  const { userId: _ignored, requestHash: _hash, ...entry } = row;
+  return entry;
 }

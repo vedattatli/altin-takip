@@ -272,6 +272,46 @@ async function main() {
     });
     expect("anon login_rate_limit_check ÇAĞIRAMAZ", denied(anonRpc) || anonRpc.status === 404, `${anonRpc.status} ${anonRpc.text.slice(0, 120)}`);
 
+    // --- Muhasebe defteri (Sprint 1): defter RPC'leri ve türetilmiş tablolar ---
+    console.log("authenticated JWT (defter / pozisyon):");
+    const ledgerRpc = await call("POST", "/rest/v1/rpc/ledger_append", {
+      token: userJwt,
+      body: { p_user_id: actualUserId, p_payload: {} },
+    });
+    expect("authenticated ledger_append ÇAĞIRAMAZ", denied(ledgerRpc) || ledgerRpc.status === 404, `${ledgerRpc.status} ${ledgerRpc.text.slice(0, 120)}`);
+    const ledgerListRpc = await call("POST", "/rest/v1/rpc/ledger_list", { token: userJwt, body: { p_user_id: actualUserId } });
+    expect("authenticated ledger_list ÇAĞIRAMAZ (okuma bile BFF'den)", denied(ledgerListRpc) || ledgerListRpc.status === 404, `${ledgerListRpc.status}`);
+    const positionsInsert = await call("POST", "/rest/v1/portfolio_positions", {
+      token: userJwt,
+      body: { portfolio_id: portfolioId, user_id: actualUserId, product_id: "gram-altin", quantity: "999" },
+    });
+    expect("authenticated portfolio_positions YAZAMAZ", denied(positionsInsert), `${positionsInsert.status} ${positionsInsert.text.slice(0, 120)}`);
+    const positionsPatch = await call("PATCH", `/rest/v1/portfolio_positions?user_id=eq.${actualUserId}`, {
+      token: userJwt,
+      body: { quantity: "999" },
+    });
+    expect("authenticated portfolio_positions DEĞİŞTİREMEZ", denied(positionsPatch), `${positionsPatch.status} ${positionsPatch.text.slice(0, 120)}`);
+    const snapshotInsert = await call("POST", "/rest/v1/price_snapshots", {
+      token: userJwt,
+      body: {
+        user_id: actualUserId,
+        product_id: "gram-altin",
+        liquidation_price: "1",
+        replacement_price: "1",
+        provider: "sahte",
+        market: "SAHTE",
+        provider_status: "ok",
+        provider_timestamp: new Date().toISOString(),
+        fetched_at: new Date().toISOString(),
+      },
+    });
+    expect("authenticated price_snapshots YAZAMAZ (sahte başlangıç fiyatı)", denied(snapshotInsert), `${snapshotInsert.status} ${snapshotInsert.text.slice(0, 120)}`);
+    const servicePositionsPatch = await call("PATCH", `/rest/v1/portfolio_positions?user_id=eq.${actualUserId}`, {
+      token: SERVICE_KEY,
+      body: { quantity: "999" },
+    });
+    expect("service_role bile portfolio_positions'ı elle DEĞİŞTİREMEZ", denied(servicePositionsPatch), `${servicePositionsPatch.status} ${servicePositionsPatch.text.slice(0, 120)}`);
+
     // --- BFF (service_role) yolu çalışır: sınır yanlış tarafı kapatmamış ---
     console.log("service_role (BFF yolu):");
     const bffRpc = await call("POST", "/rest/v1/rpc/create_transaction_checked", {
@@ -296,6 +336,33 @@ async function main() {
       ownTx.status === 200 && ownTx.json?.length === 1 && ownTx.json[0].user_id === actualUserId,
       `${ownTx.status} ${ownTx.text.slice(0, 120)}`,
     );
+
+    const ledgerAppend = await call("POST", "/rest/v1/rpc/ledger_append", {
+      token: SERVICE_KEY,
+      body: {
+        p_user_id: actualUserId,
+        p_payload: {
+          kind: "BUY", product_id: "gram-altin", quantity: "0.1", unit: "gram", occurred_at: "2026-02-02",
+          pricing_input_mode: "UNIT_PRICE", unit_price: "5000.33", total_amount: null, fees: "0", workmanship: "0",
+          cost_basis_origin: "ACTUAL", note: "", client_request_id: "probe-req-0001",
+        },
+      },
+    });
+    expect("service_role ledger_append ile defter kaydı yazar", ledgerAppend.status === 200 && ledgerAppend.json?.transaction?.quantity === "0.1", `${ledgerAppend.status} ${ledgerAppend.text.slice(0, 160)}`);
+    const ledgerReplay = await call("POST", "/rest/v1/rpc/ledger_append", {
+      token: SERVICE_KEY,
+      body: { p_user_id: actualUserId, p_payload: { ...JSON.parse(JSON.stringify({
+        kind: "BUY", product_id: "gram-altin", quantity: "0.1", unit: "gram", occurred_at: "2026-02-02",
+        pricing_input_mode: "UNIT_PRICE", unit_price: "5000.33", total_amount: null, fees: "0", workmanship: "0",
+        cost_basis_origin: "ACTUAL", note: "", client_request_id: "probe-req-0001",
+      })) } },
+    });
+    expect("aynı istek kimliği tekrar gönderilince replay döner (idempotency)", ledgerReplay.status === 200 && ledgerReplay.json?.replayed === true, `${ledgerReplay.status} ${ledgerReplay.text.slice(0, 160)}`);
+    const positions = await call("POST", "/rest/v1/rpc/positions_list", { token: SERVICE_KEY, body: { p_user_id: actualUserId } });
+    const gramPosition = Array.isArray(positions.json) ? positions.json.find((p) => p.productId === "gram-altin") : null;
+    expect("positions_list ondalık metin döner (1 + 0.1 = 1.1)", gramPosition?.quantity === "1.1", `${positions.status} ${positions.text.slice(0, 160)}`);
+    const ownPositions = await call("GET", "/rest/v1/portfolio_positions?select=product_id,quantity", { token: userJwt });
+    expect("authenticated kendi türetilmiş pozisyonunu okur (RLS)", ownPositions.status === 200 && ownPositions.json?.length === 1, `${ownPositions.status} ${ownPositions.text.slice(0, 120)}`);
   } finally {
     await cleanup(actualUserId);
   }

@@ -51,8 +51,9 @@ function pseudoRandom(seed: number): number {
   return (x - Math.floor(x)) * 2 - 1;
 }
 
-function roundMoney(value: number): number {
-  return Math.round(value * 100) / 100;
+/** Test fiyatı iki ondalıklı TL dizesi olarak üretilir; sonrasında kayan nokta hesabına girmez. */
+function moneyString(value: number): string {
+  return (Math.round(value * 100) / 100).toFixed(2);
 }
 
 export interface MockPriceProviderOptions {
@@ -117,9 +118,9 @@ export class MockPriceProvider implements PriceProvider {
 
       quotes[productId] = {
         productId,
-        // Alış her zaman ortanın altında, satış her zaman üstünde: buyPrice < sellPrice.
-        buyPrice: roundMoney(unitMid * (1 - spread)),
-        sellPrice: roundMoney(unitMid * (1 + spread)),
+        // Bozdurma her zaman ortanın altında, yeniden alım her zaman üstünde.
+        liquidationPrice: moneyString(unitMid * (1 - spread)),
+        replacementPrice: moneyString(unitMid * (1 + spread)),
         currency: "TRY",
         market: this.meta.market,
         provider: this.meta.id,

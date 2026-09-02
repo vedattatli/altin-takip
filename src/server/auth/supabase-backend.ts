@@ -6,16 +6,29 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { internalEmailForUsername } from "@/auth/internal-identity";
 import { normalizeUsername } from "@/auth/username";
 import type { AdminAuditLog, UserProfile, UserStatus } from "@/auth/types";
-import { SESSION_ROLLING_LIFETIME_MS } from "@/auth/types";
-import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
+import type {
+  LedgerAppendRequest,
+  LedgerEntry,
+  ProductPosition,
+} from "@/domain/accounting/types";
+import { LedgerAmountError } from "@/domain/accounting/amounts";
+import type { PortfolioMeta } from "@/domain/types";
 import { serverEnv } from "@/server/env";
 import type { DataScope } from "./actor";
 import {
+  IdempotencyConflictError,
+  LedgerEntryNotActiveError,
+  LedgerEntryNotFoundError,
   OversellError,
   PortfolioNotProvisionedError,
   type AuthBackend,
   type CreateUserRequest,
+  type LedgerAppendResult,
+  type LedgerReplaceResult,
+  type LedgerVerifyResult,
+  type LedgerVoidResult,
   type ResolvedSession,
+  type SessionPolicy,
   type SessionRecord,
   type SessionTouch,
   type StoredSessionSummary,
@@ -61,42 +74,14 @@ function toProfile(row: ProfileRow): UserProfile {
   };
 }
 
-interface TransactionRow {
-  id: string;
-  portfolio_id: string;
-  product_id: string;
-  side: "buy" | "sell";
-  quantity: number;
-  unit: "gram" | "adet";
-  traded_at: string;
-  unit_price: number;
-  fee_amount: number;
-  note: string;
-  created_at: string;
-  updated_at: string;
-}
-
-function toTransaction(row: TransactionRow): Transaction {
-  return {
-    id: row.id,
-    portfolioId: row.portfolio_id,
-    productId: row.product_id,
-    side: row.side,
-    quantity: Number(row.quantity),
-    unit: row.unit,
-    tradedAt: row.traded_at,
-    unitPrice: Number(row.unit_price),
-    feeAmount: Number(row.fee_amount),
-    note: row.note ?? "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 /** Postgres tarafındaki aşırı satış hatasının tanınması için işaret. */
 const OVERSELL_MARKER = "ALTIN_OVERSELL";
 /** Portföy provisioning eksikliğinin tanınması için işaret. */
 const NOT_PROVISIONED_MARKER = "ALTIN_PORTFOLIO_NOT_PROVISIONED";
+/** Aynı idempotency anahtarı farklı içerikle geldi. */
+const IDEMPOTENCY_MARKER = "ALTIN_IDEMPOTENCY_CONFLICT";
+/** İptal edilmiş / düzeltilmiş kayıt yeniden değiştirilmeye çalışıldı. */
+const NOT_ACTIVE_MARKER = "ALTIN_LEDGER_NOT_ACTIVE";
 
 function toPortfolio(row: Record<string, unknown>): PortfolioMeta {
   return {
@@ -112,6 +97,10 @@ interface SessionRow {
   id: string;
   user_id: string;
   expires_at: string;
+  idle_expires_at: string | null;
+  absolute_expires_at: string;
+  persistent: boolean;
+  created_at: string;
   last_seen_at: string;
   renewed_at: string;
   rotated_at: string;
@@ -121,7 +110,7 @@ interface SessionRow {
 }
 
 const SESSION_COLUMNS =
-  "id, user_id, expires_at, last_seen_at, renewed_at, rotated_at, revoked_at, device_label, previous_token_valid_until";
+  "id, user_id, expires_at, idle_expires_at, absolute_expires_at, persistent, created_at, last_seen_at, renewed_at, rotated_at, revoked_at, device_label, previous_token_valid_until";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -196,27 +185,35 @@ export class SupabaseAuthBackend implements AuthBackend {
 
   // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
 
-  async createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord> {
+  async createSession(
+    userId: string,
+    now: number,
+    deviceLabel: string,
+    policy: SessionPolicy,
+  ): Promise<SessionRecord> {
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
     const timestamp = new Date(now).toISOString();
-    const expiresAt = new Date(now + SESSION_ROLLING_LIFETIME_MS).toISOString();
+    const expiresAt = new Date(now + policy.absoluteLifetimeMs).toISOString();
+    const idleExpiresAt =
+      policy.idleTimeoutMs === null ? null : new Date(now + policy.idleTimeoutMs).toISOString();
 
     const { error } = await this.admin.from("app_sessions").insert({
       id,
       user_id: userId,
       token_hash: hashToken(token),
       device_label: deviceLabel,
+      persistent: policy.persistent,
       created_at: timestamp,
       last_seen_at: timestamp,
       renewed_at: timestamp,
       rotated_at: timestamp,
       expires_at: expiresAt,
-      // Eski sürümle uyum: absolute_expires_at aynı değeri taşır.
       absolute_expires_at: expiresAt,
+      idle_expires_at: idleExpiresAt,
     });
     if (error) fail("Oturum oluşturulamadı", error);
-    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel };
+    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel, persistent: policy.persistent };
   }
 
   private async findSessionRow(tokenHash: string, now: number): Promise<SessionRow | null> {
@@ -243,8 +240,11 @@ export class SupabaseAuthBackend implements AuthBackend {
     const row = await this.findSessionRow(hashToken(token), now);
     if (!row || row.revoked_at !== null) return null;
 
-    // Hareketsizlik sınırı YOKTUR; yalnızca kaydırmalı bitiş zamanı kontrol edilir.
-    if (Date.parse(row.expires_at) <= now) {
+    // Kalıcı olmayan oturumda hareketsizlik, her oturumda mutlak/kaydırmalı bitiş kontrol edilir.
+    const idleExpired = row.idle_expires_at !== null && Date.parse(row.idle_expires_at) <= now;
+    const expired =
+      Date.parse(row.expires_at) <= now || Date.parse(row.absolute_expires_at) <= now;
+    if (idleExpired || expired) {
       await this.admin.from("app_sessions").delete().eq("id", row.id);
       return null;
     }
@@ -256,9 +256,13 @@ export class SupabaseAuthBackend implements AuthBackend {
       sessionId: row.id,
       profile,
       expiresAt: row.expires_at,
+      idleExpiresAt: row.idle_expires_at,
+      absoluteExpiresAt: row.absolute_expires_at,
+      persistent: row.persistent,
       lastSeenAt: row.last_seen_at,
       renewedAt: row.renewed_at,
       rotatedAt: row.rotated_at,
+      createdAt: row.created_at,
       deviceLabel: row.device_label,
     };
   }
@@ -270,6 +274,7 @@ export class SupabaseAuthBackend implements AuthBackend {
       update.absolute_expires_at = patch.expiresAt;
     }
     if (patch.renewedAt) update.renewed_at = patch.renewedAt;
+    if (patch.idleExpiresAt) update.idle_expires_at = patch.idleExpiresAt;
     await this.admin.from("app_sessions").update(update).eq("id", sessionId).is("revoked_at", null);
   }
 
@@ -302,7 +307,9 @@ export class SupabaseAuthBackend implements AuthBackend {
     const { data, error } = await this.admin
       .from("app_sessions")
       .delete()
-      .or(`expires_at.lte.${timestamp},revoked_at.not.is.null`)
+      .or(
+        `expires_at.lte.${timestamp},absolute_expires_at.lte.${timestamp},idle_expires_at.lte.${timestamp},revoked_at.not.is.null`,
+      )
       .select("id");
     if (error) return 0;
     return (data ?? []).length;
@@ -339,10 +346,11 @@ export class SupabaseAuthBackend implements AuthBackend {
   async listSessionsForUser(userId: string, now: number): Promise<StoredSessionSummary[]> {
     const { data } = await this.admin
       .from("app_sessions")
-      .select("id, created_at, last_seen_at, expires_at, device_label")
+      .select("id, created_at, last_seen_at, expires_at, idle_expires_at, device_label, persistent")
       .eq("user_id", userId)
       .is("revoked_at", null)
       .gt("expires_at", new Date(now).toISOString())
+      .or(`idle_expires_at.is.null,idle_expires_at.gt.${new Date(now).toISOString()}`)
       .order("last_seen_at", { ascending: false });
     return (data ?? []).map((row) => ({
       id: row.id as string,
@@ -350,6 +358,7 @@ export class SupabaseAuthBackend implements AuthBackend {
       lastSeenAt: row.last_seen_at as string,
       expiresAt: row.expires_at as string,
       deviceLabel: (row.device_label as string | null) ?? "Bilinmeyen cihaz",
+      persistent: Boolean(row.persistent),
     }));
   }
 
@@ -554,97 +563,159 @@ export class SupabaseAuthBackend implements AuthBackend {
     return toPortfolio(data);
   }
 
-  async listTransactions(scope: DataScope): Promise<Transaction[]> {
-    const { data, error } = await this.admin
-      .from("transactions")
-      .select("*")
-      .eq("user_id", scope.userId)
-      .order("traded_at", { ascending: true });
-    if (error) fail("İşlemler okunamadı", error);
-    return (data as TransactionRow[]).map(toTransaction);
-  }
+  // --- İşlem defteri (Postgres RPC; append-only; hard delete YOK) ---
 
   /**
-   * Aşırı satış kontrolü ATOMİK yapılır.
-   *
-   * Kontrol ile yazma tek bir Postgres fonksiyonu içinde, kullanıcının portföy
-   * satırı kilitlenerek (SELECT ... FOR UPDATE) yürütülür. Böylece iki eşzamanlı
-   * satış isteği birlikte eldeki miktarı aşamaz.
-   * Bkz. supabase/migrations/0005_security_hardening.sql
+   * Bütün finansal mutation'lar SECURITY DEFINER RPC'lerden geçer
+   * (supabase/migrations/0010_accounting_rpc.sql): portföy satırı + ürün
+   * düzeyinde kilit, idempotency, defter kaydı ve pozisyon yeniden oluşturma
+   * TEK transaction içindedir. Sayısal alanlar JSON'da metin olarak gelir.
    */
-  private async callTransactionRpc(
+  private async ledgerRpc<T>(
     fn: string,
     params: Record<string, unknown>,
     context: string,
-  ): Promise<TransactionRow | null> {
+    meta: { productId?: string; clientRequestId?: string | null; transactionId?: string } = {},
+  ): Promise<T> {
+    // PostgREST fonksiyonu parametre ADLARIYLA eşler; hata bağlamı için ek parametre GÖNDERİLMEZ.
     const { data, error } = await this.admin.rpc(fn, params);
     if (error) {
-      if (error.message.includes(OVERSELL_MARKER)) {
-        throw new OversellError(String(params.p_product_id ?? ""), 0);
+      const message = error.message ?? "";
+      if (message.includes(OVERSELL_MARKER)) {
+        const available = /mevcut ([0-9.]+)/.exec(message)?.[1] ?? "0";
+        throw new OversellError(meta.productId ?? "", available);
       }
-      if (error.message.includes(NOT_PROVISIONED_MARKER)) {
+      if (message.includes(NOT_PROVISIONED_MARKER)) {
         throw new PortfolioNotProvisionedError(String(params.p_user_id ?? ""));
+      }
+      if (message.includes(IDEMPOTENCY_MARKER)) {
+        throw new IdempotencyConflictError(meta.clientRequestId ?? "");
+      }
+      if (message.includes(NOT_ACTIVE_MARKER)) {
+        throw new LedgerEntryNotActiveError(meta.transactionId ?? "");
+      }
+      if (message.includes("İşlem bulunamadı")) {
+        throw new LedgerEntryNotFoundError(meta.transactionId ?? "");
+      }
+      if (error.code === "P0004") {
+        throw new LedgerAmountError(message);
       }
       fail(context, error);
     }
-    return (data as TransactionRow | null) ?? null;
+    return data as T;
   }
 
-  async createTransaction(scope: DataScope, input: TransactionInput): Promise<Transaction> {
-    const row = await this.callTransactionRpc(
-      "create_transaction_checked",
-      {
-        p_user_id: scope.userId,
-        p_product_id: input.productId,
-        p_side: input.side,
-        p_quantity: input.quantity,
-        p_unit: input.unit,
-        p_traded_at: input.tradedAt,
-        p_unit_price: input.unitPrice,
-        p_fee_amount: input.feeAmount,
-        p_note: input.note,
-      },
+  private static payloadOf(scope: DataScope, request: LedgerAppendRequest): Record<string, unknown> {
+    return {
+      kind: request.kind,
+      product_id: request.productId,
+      quantity: request.quantity,
+      unit: request.unit,
+      occurred_at: request.occurredAt,
+      pricing_input_mode: request.pricingInputMode,
+      unit_price: request.unitPrice,
+      total_amount: request.totalAmount,
+      fees: request.fees,
+      workmanship: request.workmanship,
+      cost_basis_origin: request.costBasisOrigin,
+      note: request.note,
+      client_request_id: request.clientRequestId,
+      created_by: scope.userId,
+      baseline_snapshot: request.baselineSnapshot
+        ? {
+            liquidation_price: request.baselineSnapshot.liquidationPrice,
+            replacement_price: request.baselineSnapshot.replacementPrice,
+            provider: request.baselineSnapshot.provider,
+            market: request.baselineSnapshot.market,
+            currency: request.baselineSnapshot.currency,
+            provider_status: request.baselineSnapshot.providerStatus,
+            is_real_market_data: request.baselineSnapshot.isRealMarketData,
+            provider_timestamp: request.baselineSnapshot.providerTimestamp,
+            fetched_at: request.baselineSnapshot.fetchedAt,
+          }
+        : null,
+    };
+  }
+
+  async listLedger(scope: DataScope): Promise<LedgerEntry[]> {
+    const rows = await this.ledgerRpc<LedgerEntry[] | null>(
+      "ledger_list",
+      { p_user_id: scope.userId },
+      "İşlemler okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async listPositions(scope: DataScope): Promise<ProductPosition[]> {
+    const rows = await this.ledgerRpc<ProductPosition[] | null>(
+      "positions_list",
+      { p_user_id: scope.userId },
+      "Pozisyonlar okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async appendLedgerEntry(scope: DataScope, request: LedgerAppendRequest): Promise<LedgerAppendResult> {
+    const result = await this.ledgerRpc<{
+      transaction: LedgerEntry;
+      position: ProductPosition;
+      replayed: boolean;
+    }>(
+      "ledger_append",
+      { p_user_id: scope.userId, p_payload: SupabaseAuthBackend.payloadOf(scope, request) },
       "İşlem kaydedilemedi",
+      { productId: request.productId, clientRequestId: request.clientRequestId },
     );
-    if (!row) throw new Error("İşlem kaydedilemedi.");
-    return toTransaction(row);
+    return { entry: result.transaction, position: result.position, replayed: Boolean(result.replayed) };
   }
 
-  async updateTransaction(
+  async voidLedgerEntry(scope: DataScope, entryId: string, reason: string): Promise<LedgerVoidResult> {
+    const result = await this.ledgerRpc<{ transaction: LedgerEntry; position: ProductPosition }>(
+      "ledger_void",
+      { p_user_id: scope.userId, p_transaction_id: entryId, p_reason: reason },
+      "İşlem iptal edilemedi",
+      { transactionId: entryId },
+    );
+    return { entry: result.transaction, position: result.position };
+  }
+
+  async replaceLedgerEntry(
     scope: DataScope,
-    id: string,
-    input: TransactionInput,
-  ): Promise<Transaction> {
-    const row = await this.callTransactionRpc(
-      "update_transaction_checked",
+    entryId: string,
+    request: LedgerAppendRequest,
+  ): Promise<LedgerReplaceResult> {
+    const result = await this.ledgerRpc<{
+      voided: LedgerEntry;
+      transaction: LedgerEntry;
+      positions: ProductPosition[];
+    }>(
+      "ledger_replace",
       {
         p_user_id: scope.userId,
-        p_transaction_id: id,
-        p_product_id: input.productId,
-        p_side: input.side,
-        p_quantity: input.quantity,
-        p_unit: input.unit,
-        p_traded_at: input.tradedAt,
-        p_unit_price: input.unitPrice,
-        p_fee_amount: input.feeAmount,
-        p_note: input.note,
+        p_transaction_id: entryId,
+        p_payload: SupabaseAuthBackend.payloadOf(scope, request),
       },
-      "İşlem güncellenemedi",
+      "İşlem düzeltilemedi",
+      { productId: request.productId, clientRequestId: request.clientRequestId, transactionId: entryId },
     );
-    if (!row) throw new Error("İşlem bulunamadı.");
-    return toTransaction(row);
+    return { voided: result.voided, entry: result.transaction, positions: result.positions };
   }
 
-  async deleteTransaction(scope: DataScope, id: string): Promise<void> {
-    await this.callTransactionRpc(
-      "delete_transaction_checked",
-      { p_user_id: scope.userId, p_transaction_id: id },
-      "İşlem silinemedi",
+  async voidAllLedgerEntries(scope: DataScope, reason: string): Promise<number> {
+    const count = await this.ledgerRpc<number>(
+      "ledger_void_all",
+      { p_user_id: scope.userId, p_reason: reason },
+      "İşlemler iptal edilemedi",
     );
+    return Number(count ?? 0);
   }
 
-  async clearTransactions(scope: DataScope): Promise<void> {
-    const { error } = await this.admin.from("transactions").delete().eq("user_id", scope.userId);
-    if (error) fail("İşlemler silinemedi", error);
+  async verifyLedger(scope: DataScope): Promise<LedgerVerifyResult> {
+    const result = await this.ledgerRpc<LedgerVerifyResult>(
+      "ledger_verify",
+      { p_user_id: scope.userId },
+      "Defter doğrulanamadı",
+    );
+    return { checked: Number(result?.checked ?? 0), mismatches: result?.mismatches ?? [] };
   }
 }

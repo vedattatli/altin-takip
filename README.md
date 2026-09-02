@@ -76,6 +76,10 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
                                      Data API doğrudan yazma yüzeyinin kapatılması,
                                      varsayılan portföy provisioning tetikleyicisi
    0007_persistent_sessions.sql   -> kalıcı, kaydırmalı ve kimliği yenilenen oturum modeli
+   0008_session_policy.sql        -> "oturumumu açık tut" tercihi; tarayıcı oturumu / admin sınırları
+   0009_portfolio_accounting.sql  -> işlem defteri sütunları, price_snapshots, portfolio_positions,
+                                     defter koruma tetikleyicileri, idempotency indeksi
+   0010_accounting_rpc.sql        -> atomik defter RPC'leri (ekle / iptal / düzelt / doğrula)
    ```
 
    Bakım görevleri (pg_cron) için ayrıca bir kez `supabase/setup/maintenance-cron.sql`
@@ -88,7 +92,7 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    ```
 
    Bu komut `supabase db reset` ile 0001'den itibaren tüm migration'ları temiz bir
-   veritabanına uygular ve 73 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
+   veritabanına uygular ve 124 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
 
    ```bash
    npm run test:data-api
@@ -116,12 +120,14 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | Veritabanı yetki sınırı + RLS testleri: temiz DB'ye 0001→0007 uygular, 73 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0010 uygular, 124 pgTAP testi koşar (Supabase CLI + Docker) |
 | `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
 | `npm run admin:create` | İlk yönetici hesabını oluşturur |
 | `npm run admin:repair` | Eksik varsayılan portföy/tercih kayıtlarını idempotent biçimde tamamlar (yönetici onarımı) |
+| `npm run accounting:verify` | Defteri yeniden oynatır; türetilmiş pozisyonlar ve Postgres içi doğrulamayla karşılaştırır; tutarsızlıkta başarısız olur |
+| `npm run accounting:smoke` | Yalnızca yerel Supabase: gerçek RPC yolundan kabul örneklerini (1, 4, 8, 9, VOID/REPLACE, MARKET_BASELINE) koşar |
 | `npm run icons` | PWA simgelerini koddan üretir |
 | `npm run db:catalog` | Ürün kataloğunu SQL migration'ına yazar |
 
@@ -158,42 +164,39 @@ Bu sürümde yalnızca `MockPriceProvider` kullanılır ve arayüzde **Test Veri
 
 ---
 
-## Oturum modeli: her cihazda bir kez giriş
+## Oturum modeli: "Bu cihazda oturumumu açık tut"
 
-Kullanıcılar sık sık yeniden giriş yapmaz. Giriş ekranında cihaz türü **sorulmaz**;
-telefon, tablet ve bilgisayarda aynı, sade ve kalıcı oturum modeli kullanılır.
+Giriş ekranında tek bir tercih vardır; cihaz türü sorulmaz.
 
-| Konu | Davranış |
-| --- | --- |
-| Oturum çerezi | Kalıcı; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, üretimde `__Host-` önekli |
-| Ömür | 180 gün **kaydırmalı**: aktivitede bitiş sessizce ileri alınır (en fazla 24 saatte bir DB yazımı) |
-| Kimlik yenileme | Oturum kimliği 7 günde bir sessizce yenilenir; eski kimlik 60 sn tolerans süresiyle geçerlidir |
-| Hareketsizlik | **Otomatik çıkış yok.** 15 dk, 1 saat, 24 saat hareketsizlik oturumu kapatmaz |
-| Tarayıcı/PWA/cihaz yeniden başlatma | Oturum devam eder |
-| Aynı anda birden çok cihaz | Serbest; her cihaz ilk girişten sonra hesabı hatırlar |
-| Normal "Çıkış" | Yalnızca bu cihazın oturumunu kapatır |
-| "Tüm cihazlardan çıkış yap" | Ayarlar sayfasından; kullanıcının bütün oturumlarını iptal eder |
+| Durum | Çerez | Sunucu sınırı |
+| --- | --- | --- |
+| Kutu **işaretli** | Kalıcı (`__Host-`, HttpOnly, Secure, SameSite=Lax) | 180 gün **kaydırmalı** ömür (bitiş ≤ 24 saatte bir ileri alınır), kimlik 7 günde bir sessizce yenilenir; yalnızca açık çıkış veya güvenlik olayıyla kapanır |
+| Kutu **işaretsiz** (varsayılan) | Tarayıcı oturumu çerezi (kapanınca silinir) | En fazla **8 saat** mutlak ömür, **30 dakika** hareketsizlik |
+| **Yönetici** hesabı | Her zaman tarayıcı oturumu çerezi | Tercihten bağımsız en fazla **8 saat** mutlak, **15 dakika** hareketsizlik; asla kalıcı değil |
 
-Oturumun zorunlu olarak kapandığı güvenlik olayları: kullanıcı kendi parolasını
-değiştirirse **diğer** cihazlar kapanır; yönetici parolayı sıfırlarsa, hesabı
-pasifleştirirse, oturumları iptal ederse veya hesap silinirse **bütün** cihazlar
-kapanır. İptal edilmiş veya silinmiş bir oturum kimliği hiçbir istekte kabul edilmez.
+- Tercih `localStorage`/`sessionStorage`'a yazılmaz; sunucudaki oturum kaydında (`persistent`) tutulur.
+- Mevcut 180 günlük kullanıcı oturumları "kalıcı tercih verilmiş" kabul edilir ve geçersiz kılınmaz;
+  mevcut admin oturumları migration ile 8 saat / 15 dakika sınırına çekilir.
+- Normal "Çıkış" yalnızca bu cihazı kapatır; Ayarlar'daki "Tüm cihazlardan çıkış yap" bütün oturumları
+  iptal eder. Parola sıfırlama, pasifleştirme, yönetici iptali ve hesap silme bütün cihazları kapatır.
+- Oturum kimliği yalnızca `HttpOnly` çerezde taşınır; erişim/yenileme jetonu, parola veya dahili
+  e-posta tarayıcı deposuna yazılmaz. Süresi dolan kayıtlar `purge_expired_sessions()` ile temizlenir.
 
-Her cihazda:
+Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 4 ve 16.
 
-- Oturum kimliği yalnızca `HttpOnly` çerezde taşınır; JavaScript ile okunamaz.
-- Erişim/yenileme jetonu, parola veya dahili e-posta `localStorage` /
-  `sessionStorage` / IndexedDB gibi JavaScript'ten okunabilir depolara **yazılmaz**.
-- Portföy bulut veritabanında saklanır; mobil PWA ve masaüstü aynı portföyü gösterir.
-- Servis çalışanı `/api/*` yanıtlarını ve kimliği doğrulanmış sayfaları önbelleğe almaz;
-  internet yokken oturum varmış gibi yeni finansal işlem kabul edilmez.
-- Bildirim, push, konum veya kamera izni istenmez; PWA kurulumu isteğe bağlıdır.
+## Muhasebe modeli (özet)
 
-Yönetici, kullanıcının aktif oturumlarını cihaz etiketi (örn. "Chrome · Windows"),
-giriş ve son görülme zamanıyla görür; tek oturumu veya tümünü kapatabilir.
-Ham IP veya cihaz parmak izi **saklanmaz**.
+Yöntem **ürün bazlı hareketli ağırlıklı ortalama maliyet**; kaynak gerçek **append-only işlem
+defteri**dir (kayıt silinmez; iptal edilir veya düzeltilir). Üç akış: **Mevcut Altını Ekle**
+(gerçek / tahmini maliyet veya "bugünden itibaren takip et" = piyasa başlangıç değeri),
+**Yeni Alış Ekle** (birim fiyat + masraflar veya toplam ödenen tutar) ve **Satış Ekle**
+(birim satış fiyatı veya net tahsilat). Bütün miktar ve tutarlar ondalık dize olarak taşınır;
+hesaplar `decimal.js` ve PostgreSQL `numeric` ile yapılır. Her mutation atomik RPC'den geçer,
+eşzamanlı satış eldeki miktarı aşamaz, aynı `clientRequestId` ile tekrar gönderim ikinci kayıt
+oluşturmaz. Ayrıntı ve örnek hesaplar: [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md).
 
-Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 4, 12 ve 16.
+> Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girilen verilere ve
+> bilgilendirme amaçlı (bu sürümde test) fiyatlara dayalı bir portföy takip aracıdır.
 
 ## Güvenlik özeti
 
@@ -203,14 +206,17 @@ Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 4, 12 ve 16.
   Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 14.
 - **Geçici parolalı kullanıcı** portföy, işlem ve yönetim uçlarını kullanamaz
   (`PASSWORD_CHANGE_REQUIRED`).
-- **Oturum sunucuda yönetilir:** 180 gün kaydırmalı ömür, 7 günde bir sessiz kimlik
-  yenileme, iptal listesi. Hareketsizlik zaman aşımı yoktur; oturumu yalnızca açık
-  çıkış veya güvenlik olayları kapatır.
+- **Oturum sunucuda yönetilir:** "oturumumu açık tut" işaretliyse 180 gün kaydırmalı
+  ömür ve 7 günde bir sessiz kimlik yenileme; işaretsizse 8 saat / 30 dk; admin için
+  her zaman 8 saat / 15 dk. Güvenlik olayları bütün cihazları kapatır.
+- **Muhasebe defteri:** finansal kayıtlar yalnızca eklenir ya da VOID/REPLACED olur;
+  pozisyonlar atomik RPC içinde defterden yeniden oynatılır; idempotency anahtarı
+  çift gönderimi engeller; türetilmiş pozisyon tablosuna `service_role` bile elle yazamaz.
 - **Veritabanı yetki sınırı (0006):** anon/authenticated rolleri kişisel ve finansal
   tablolara **doğrudan yazamaz** (INSERT/UPDATE/DELETE grant'ı yok); kritik
   SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal mutation
   yalnızca BFF + kontrollü RPC yolundan geçer. GRANT ve RLS iki ayrı katmandır ve
-  73 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
+  124 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
 - **Üretim sertleştirme:** `APP_ORIGIN` zorunlu (Host'tan türetilmez),
   `TRUSTED_PROXY_PROVIDER` ile `X-Forwarded-For` yalnızca güvenilir vekilde okunur,
   ham IP hiçbir yere yazılmaz, giriş hız sınırı IP / kullanıcı adı / kombinasyon
@@ -253,5 +259,6 @@ senkronize olmaz.
 | [docs/SECURITY.md](docs/SECURITY.md) | Kimlik doğrulama, yetkilendirme, RLS, denetim kaydı |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Tablolar, ilişkiler, indeksler |
 | [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md) | Kabul kriterleri ve karşılık gelen testler |
+| [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md) | Hareketli ağırlıklı ortalama, açılış bakiyesi, K/Z, decimal ve iptal/düzeltme politikası |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sonraki sprintler |
 | [CLAUDE.md](CLAUDE.md) | Bu depoda çalışan yapay zekâ ajanları için kurallar |

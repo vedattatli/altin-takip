@@ -194,7 +194,13 @@ Tüm API route'ları `apiRoute()` ile sarılır (`src/server/security/route.ts`)
 
 Bir route'un bu kontrolü atlaması test tarafından engellenir.
 
-## 3.8 Oturum yaşam döngüsü (kalıcı, kaydırmalı, yenilenen kimlik)
+## 3.8 Oturum yaşam döngüsü (tercihe bağlı: kalıcı / tarayıcı oturumu / admin)
+
+Giriş gövdesindeki `keepSignedIn === true` ve rol, `sessionPolicyFor(role, keepSignedIn)` ile
+politikaya çevrilir: kullanıcı + işaretli → kalıcı (aşağıdaki akış); kullanıcı + işaretsiz →
+tarayıcı oturumu çerezi, 8 saat mutlak + 30 dk hareketsizlik (`idle_expires_at` ≤ 60 sn'de bir
+ileri alınır, süre uzatılmaz, kimlik yenilenmez); admin → her zaman 8 saat + 15 dk, asla kalıcı
+değil (kalıcı işaretli eski bir admin oturumu çözümlemede reddedilir).
 
 ```
 login(username, password, clientKey, deviceLabel)
@@ -253,23 +259,32 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 | Yöntem | Yol | Yetki |
 | --- | --- | --- |
-| POST | `/api/auth/login` | Herkese açık |
-| POST | `/api/auth/logout` | Herkese açık |
-| GET | `/api/auth/session` | Herkese açık (oturum yoksa `null`) |
+| POST | `/api/auth/login` | Herkese açık (`keepSignedIn` tercihi) |
+| POST | `/api/auth/logout` | Herkese açık (yalnızca bu cihaz) |
+| POST | `/api/auth/logout-all` | Oturum (geçici parolalı da geçer) — bütün cihazlar |
+| GET | `/api/auth/session` | Herkese açık (oturum yoksa `null`; `persistent` alanı) |
 | POST | `/api/auth/change-password` | Oturum (geçici parolalı da geçer) |
 | GET / PATCH | `/api/portfolio` | Kullanılabilir oturum (yalnızca kendi kaydı) |
-| GET / POST / DELETE | `/api/transactions` | Kullanılabilir oturum (yalnızca kendi kayıtları) |
-| PUT / DELETE | `/api/transactions/[id]` | Kullanılabilir oturum (yalnızca kendi kayıtları) |
+| GET | `/api/portfolio/summary` | Kullanılabilir oturum — sunucu tarafı pozisyon + değerleme (salt okuma) |
+| GET | `/api/transactions` | Kullanılabilir oturum — defter (ACTIVE/VOID/REPLACED) |
+| POST | `/api/transactions` | Kullanılabilir oturum — OPENING_BALANCE / BUY / SELL ekle (idempotent) |
+| DELETE | `/api/transactions` | Kullanılabilir oturum — tüm aktif kayıtları VOID yap |
+| PUT | `/api/transactions/[id]` | Kullanılabilir oturum — düzelt (REPLACED + yeni kayıt) |
+| DELETE | `/api/transactions/[id]` | Kullanılabilir oturum — iptal (VOID, sebep) |
 | GET / POST | `/api/admin/users` | Yönetici |
 | GET / PATCH / DELETE | `/api/admin/users/[id]` | Yönetici |
 | POST | `/api/admin/users/[id]/password` | Yönetici |
-| GET | `/api/admin/users/[id]/portfolio` | Yönetici (salt okunur) |
+| GET | `/api/admin/users/[id]/portfolio` | Yönetici (salt okunur; BUY/SELL/VOID/REPLACE yok) |
+| GET / DELETE | `/api/admin/users/[id]/sessions` | Yönetici |
+| DELETE | `/api/admin/users/[id]/sessions/[sessionId]` | Yönetici |
 | GET | `/api/admin/audit` | Yönetici |
 
 **Kayıt (register/signup) ucu bilinçli olarak yoktur** ve varlığı testle engellenir.
 
 Tüm yanıtlar tek zarf kullanır: başarıda `{ data }`, hatada `{ error, code }`.
-Durum değiştiren her uç origin + CSRF kontrolünden geçer (bkz. 3.7).
+Durum değiştiren her uç origin + CSRF kontrolünden geçer (bkz. 3.7). Miktar ve tutar
+alanları **ondalık dize** olarak taşınır; normal kullanıcı hiçbir uçta hedef `userId`
+gönderemez.
 
 ## 6. Depolama soyutlaması
 
@@ -348,5 +363,40 @@ Tarayıcı ──(anon / authenticated JWT, Data API)──▶ PostgREST ──�
 - Varsayılan portföy profil oluşturulurken tetikleyiciyle hazırlanır; `GET`
   yolları veri oluşturmaz; onarım `provision_missing_defaults()` /
   `npm run admin:repair` ile idempotenttir.
-- Doğrulama: `npm run test:db` (73 pgTAP, temiz DB'ye 0001→0007) ve
+- Doğrulama: `npm run test:db` (124 pgTAP, temiz DB'ye 0001→0010) ve
   `npm run test:data-api` (gerçek JWT ile PostgREST). Ayrıntı: SECURITY.md bölüm 22.
+
+## 11. Muhasebe motoru (Sprint 1)
+
+```
+İstemci formu ──(LedgerCommand, ondalık dize, clientRequestId)──▶ /api/transactions
+   │                                                                   │
+   │  parseLedgerCommand (sıkı doğrulama)                              ▼
+   │                                              UserPortfolioService.appendTransaction
+   │                                                MARKET_BASELINE ise: sunucu fiyat sağlayıcısından
+   │                                                anlık görüntü alır (istemci fiyatı YOK SAYILIR)
+   │                                                                   ▼
+   │                                              AuthBackend.appendLedgerEntry(scope, request)
+   │                                                Supabase: ledger_append RPC (tek transaction:
+   │                                                kilit → idempotency → ekle → rebuild → oversell)
+   │                                                Yerel: aynı kurallar, kullanıcı başına kuyruk
+   │                                                                   ▼
+   ▼                                              { entry, position, replayed }
+GET /api/portfolio/summary ──▶ positions_list + sunucu fiyatı ──▶ valuePositions (decimal)
+```
+
+- **Kaynak gerçek:** `public.transactions` (append-only). `portfolio_positions` yalnızca
+  projeksiyondur; `ledger_rebuild_position` ile yeniden oluşturulur ve `service_role` bile
+  doğrudan yazamaz.
+- **Motor:** `src/domain/accounting/` — `decimal.ts` (decimal.js, sıkı girdi ayrıştırma),
+  `amounts.ts` (alış/satış tutarları), `engine.ts` (yeniden oynatma, değerleme, etiketler),
+  `commands.ts` (komut doğrulama). Aynı algoritma `0010_accounting_rpc.sql` içinde
+  `ledger_replay_product` olarak vardır; `npm run accounting:verify` ikisini karşılaştırır.
+- **İstemci:** özet (pozisyon + değerleme) hesap modunda SUNUCUDAN gelir; demo modunda aynı
+  motor tarayıcıda çalışır (`src/storage/local-ledger.ts`). İstemci hiçbir sayıyı `Number`'a
+  çevirerek hesaplamaz; biçimlendirme decimal ile yuvarlandıktan sonra yapılır.
+- **İptal / düzeltme:** `DELETE /api/transactions/[id]` → `ledger_void` (VOID + sebep);
+  `PUT` → `ledger_replace` (eski REPLACED, yeni kayıt, tek transaction).
+- **Idempotency:** `clientRequestId` form ömrü boyunca sabittir; `(user_id, client_request_id)`
+  benzersiz; aynı içerik → replay, farklı içerik → 409.
+- Ayrıntı: [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md).

@@ -2,22 +2,25 @@
  * Fiyat sağlayıcı sözleşmesi.
  *
  * TEMEL KURALLAR
- * 1. buyPrice ve sellPrice birbirine ÇEVRİLMEZ, türetilmez, yer değiştirmez.
- *    buyPrice  = piyasanın alış fiyatı  (kullanıcı bozdurursa eline geçen)
- *    sellPrice = piyasanın satış fiyatı (kullanıcı yeniden alırsa ödediği)
+ * 1. liquidationPrice ve replacementPrice birbirine ÇEVRİLMEZ, türetilmez, yer değiştirmez.
+ *    liquidationPrice = kuyumcunun kullanıcıdan ALDIĞI fiyat (bozdurma değeri, gerçekleşmemiş K/Z)
+ *    replacementPrice = kuyumcunun kullanıcıya SATTIĞI fiyat (yeniden alım değeri)
+ *    Kullanıcının gerçek işlem fiyatları için ayrı isimler kullanılır:
+ *    acquisitionUnitPrice (alış) ve disposalUnitPrice (satış). Piyasa alanlarıyla karıştırılmaz.
  * 2. Bir sağlayıcı başarısız olursa BAŞKA BİR PİYASANIN fiyatı sessizce
  *    gösterilmez. Sonuç "unavailable" döner ve arayüz bunu açıkça yazar.
  * 3. Test verisi hiçbir koşulda gerçek piyasa verisi gibi etiketlenmez.
+ * 4. Fiyatlar ONDALIK DİZE olarak taşınır; kayan nokta hesabına girmez.
  */
 
 export type PriceStatus = "ok" | "stale" | "unavailable";
 
 export interface PriceQuote {
   productId: string;
-  /** Piyasanın alış fiyatı (TL). Kullanıcının bozdurma karşılığı. */
-  buyPrice: number;
-  /** Piyasanın satış fiyatı (TL). Kullanıcının yeniden alım maliyeti. */
-  sellPrice: number;
+  /** Kuyumcunun kullanıcıdan altını aldığı fiyat (TL, ondalık dize). Bozdurma değeri. */
+  liquidationPrice: string;
+  /** Kuyumcunun kullanıcıya altını sattığı fiyat (TL, ondalık dize). Yeniden alım değeri. */
+  replacementPrice: string;
   currency: "TRY";
   /** Fiyatın alındığı piyasa. Test verisinde "TEST". */
   market: string;

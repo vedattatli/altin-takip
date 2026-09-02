@@ -8,6 +8,11 @@ import {
   type LoginRateLimiter,
 } from "@/server/rate-limit/types";
 import {
+  ADMIN_SESSION_ABSOLUTE_MS,
+  ADMIN_SESSION_IDLE_MS,
+  BROWSER_SESSION_ABSOLUTE_MS,
+  BROWSER_SESSION_IDLE_MS,
+  NON_PERSISTENT_TOUCH_INTERVAL_MS,
   SESSION_RENEWAL_INTERVAL_MS,
   SESSION_ROLLING_LIFETIME_MS,
   SESSION_ROTATION_GRACE_MS,
@@ -17,9 +22,10 @@ import {
   type SessionSummary,
   type SessionUser,
   type UserProfile,
+  type UserRole,
 } from "@/auth/types";
 import { validateUsername } from "@/auth/username";
-import type { AuthBackend, ResolvedSession, SessionTouch } from "./backend";
+import type { AuthBackend, ResolvedSession, SessionPolicy, SessionTouch } from "./backend";
 import {
   createAdminActor,
   createUserActor,
@@ -43,13 +49,12 @@ import {
  * sınırlama kuralları tek yerden test edilebilir. Yönetim işlemleri
  * AdminService'te, kullanıcının kendi verisi UserPortfolioService'tedir.
  *
- * OTURUM MODELİ (kalıcı, kaydırmalı, yenilenen kimlik)
- * - Oturum 180 gün kaydırmalı ömürlüdür; aktif kullanıcı süresiz oturumda kalır.
- * - Bitiş zamanı en fazla 24 saatte bir ileri alınır (her istekte DB yazımı yok).
- * - Oturum kimliği 7 günde bir sessizce yenilenir; eski kimlik 60 sn tolerans
- *   süresiyle kabul edilir. Hiç bitmeyen ve hiç değişmeyen jeton yoktur.
- * - Hareketsizlik zaman aşımı YOKTUR. Oturumu yalnızca açık çıkış veya güvenlik
- *   olayları (parola sıfırlama, pasifleştirme, yönetici iptali, silme) kapatır.
+ * OTURUM POLİTİKASI (bkz. src/auth/types.ts)
+ * - Kalıcı (kullanıcı "oturumumu açık tut" seçti): 180 gün kaydırmalı ömür,
+ *   ≤ 24 saatte bir yenileme, 7 günde bir sessiz kimlik yenileme.
+ * - Tarayıcı oturumu: 8 saat mutlak + 30 dk hareketsizlik; çerez kalıcı değil.
+ * - Admin: tercihten bağımsız 8 saat mutlak + 15 dk hareketsizlik; asla kalıcı değil.
+ *   Bu kural çözümleme anında da uygulanır: kalıcı işaretli bir admin oturumu reddedilir.
  *
  * GÜVENLİK SINIRI
  * - Geçici parolalı kullanıcı yalnızca oturum/çıkış/parola değiştirme
@@ -61,11 +66,13 @@ export interface LoginResult {
   token: string;
   expiresAt: string;
   user: SessionUser;
+  /** Çerezin kalıcı olup olmayacağı (route bunu çerez seçeneklerine yansıtır). */
+  persistent: boolean;
 }
 
 /** Çözülmüş oturum + bu istekte süresinin uzatılıp uzatılmadığı. */
 export interface SessionContext extends ResolvedSession {
-  /** true ise çerezin son kullanma tarihi de tazelenmelidir. */
+  /** true ise çerezin son kullanma tarihi de tazelenmelidir (yalnızca kalıcı oturum). */
   renewed: boolean;
 }
 
@@ -74,6 +81,25 @@ export interface AuthServiceOptions {
   /** Testlerde eşikleri küçültmek için. Üretimde varsayılan politika kullanılır. */
   loginRateLimits?: LoginRateLimitPolicy;
   now?: () => number;
+}
+
+/** Rol ve tercihe göre oturum ömür politikası. Admin asla kalıcı olmaz. */
+export function sessionPolicyFor(role: UserRole, keepSignedIn: boolean): SessionPolicy {
+  if (role === "admin") {
+    return {
+      persistent: false,
+      idleTimeoutMs: ADMIN_SESSION_IDLE_MS,
+      absoluteLifetimeMs: ADMIN_SESSION_ABSOLUTE_MS,
+    };
+  }
+  if (keepSignedIn) {
+    return { persistent: true, idleTimeoutMs: null, absoluteLifetimeMs: SESSION_ROLLING_LIFETIME_MS };
+  }
+  return {
+    persistent: false,
+    idleTimeoutMs: BROWSER_SESSION_IDLE_MS,
+    absoluteLifetimeMs: BROWSER_SESSION_ABSOLUTE_MS,
+  };
 }
 
 export class AuthService {
@@ -105,6 +131,7 @@ export class AuthService {
     password: string,
     clientKey: string,
     deviceLabel = "Bilinmeyen cihaz",
+    keepSignedIn = false,
   ): Promise<LoginResult> {
     const username = validateUsername(rawUsername ?? "");
     const buckets = loginRateLimitBuckets(clientKey, username.value, this.loginRateLimits);
@@ -132,10 +159,16 @@ export class AuthService {
     // IP ve kullanıcı sayaçları saldırı korumasını sürdürür.
     await this.rateLimiter.reset(buckets[2].key);
 
-    const session = await this.backend.createSession(profile.id, this.now(), deviceLabel);
+    const policy = sessionPolicyFor(profile.role, keepSignedIn === true);
+    const session = await this.backend.createSession(profile.id, this.now(), deviceLabel, policy);
     await this.backend.recordLogin(profile.id);
 
-    return { token: session.token, expiresAt: session.expiresAt, user: toSessionUser(profile) };
+    return {
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user: toSessionUser(profile),
+      persistent: policy.persistent,
+    };
   }
 
   /** Tüm sayaçlara başarısızlık yazar; en uzun bekleme süresini döner. */
@@ -171,9 +204,11 @@ export class AuthService {
   // ---------------------------------------------------------------- oturum
 
   /**
-   * Jetonu çözer ve gerekiyorsa oturumu sessizce yeniler (kaydırmalı süre).
-   * Veritabanına en fazla SESSION_TOUCH_INTERVAL_MS'de bir yazılır; bitiş
-   * zamanı en fazla SESSION_RENEWAL_INTERVAL_MS'de bir ileri alınır.
+   * Jetonu çözer ve politikaya göre oturumu ilerletir.
+   *
+   * Kalıcı oturum: last_seen ≤ 15 dk'da bir, bitiş ≤ 24 saatte bir yazılır.
+   * Tarayıcı / admin oturumu: hareketsizlik penceresi ≤ 60 sn'de bir ileri alınır;
+   * mutlak bitiş hiç uzatılmaz. Her istekte DB yazımı yoktur.
    */
   async resolveSessionContext(token: string | null): Promise<SessionContext | null> {
     if (!token) return null;
@@ -181,7 +216,37 @@ export class AuthService {
     const session = await this.backend.resolveSession(token, now);
     if (!session) return null;
 
+    const isAdmin = session.profile.role === "admin";
     const lastSeen = Date.parse(session.lastSeenAt);
+
+    if (isAdmin || !session.persistent) {
+      // Admin asla kalıcı olamaz; kalıcı işaretli eski bir admin oturumu reddedilir.
+      if (isAdmin && session.persistent) return null;
+      // Mutlak ömür: admin için 8 saat (kayıt ne derse desin), diğerleri kayıttaki bitiş.
+      const created = Date.parse(session.createdAt);
+      if (isAdmin && !Number.isNaN(created) && now - created >= ADMIN_SESSION_ABSOLUTE_MS) {
+        await this.backend.destroySessionById(session.profile.id, session.sessionId);
+        return null;
+      }
+      const idleMs = isAdmin ? ADMIN_SESSION_IDLE_MS : BROWSER_SESSION_IDLE_MS;
+      // Hareketsizlik: kayıttaki idle bitişi arka uçta kontrol edildi; ek olarak
+      // last_seen üzerinden de doğrulanır (kayıt eksikse fail closed).
+      if (session.idleExpiresAt === null || Number.isNaN(lastSeen) || now - lastSeen >= idleMs) {
+        await this.backend.destroySessionById(session.profile.id, session.sessionId);
+        return null;
+      }
+      if (now - lastSeen >= NON_PERSISTENT_TOUCH_INTERVAL_MS) {
+        const patch: SessionTouch = {
+          lastSeenAt: new Date(now).toISOString(),
+          idleExpiresAt: new Date(now + idleMs).toISOString(),
+        };
+        await this.backend.touchSession(session.sessionId, patch);
+        return { ...session, lastSeenAt: patch.lastSeenAt, idleExpiresAt: patch.idleExpiresAt ?? null, renewed: false };
+      }
+      return { ...session, renewed: false };
+    }
+
+    // Kalıcı oturum: kaydırmalı yenileme.
     const renewedAt = Date.parse(session.renewedAt);
     const touchDue = Number.isNaN(lastSeen) || now - lastSeen >= SESSION_TOUCH_INTERVAL_MS;
     const renewDue = Number.isNaN(renewedAt) || now - renewedAt >= SESSION_RENEWAL_INTERVAL_MS;
@@ -199,13 +264,15 @@ export class AuthService {
       ...session,
       lastSeenAt: patch.lastSeenAt,
       expiresAt: patch.expiresAt ?? session.expiresAt,
+      absoluteExpiresAt: patch.expiresAt ?? session.absoluteExpiresAt,
       renewedAt: patch.renewedAt ?? session.renewedAt,
       renewed: renewDue,
     };
   }
 
-  /** Oturum kimliğinin yenilenme zamanı geldi mi? */
+  /** Oturum kimliğinin yenilenme zamanı geldi mi? (Yalnızca kalıcı oturumlar yenilenir.) */
   rotationDue(session: ResolvedSession): boolean {
+    if (!session.persistent) return false;
     const rotatedAt = Date.parse(session.rotatedAt);
     return Number.isNaN(rotatedAt) || this.now() - rotatedAt >= SESSION_ROTATION_INTERVAL_MS;
   }

@@ -20,33 +20,6 @@ export interface GoldProduct {
   sortOrder: number;
 }
 
-/** İşlem yönü. "buy" = satın alma, "sell" = elden çıkarma. */
-export type TradeSide = "buy" | "sell";
-
-export interface Transaction {
-  id: string;
-  portfolioId: string;
-  productId: string;
-  side: TradeSide;
-  /** Her zaman pozitif. Yön "side" alanında tutulur. */
-  quantity: number;
-  unit: MeasureUnit;
-  /** ISO tarih (YYYY-MM-DD). */
-  tradedAt: string;
-  /** Birim başına fiyat (TL). Alışta ödenen, satışta alınan. */
-  unitPrice: number;
-  /** İşçilik / komisyon / makas farkı (TL). Alışta maliyete eklenir, satışta gelirden düşülür. */
-  feeAmount: number;
-  note: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type TransactionInput = Omit<
-  Transaction,
-  "id" | "portfolioId" | "createdAt" | "updatedAt"
->;
-
 export interface PortfolioMeta {
   id: string;
   /** Kullanıcının seçtiği portföy adı. */
@@ -56,3 +29,9 @@ export interface PortfolioMeta {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Finansal işlem kayıtları için bkz. `@/domain/accounting` (LedgerEntry).
+ * Eski `Transaction` / `TransactionInput` tipleri Sprint 1'de kaldırıldı:
+ * miktar ve tutarlar artık ondalık dize, defter kaynak gerçek.
+ */

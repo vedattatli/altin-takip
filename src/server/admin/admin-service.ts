@@ -10,10 +10,10 @@ import {
   type UserStatus,
 } from "@/auth/types";
 import { isReservedUsername, validateUsername } from "@/auth/username";
+import { valuePositions } from "@/domain/accounting";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
 import { GOLD_PRODUCTS } from "@/domain/catalog";
-import { buildPortfolio } from "@/domain/portfolio";
-import { MockPriceProvider } from "@/prices/mock-provider";
+import { getPriceProvider } from "@/prices";
 import { adminScope, type AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
@@ -114,18 +114,22 @@ export class AdminService {
       throw notFound("Kullanıcı bulunamadı.");
     }
 
-    // Başka kullanıcının verisine erişim AÇIKÇA işaretlenir.
+    // Başka kullanıcının verisine erişim AÇIKÇA işaretlenir. Yalnızca OKUMA:
+    // yönetici kullanıcı adına BUY/SELL/OPENING_BALANCE/VOID/REPLACE yapamaz.
     const scope = adminScope(actor, userId);
-    const transactions = await this.backend.listTransactions(scope);
-    const snapshot = await new MockPriceProvider().getQuotes(GOLD_PRODUCTS.map((p) => p.id));
-    const summary = buildPortfolio(transactions, snapshot);
+    const [ledger, positions, snapshot] = await Promise.all([
+      this.backend.listLedger(scope),
+      this.backend.listPositions(scope),
+      getPriceProvider().getQuotes(GOLD_PRODUCTS.map((p) => p.id)),
+    ]);
+    const summary = valuePositions(positions, snapshot, this.now());
 
     // Denetim kaydına yalnızca hassas olmayan sayısal özet yazılır.
     await this.audit(actor, "user.portfolio_view", target, true, {
-      transactionCount: transactions.length,
+      transactionCount: ledger.length,
     });
 
-    return { user: target, summary, transactions, canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO };
+    return { user: target, summary, ledger, canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO };
   }
 
   async createUser(

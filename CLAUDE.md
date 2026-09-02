@@ -65,8 +65,9 @@ npm run test:db
 - **Parola veya oturum jetonunu JavaScript'ten okunabilir depoya yazma.** `localStorage`,
   `sessionStorage` ve `document.cookie` uygulama kodunda kullanılmaz. Oturum yalnızca
   `Secure` + `HttpOnly` + `SameSite=Lax` çerezle taşınır.
-- **Kalıcı oturum modelini bozma:** cihaz türü seçimi, "beni hatırla" kutusu, istemci tarafı
-  hareketsizlik sayacı veya otomatik çıkış EKLEME. Oturum yalnızca açık çıkış veya güvenlik
+- **Oturum modelini bozma:** cihaz türü seçimi, istemci tarafı hareketsizlik sayacı veya
+  istemci tarafı otomatik çıkış EKLEME. Tek tercih "Bu cihazda oturumumu açık tut" kutusudur;
+  süre sınırları yalnızca sunucuda uygulanır. Kalıcı oturum yalnızca açık çıkış veya güvenlik
   olayıyla (parola sıfırlama, pasifleştirme, yönetici iptali, silme) kapanır. Cihaz izni istenmez.
 - **Servis çalışanına hassas yanıt yazma.** `/api/*` ve kimliği doğrulanmış sayfa yanıtları
   önbelleğe alınmaz.
@@ -112,8 +113,12 @@ Arayüz yönlendirmesine tek başına güvenme.
 - CSRF jetonunu `localStorage`/`sessionStorage`'a yazma. Jeton `<meta>` ile
   taşınır, eşi `HttpOnly` çerezdedir.
 
-## Oturum modeli (kalıcı, kaydırmalı, yenilenen kimlik)
+## Oturum modeli (tercihe bağlı: kalıcı / tarayıcı oturumu / admin)
 
+- Giriş ekranında tek kutu: "Bu cihazda oturumumu açık tut" (`keepSignedIn`). İşaretli →
+  kalıcı çerez + 180 gün kaydırmalı; işaretsiz → tarayıcı oturumu çerezi + 8 saat / 30 dk;
+  admin → her zaman 8 saat / 15 dk, ASLA kalıcı değil (`sessionPolicyFor`).
+- Tercihi tarayıcı deposuna yazma; oturum kaydındaki `persistent` alanı tek kaynaktır.
 - Süre kontrolü **sunucudadır**; istemcide sayaç YOKTUR.
 - 180 gün kaydırmalı ömür (`SESSION_ROLLING_LIFETIME_MS`); bitiş en fazla 24 saatte bir,
   `last_seen_at` en fazla 15 dakikada bir yazılır. Her istekte DB yazma.
@@ -153,6 +158,24 @@ Arayüz yönlendirmesine tek başına güvenme.
 - Politika ve grant değişikliğinden sonra `supabase/tests/rls.test.sql` planını güncelle ve
   `npm run test:db` çalıştır (yerel Supabase: `npx supabase start`).
 
+## Muhasebe kuralları (ihlal edilemez)
+
+- **Finansal hesapta `number` kullanma.** Miktar/tutar API'de ondalık DİZE, motorda
+  `decimal.js` (`src/domain/accounting`), veritabanında `numeric`. `decimal.js`'te
+  `isPositive()` sıfır için de true döner; `> 0` için `greaterThan(0)` kullan.
+- **Defter kaynak gerçektir.** Kayıt silme/güncelleme yok; yalnızca `ledger_append`,
+  `ledger_void`, `ledger_replace` RPC'leri. `portfolio_positions` projeksiyonuna elle yazma.
+- **Her mutation `clientRequestId` kabul etsin;** aynı içerik replay, farklı içerik 409.
+- Kullanıcının gerçek işlem fiyatı esastır; piyasa fiyatı maliyeti değiştirmez.
+  `MARKET_BASELINE` fiyatını yalnızca sunucu sağlayıcısından al; istemci fiyatını yok say.
+- Fiyat yok/bayat/geçersizse değerlemeyi hesaplanmış gibi gösterme; başka üründen tahmin yapma.
+- "Hayat boyu toplam kâr", "kesin kâr", "vergiye esas kâr" ifadelerini kullanma.
+- Motoru değiştirirsen `tests/accounting.test.ts`, pgTAP muhasebe bölümü ve
+  `0010_accounting_rpc.sql` (`ledger_replay_product`) birlikte güncellenmeli;
+  `npm run accounting:verify` ve `npm run accounting:smoke` (yerel Supabase) çalıştır.
+- CLI betikleri (`admin:*`, `accounting:*`) `server-only` stub'ı ile çalışır
+  (`scripts/node-server-only-stub.cjs`); uygulama kodunda bu stub'ı kullanma.
+
 ## Teslim paketi
 
 - Build/cache dosyalarını depoya ekleme (`.next`, `node_modules`, `.data`,
@@ -165,8 +188,9 @@ Arayüz yönlendirmesine tek başına güvenme.
 - **Gerçek fiyat entegrasyonunu lisans/izin olmadan scrape ederek yapma.** KAYSARDER, Sarraf TV veya
   başka bir siteden izinsiz veri çekme.
 - Alış ve satış fiyatlarını birbirine çevirme, türetme veya yer değiştirme.
-  `buyPrice` = piyasanın alışı (kullanıcının bozdurma karşılığı),
-  `sellPrice` = piyasanın satışı (kullanıcının yeniden alım maliyeti).
+  `liquidationPrice` = piyasanın alışı (kullanıcının bozdurma karşılığı),
+  `replacementPrice` = piyasanın satışı (kullanıcının yeniden alım maliyeti).
+  Kullanıcının kendi işlem fiyatı bu ikisinden bağımsızdır ve maliyette esas olan odur.
 - Bir sağlayıcı başarısız olduğunda başka piyasanın fiyatına **sessizce geçme**. Fiyat yoksa
   arayüzde "fiyat yok" gösterilir, sıfır gösterilmez.
 - Test verisini gerçek piyasa verisi gibi etiketleme. `isRealMarketData: false` olan her kaynak

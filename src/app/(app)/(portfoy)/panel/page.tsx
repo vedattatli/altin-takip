@@ -5,5 +5,5 @@ import { DashboardView } from "@/components/dashboard-view";
 export const metadata: Metadata = { title: "Panel" };
 
 export default function PanelPage() {
-  return <DashboardView addHref="/islemler?yeni=1" />;
+  return <DashboardView addHref="/islemler" />;
 }

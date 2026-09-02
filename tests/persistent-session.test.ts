@@ -15,7 +15,8 @@ import { describeDevice } from "@/server/security/device-label";
 import { adminActor } from "./actors";
 
 /**
- * KALICI OTURUM MODELİ — sunucu tarafı.
+ * KALICI OTURUM MODELİ — sunucu tarafı ("Bu cihazda oturumumu açık tut" İŞARETLİ).
+ * İşaretsiz tarayıcı oturumu ve admin kuralları: tests/session-policy.test.ts
  *
  * Kullanıcı yalnızca açıkça çıkış yaptığında veya bir güvenlik olayında
  * (parola sıfırlama, pasifleştirme, yönetici iptali, silme) oturumunu
@@ -66,13 +67,13 @@ describe("hareketsizlik oturumu kapatmaz", () => {
     ["7 gün", 7 * DAY],
     ["179 gün", 179 * DAY],
   ])("%s hareketsizlikten sonra oturum yaşar", async (_label, idleMs) => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     advance(idleMs);
     expect(await service.resolveSession(token)).not.toBeNull();
   });
 
   it("tarayıcı kapatılıp açıldığında (aynı çerez) oturum devam eder", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     // Sekme askıya alındı, cihaz yeniden başladı; jeton aynı.
     advance(3 * DAY);
     const context = await service.resolveSessionContext(token);
@@ -80,7 +81,7 @@ describe("hareketsizlik oturumu kapatmaz", () => {
   });
 
   it("kaydırmalı ömür hiç kullanılmadan dolarsa oturum sona erer", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     advance(SESSION_ROLLING_LIFETIME_MS + MINUTE);
     expect(await service.resolveSession(token)).toBeNull();
     // Kayıt gerçekten silinmiştir.
@@ -90,7 +91,7 @@ describe("hareketsizlik oturumu kapatmaz", () => {
 
 describe("kaydırmalı yenileme (rolling renewal)", () => {
   it("aktif kullanıcı 180 günden uzun süre oturumda kalır", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
 
     // Her 30 günde bir tek istek: toplam 2 yıl.
     for (let month = 0; month < 24; month += 1) {
@@ -100,7 +101,7 @@ describe("kaydırmalı yenileme (rolling renewal)", () => {
   });
 
   it("bitiş zamanı aktivitede ileri taşınır", async () => {
-    const login = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const login = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     const initialExpiry = Date.parse(login.expiresAt);
     expect(initialExpiry).toBe(START + SESSION_ROLLING_LIFETIME_MS);
 
@@ -112,7 +113,7 @@ describe("kaydırmalı yenileme (rolling renewal)", () => {
   });
 
   it("her API çağrısında veritabanına YAZILMAZ", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
 
     let touches = 0;
     const original = backend.touchSession.bind(backend);
@@ -144,7 +145,7 @@ describe("kaydırmalı yenileme (rolling renewal)", () => {
   });
 
   it("süre uzatma en fazla 24 saatte bir yapılır", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     const first = (await service.resolveSessionContext(token))!;
 
     advance(6 * HOUR);
@@ -159,14 +160,14 @@ describe("kaydırmalı yenileme (rolling renewal)", () => {
 
 describe("oturum kimliği yenileme (rotation)", () => {
   it("yenileme zamanı gelmeden kimlik değişmez", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     advance(SESSION_ROTATION_INTERVAL_MS - HOUR);
     const context = (await service.resolveSessionContext(token))!;
     expect(await service.rotateSessionIfDue(context)).toBeNull();
   });
 
   it("zamanı gelince yeni kimlik verilir; eski kimlik kısa süre sonra geçersizdir", async () => {
-    const { token: oldToken } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token: oldToken } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     advance(SESSION_ROTATION_INTERVAL_MS + MINUTE);
 
     const context = (await service.resolveSessionContext(oldToken))!;
@@ -189,7 +190,7 @@ describe("oturum kimliği yenileme (rotation)", () => {
   });
 
   it("yenilenen kimlik bir daha yenilenmez (aralık sıfırlanır)", async () => {
-    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1");
+    const { token } = await service.login("ayse", PASSWORD, "127.0.0.1", "Cihaz", true);
     advance(SESSION_ROTATION_INTERVAL_MS + MINUTE);
     const context = (await service.resolveSessionContext(token))!;
     const newToken = (await service.rotateSessionIfDue(context))!;
@@ -201,8 +202,8 @@ describe("oturum kimliği yenileme (rotation)", () => {
 
 describe("çıkış davranışı", () => {
   it("normal çıkış yalnızca bu cihazın oturumunu kapatır", async () => {
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows", true);
 
     await service.logout(phone.token);
 
@@ -211,9 +212,9 @@ describe("çıkış davranışı", () => {
   });
 
   it("tüm cihazlardan çıkış bütün oturumları kapatır", async () => {
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1");
-    const tablet = await service.login("ayse", PASSWORD, "10.0.0.2");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.3");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
+    const tablet = await service.login("ayse", PASSWORD, "10.0.0.2", "Cihaz", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.3", "Cihaz", true);
 
     const actor = await service.requireAuthenticatedUser(laptop.token);
     expect(await service.logoutEverywhere(actor)).toBe(3);
@@ -224,9 +225,9 @@ describe("çıkış davranışı", () => {
   });
 
   it("kullanıcı kendi oturumlarını güvenli metadata ile listeler", async () => {
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS", true);
     advance(MINUTE);
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows");
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows", true);
 
     const actor = await service.requireAuthenticatedUser(laptop.token);
     const sessions = await service.listOwnSessions(actor);
@@ -241,15 +242,15 @@ describe("çıkış davranışı", () => {
     expect(serialized).not.toContain(phone.token);
     expect(serialized).not.toContain(laptop.token);
     expect(Object.keys(sessions[0]!).sort()).toEqual(
-      ["createdAt", "current", "deviceLabel", "expiresAt", "id", "lastSeenAt"].sort(),
+      ["createdAt", "current", "deviceLabel", "expiresAt", "id", "lastSeenAt", "persistent"].sort(),
     );
   });
 });
 
 describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
   it("kullanıcının kendi parola değişikliği diğer cihazları kapatır, bu cihazı korur", async () => {
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Cihaz", true);
 
     const actor = await service.requireAuthenticatedUser(laptop.token);
     await service.changeOwnPassword(actor, PASSWORD, "YepyeniParola7Kasa");
@@ -263,8 +264,8 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
     const admin = new AdminService(backend);
     const user = (await backend.findProfileByUsername("ayse"))!;
 
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Cihaz", true);
 
     await admin.resetUserPassword(adminActor(adminProfile), user.id, "GeciciParola7Kasa");
 
@@ -277,8 +278,8 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
     const admin = new AdminService(backend);
     const user = (await backend.findProfileByUsername("ayse"))!;
 
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Cihaz", true);
 
     await admin.setUserStatus(adminActor(adminProfile), user.id, "inactive");
 
@@ -294,8 +295,8 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
     const admin = new AdminService(backend, { now: () => clock });
     const user = (await backend.findProfileByUsername("ayse"))!;
 
-    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS");
-    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows");
+    const phone = await service.login("ayse", PASSWORD, "10.0.0.1", "Safari · iOS", true);
+    const laptop = await service.login("ayse", PASSWORD, "10.0.0.2", "Chrome · Windows", true);
 
     const listed = await admin.listUserSessions(adminActor(adminProfile), user.id);
     expect(listed).toHaveLength(2);
@@ -318,7 +319,7 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
     await createReady("mehmet");
     const mehmet = (await backend.findProfileByUsername("mehmet"))!;
 
-    const session = await service.login("ayse", PASSWORD, "10.0.0.1");
+    const session = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
     const [listed] = await admin.listUserSessions(adminActor(adminProfile), ayse.id);
 
     // Oturum Ayşe'nin; Mehmet'in kimliğiyle kapatılamaz.
@@ -332,14 +333,14 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
     const adminProfile = await createReady("yonetici", "admin");
     const admin = new AdminService(backend);
     const user = (await backend.findProfileByUsername("ayse"))!;
-    const session = await service.login("ayse", PASSWORD, "10.0.0.1");
+    const session = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
 
     await admin.deleteUser(adminActor(adminProfile), user.id, "ayse");
     expect(await service.resolveSession(session.token)).toBeNull();
   });
 
   it("silinmiş / iptal edilmiş oturum kimliği reddedilir", async () => {
-    const session = await service.login("ayse", PASSWORD, "10.0.0.1");
+    const session = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
     const context = (await service.resolveSessionContext(session.token))!;
     const user = (await backend.findProfileByUsername("ayse"))!;
 
@@ -353,9 +354,9 @@ describe("oturumu zorunlu sonlandıran güvenlik olayları", () => {
 
 describe("temizlik", () => {
   it("purgeExpiredSessions yalnızca süresi dolanları siler", async () => {
-    const stale = await service.login("ayse", PASSWORD, "10.0.0.1");
+    const stale = await service.login("ayse", PASSWORD, "10.0.0.1", "Cihaz", true);
     advance(SESSION_ROLLING_LIFETIME_MS - DAY);
-    const fresh = await service.login("ayse", PASSWORD, "10.0.0.2");
+    const fresh = await service.login("ayse", PASSWORD, "10.0.0.2", "Cihaz", true);
     advance(2 * DAY);
 
     expect(await service.purgeExpiredSessions()).toBe(1);
@@ -382,8 +383,8 @@ describe("cihaz etiketi", () => {
     expect(describeDevice(null)).toBe("Bilinmeyen cihaz");
   });
 
-  it("giriş yanıtı cihaz türü veya oturum kimliği dışında bir şey içermez", async () => {
-    const result = await service.login("ayse", PASSWORD, "10.0.0.1", "Chrome · Windows");
-    expect(Object.keys(result).sort()).toEqual(["expiresAt", "token", "user"]);
+  it("giriş yanıtı yalnızca jeton, bitiş, kullanıcı ve kalıcılık bilgisini içerir", async () => {
+    const result = await service.login("ayse", PASSWORD, "10.0.0.1", "Chrome · Windows", true);
+    expect(Object.keys(result).sort()).toEqual(["expiresAt", "persistent", "token", "user"]);
   });
 });
