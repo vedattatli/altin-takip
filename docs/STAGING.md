@@ -58,3 +58,27 @@ verisi değil" uyarısını her zaman gösterir.
   plandayken durur; görünürlük/focus/online olaylarında hemen kontrol eder; tek istek
   (AbortController); hatada üstel geri çekilme + jitter; sürüm değişince defter + özet +
   portföy meta yeniden yüklenir. Hedef: ≤ 15 sn.
+
+## 5. Beklemede: dış hesap girişi gerektiren adımlar
+
+Sprint 2'nin **yerel** kapsamı tamamlandı ve commit edildi. Aşağıdaki adımlar dış hesap
+kimlik doğrulaması gerektirdiği için **yapılmadı**; başarılı gibi raporlanmamıştır.
+
+| Adım | Durum | Engel |
+| --- | --- | --- |
+| Uzak Supabase staging projesi + migration | Yapılmadı | `npx supabase login` oturumu yok |
+| Staging Data API sondası + `accounting:verify` (uzak) | Yapılmadı | Aynı |
+| Vercel staging projesi ve dağıtımı | Yapılmadı | Vercel CLI kurulu/oturumlu değil |
+| Gerçek staging E2E (`npm run test:staging`) | Yapılmadı | Staging URL'si ve hesaplar yok |
+| GitHub private repo push'u | Yapılmadı | `gh` jetonu geçersiz (keyring) |
+
+Devam etmek için (kullanıcı, kendi terminalinde):
+
+```bash
+gh auth login
+npx supabase login
+npx vercel login
+```
+
+Sonra `.env.staging.example` → `.env.staging.local` doldurulur ve bu belgenin 3. bölümündeki
+sıra izlenir. Hiçbir parola/jeton sohbete veya loglara yazılmaz; araçlar değerleri yazdırmaz.

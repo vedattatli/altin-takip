@@ -110,8 +110,12 @@
 - **Staging araçları:** doctor / migrate / smoke / seed / admin / cleanup / test:staging
   (docs/STAGING.md). Dış hesaplar kullanıcı girişine bağlıdır.
 - **Doğrulama:** 437 birim testi, 184 pgTAP, gerçek JWT sondası (46), Playwright (255 geçti, 3 atlandı).
+- **BEKLEMEDE (dış hesap girişi gerekiyor):** uzak Supabase staging projesi, Vercel staging
+  dağıtımı, gerçek staging E2E (`npm run test:staging`) ve GitHub private repo push'u
+  YAPILMADI. Kod, migration'lar ve araçlar hazır; yalnızca kullanıcı girişi bekleniyor.
+  Devam listesi: [STAGING.md → "Beklemede"](STAGING.md#5-beklemede-dış-hesap-girişi-gerektiren-adımlar).
 
-## Sprint 2 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
+## Sprint 3 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
