@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Altın Takip">
+  <rect width="512" height="512" rx="112" fill="#0d1014"/>
+  <circle cx="256" cy="256" r="168" fill="#e0b84e"/>
+  <circle cx="256" cy="256" r="161" fill="none" stroke="#b08a2d" stroke-width="14"/>
+  <path d="M182 284 256 210 330 284" fill="none" stroke="#0d1014" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M256 214 256 348" fill="none" stroke="#0d1014" stroke-width="34" stroke-linecap="round"/>
+</svg>
