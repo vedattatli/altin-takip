@@ -61,8 +61,6 @@ export function isExcludedFile(name) {
   if (name.endsWith(".log")) return true;
   // Gerçek ortam dosyaları (staging dâhil) asla pakete girmez; yalnızca *.example kalır.
   if (name.startsWith(".env") && !name.endsWith(".example")) return true;
-  // .env.example DIŞINDAKİ tüm .env dosyaları dışlanır.
-  if (name.startsWith(".env") && name !== ".env.example") return true;
   return false;
 }
 
