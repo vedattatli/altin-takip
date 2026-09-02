@@ -12,6 +12,7 @@ import {
   localReplace,
   localSnapshot,
   localSummary,
+  normalizeLocalEntries,
   localVoid,
   localVoidAll,
   sortLedgerDesc,
@@ -119,8 +120,10 @@ export class IndexedDbPortfolioRepository implements PortfolioRepository {
   private async readState(): Promise<LocalLedgerState> {
     const db = await this.db();
     const tx = db.transaction(STORE_LEDGER, "readonly");
-    const entries = await promisify<LedgerEntry[]>(tx.objectStore(STORE_LEDGER).getAll());
+    const raw = await promisify<unknown[]>(tx.objectStore(STORE_LEDGER).getAll());
     await transactionDone(tx);
+    // Eski biçimde saklanmış kayıtlar (Sprint 1) okunurken güncel biçime getirilir.
+    const entries = normalizeLocalEntries(raw);
     return {
       entries,
       nextSequence: entries.reduce((max, entry) => Math.max(max, entry.ledgerSequence), 0) + 1,

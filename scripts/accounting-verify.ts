@@ -60,6 +60,11 @@ function compare(
         mismatches.push({ username, productId, field, stored: a[field] ?? null, recomputed: b[field] ?? null });
       }
     }
+    for (const field of ["holdingCostOrigins", "realizedPnlOrigins"] as const) {
+      const stored = JSON.stringify(a[field]);
+      const recomputed = JSON.stringify(b[field]);
+      if (stored !== recomputed) mismatches.push({ username, productId, field, stored, recomputed });
+    }
     if (a.activeTransactionCount !== b.activeTransactionCount) {
       mismatches.push({
         username,

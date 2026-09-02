@@ -1,6 +1,7 @@
 import { requireProduct } from "@/domain/catalog";
 import { isSnapshotStale, type PriceQuote, type PriceSnapshot } from "@/prices/types";
 import { dec, roundMoney, toDecimalString, ZERO, type Dec } from "./decimal";
+import { instantMs } from "./time";
 import type {
   AccountingSummary,
   CostOriginFlags,
@@ -9,6 +10,7 @@ import type {
   LedgerEntry,
   PnlLabelKind,
   ProductPosition,
+  ValuationCoverage,
 } from "./types";
 
 /**
@@ -17,7 +19,7 @@ import type {
  * ÜRÜN BAZLI HAREKETLİ AĞIRLIKLI ORTALAMA MALİYET
  *
  *   Alış:   new_quantity            = old_quantity + purchased_quantity
- *           new_remaining_cost      = old_remaining_cost + acquisition_cost
+ *           new_remaining_cost      = old_remaining_cost + acquisition_cost (total_paid)
  *           new_average_cost        = new_remaining_cost / new_quantity
  *
  *   Satış:  removed_cost_basis      = quantity_sold × average_cost_before_sale
@@ -30,9 +32,15 @@ import type {
  *
  *   Kalan miktar sıfır olduğunda kalan maliyet tam sıfırdır, ortalama null'dur.
  *
+ * MALİYET KÖKENİ (iki ayrı bayrak kümesi)
+ *   holdingCostOrigins : elde kalan miktarın kökenleri. Alışta ilgili bayrak açılır;
+ *                        satışta havuz kökenleri gerçekleşmiş K/Z kökenlerine kopyalanır;
+ *                        miktar TAM SIFIRA inince holding bayrakları sıfırlanır.
+ *   realizedPnlOrigins : gerçekleşmiş K/Z'nin dayandığı kökenler; hiç silinmez.
+ *
  * Defter kaynak gerçektir: pozisyon her zaman AKTİF kayıtların deterministik
- * sırayla (occurredAt, createdAt, ledgerSequence, id) yeniden oynatılmasıyla
- * elde edilir. Aynı algoritma Postgres'te `ledger_rebuild_position` içindedir.
+ * sırayla (occurredAtInstant, createdAt, ledgerSequence, id) yeniden oynatılmasıyla
+ * elde edilir. Aynı algoritma Postgres'te `ledger_replay_product` içindedir.
  */
 
 export class LedgerOversellError extends Error {
@@ -48,14 +56,32 @@ export class LedgerOversellError extends Error {
   }
 }
 
+function compareInstant(a: string, b: string): number {
+  const am = instantMs(a);
+  const bm = instantMs(b);
+  if (am !== null && bm !== null) return am === bm ? 0 : am < bm ? -1 : 1;
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 export function sortLedger(entries: readonly LedgerEntry[]): LedgerEntry[] {
   return [...entries].sort((a, b) => {
-    if (a.occurredAt !== b.occurredAt) return a.occurredAt < b.occurredAt ? -1 : 1;
+    const byInstant = compareInstant(a.occurredAtInstant, b.occurredAtInstant);
+    if (byInstant !== 0) return byInstant;
     if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
     if (a.ledgerSequence !== b.ledgerSequence) return a.ledgerSequence - b.ledgerSequence;
     if (a.id === b.id) return 0;
     return a.id < b.id ? -1 : 1;
   });
+}
+
+/** Yeniden eskiye (arayüz listesi). */
+export function sortLedgerDesc(entries: readonly LedgerEntry[]): LedgerEntry[] {
+  return sortLedger(entries).reverse();
+}
+
+function noOrigins(): CostOriginFlags {
+  return { actual: false, estimated: false, baseline: false };
 }
 
 export function emptyPosition(productId: string): ProductPosition {
@@ -65,7 +91,8 @@ export function emptyPosition(productId: string): ProductPosition {
     remainingCostBasis: "0",
     averageCost: null,
     realizedPnl: "0",
-    costOrigins: { actual: false, estimated: false, baseline: false },
+    holdingCostOrigins: noOrigins(),
+    realizedPnlOrigins: noOrigins(),
     activeTransactionCount: 0,
     lastLedgerSequence: 0,
   };
@@ -75,7 +102,8 @@ interface Running {
   quantity: Dec;
   cost: Dec;
   realized: Dec;
-  origins: CostOriginFlags;
+  holding: CostOriginFlags;
+  realizedOrigins: CostOriginFlags;
   count: number;
   lastSequence: number;
 }
@@ -86,7 +114,8 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
     quantity: ZERO,
     cost: ZERO,
     realized: ZERO,
-    origins: { actual: false, estimated: false, baseline: false },
+    holding: noOrigins(),
+    realizedOrigins: noOrigins(),
     count: 0,
     lastSequence: 0,
   };
@@ -100,9 +129,9 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
     if (entry.kind === "BUY" || entry.kind === "OPENING_BALANCE") {
       running.quantity = running.quantity.plus(quantity);
       running.cost = running.cost.plus(dec(entry.totalPaid ?? "0"));
-      if (entry.costBasisOrigin === "ACTUAL") running.origins.actual = true;
-      if (entry.costBasisOrigin === "ESTIMATED") running.origins.estimated = true;
-      if (entry.costBasisOrigin === "MARKET_BASELINE") running.origins.baseline = true;
+      if (entry.costBasisOrigin === "ACTUAL") running.holding.actual = true;
+      if (entry.costBasisOrigin === "ESTIMATED") running.holding.estimated = true;
+      if (entry.costBasisOrigin === "MARKET_BASELINE") running.holding.baseline = true;
       continue;
     }
 
@@ -120,9 +149,17 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
       ? running.cost
       : roundMoney(running.cost.times(quantity).div(running.quantity));
     running.realized = running.realized.plus(dec(entry.netProceeds ?? "0").minus(removed));
+    // Satılan miktarın maliyeti havuzun o andaki kökenlerine dayanır; tarihsel olarak korunur.
+    running.realizedOrigins.actual ||= running.holding.actual;
+    running.realizedOrigins.estimated ||= running.holding.estimated;
+    running.realizedOrigins.baseline ||= running.holding.baseline;
     running.quantity = running.quantity.minus(quantity);
     running.cost = running.cost.minus(removed);
-    if (running.quantity.isZero()) running.cost = ZERO;
+    if (running.quantity.isZero()) {
+      running.cost = ZERO;
+      // Pozisyon tamamen kapandı: elde kalan miktarın kökeni yok.
+      running.holding = noOrigins();
+    }
   }
 
   return {
@@ -133,7 +170,8 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
       ? toDecimalString(roundMoney(running.cost.div(running.quantity)))
       : null,
     realizedPnl: toDecimalString(running.realized),
-    costOrigins: running.origins,
+    holdingCostOrigins: running.holding,
+    realizedPnlOrigins: running.realizedOrigins,
     activeTransactionCount: running.count,
     lastLedgerSequence: running.lastSequence,
   };
@@ -159,6 +197,10 @@ export function findLedgerOversell(entries: readonly LedgerEntry[]): LedgerOvers
   }
 }
 
+export function hasEstimatedOrBaseline(flags: CostOriginFlags): boolean {
+  return flags.estimated || flags.baseline;
+}
+
 export function costQualityOf(flags: CostOriginFlags, quantity: string): CostQuality {
   if (!dec(quantity).greaterThan(0)) return "NONE";
   const count = Number(flags.actual) + Number(flags.estimated) + Number(flags.baseline);
@@ -178,11 +220,11 @@ export const COST_QUALITY_LABELS: Record<CostQuality, string> = {
 };
 
 export const COST_QUALITY_DESCRIPTIONS: Record<CostQuality, string> = {
-  ACTUAL: "Kullanıcının girdiği gerçek alış maliyetleri.",
+  ACTUAL: "Elde kalan miktarın tamamı kullanıcının girdiği gerçek alış maliyetlerine dayanır.",
   ESTIMATED: "Kullanıcının tahmini olarak girdiği maliyet; gerçek alış fiyatı değildir.",
   BASELINE:
     "Takibe başlandığı andaki bozdurma fiyatı. Gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır.",
-  MIXED: "Gerçek geçmiş maliyet ile takip başlangıç değerinin birleşimi.",
+  MIXED: "Elde kalan miktar gerçek maliyet ile tahmini/takip başlangıç değerinin birleşimidir.",
   NONE: "",
 };
 
@@ -190,6 +232,8 @@ export const PNL_LABELS: Record<PnlLabelKind, string> = {
   COST_BASIS: "Maliyet bazlı K/Z",
   SINCE_TRACKING_START: "Takip başlangıcından itibaren K/Z",
 };
+
+export const PARTIAL_VALUATION_LABEL = "Kısmi değerleme";
 
 function usableQuote(snapshot: PriceSnapshot | null, productId: string, now: number): PriceQuote | null {
   if (!snapshot || snapshot.status === "unavailable") return null;
@@ -199,6 +243,7 @@ function usableQuote(snapshot: PriceSnapshot | null, productId: string, now: num
   if (!dec(quote.liquidationPrice).greaterThan(0) || !dec(quote.replacementPrice).greaterThan(0)) {
     return null;
   }
+  if (dec(quote.replacementPrice).lessThan(dec(quote.liquidationPrice))) return null;
   return quote;
 }
 
@@ -224,6 +269,11 @@ export const EMPTY_SUMMARY: AccountingSummary = {
   totalUnrealizedPnlPercent: null,
   hasMissingPrices: false,
   unpricedCostBasis: "0",
+  valuationCoverage: "none",
+  pricedPositionCount: 0,
+  unpricedPositionCount: 0,
+  holdingHasEstimatedOrBaseline: false,
+  realizedHasEstimatedOrBaseline: false,
   hasEstimatedOrBaseline: false,
   pnlLabel: "COST_BASIS",
   snapshot: null,
@@ -239,7 +289,9 @@ export const EMPTY_SUMMARY: AccountingSummary = {
  *   total_pnl         = realized_pnl + unrealized_pnl
  *
  * Fiyat yoksa / geçersizse / bayatsa değerleme HESAPLANMIŞ GİBİ gösterilmez.
- * Başka ürünün fiyatından veya gram dönüşümünden tahmin YAPILMAZ.
+ * Başka ürünün fiyatından veya gram dönüşümünden tahmin YAPILMAZ. Bazı ürünlerin
+ * fiyatı yoksa toplamlar KISMİDİR (valuationCoverage = "partial"); gerçekleşmiş K/Z
+ * fiyattan bağımsızdır ve her zaman tamdır.
  */
 export function valuePositions(
   positions: Iterable<ProductPosition>,
@@ -254,8 +306,10 @@ export function valuePositions(
   let totalReplacement = ZERO;
   let totalRealized = ZERO;
   let totalPureGrams = ZERO;
-  let hasMissingPrices = false;
-  let hasEstimatedOrBaseline = false;
+  let pricedCount = 0;
+  let unpricedCount = 0;
+  let holdingFlag = false;
+  let realizedFlag = false;
 
   for (const position of positions) {
     const product = requireProduct(position.productId);
@@ -263,12 +317,11 @@ export function valuePositions(
     const cost = dec(position.remainingCostBasis);
     const isOpen = quantity.greaterThan(0);
     const quote = isOpen ? usableQuote(snapshot, position.productId, now) : null;
-    const costQuality = costQualityOf(position.costOrigins, position.quantity);
+    const costQuality = costQualityOf(position.holdingCostOrigins, position.quantity);
 
     totalRealized = totalRealized.plus(dec(position.realizedPnl));
-    if (position.costOrigins.estimated || position.costOrigins.baseline) {
-      hasEstimatedOrBaseline = true;
-    }
+    if (isOpen && hasEstimatedOrBaseline(position.holdingCostOrigins)) holdingFlag = true;
+    if (hasEstimatedOrBaseline(position.realizedPnlOrigins)) realizedFlag = true;
 
     let liquidationValue: Dec | null = null;
     let replacementValue: Dec | null = null;
@@ -286,11 +339,12 @@ export function valuePositions(
         pricedCost = pricedCost.plus(cost);
         totalLiquidation = totalLiquidation.plus(liquidationValue);
         totalReplacement = totalReplacement.plus(replacementValue);
+        pricedCount += 1;
         percent = cost.greaterThan(0)
           ? toDecimalString(unrealized.div(cost).times(100).toDecimalPlaces(2))
           : null;
       } else {
-        hasMissingPrices = true;
+        unpricedCount += 1;
         unpricedCost = unpricedCost.plus(cost);
       }
     } else {
@@ -324,7 +378,10 @@ export function valuePositions(
   });
 
   const totalUnrealized = totalLiquidation.minus(pricedCost);
-  const openCount = holdings.filter((holding) => dec(holding.position.quantity).greaterThan(0)).length;
+  const openCount = pricedCount + unpricedCount;
+  const coverage: ValuationCoverage =
+    openCount === 0 || pricedCount === 0 ? "none" : unpricedCount === 0 ? "full" : "partial";
+  const anyEstimatedOrBaseline = holdingFlag || realizedFlag;
 
   return {
     holdings,
@@ -339,10 +396,15 @@ export function valuePositions(
     totalUnrealizedPnlPercent: pricedCost.greaterThan(0)
       ? toDecimalString(totalUnrealized.div(pricedCost).times(100).toDecimalPlaces(2))
       : null,
-    hasMissingPrices,
+    hasMissingPrices: unpricedCount > 0,
     unpricedCostBasis: toDecimalString(unpricedCost),
-    hasEstimatedOrBaseline,
-    pnlLabel: hasEstimatedOrBaseline ? "SINCE_TRACKING_START" : "COST_BASIS",
+    valuationCoverage: coverage,
+    pricedPositionCount: pricedCount,
+    unpricedPositionCount: unpricedCount,
+    holdingHasEstimatedOrBaseline: holdingFlag,
+    realizedHasEstimatedOrBaseline: realizedFlag,
+    hasEstimatedOrBaseline: anyEstimatedOrBaseline,
+    pnlLabel: anyEstimatedOrBaseline ? "SINCE_TRACKING_START" : "COST_BASIS",
     snapshot,
     priceStatus: summaryPriceStatus(snapshot, now),
   };

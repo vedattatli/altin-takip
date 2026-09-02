@@ -612,6 +612,7 @@ export class SupabaseAuthBackend implements AuthBackend {
       quantity: request.quantity,
       unit: request.unit,
       occurred_at: request.occurredAt,
+      occurred_time: request.occurredTime,
       pricing_input_mode: request.pricingInputMode,
       unit_price: request.unitPrice,
       total_amount: request.totalAmount,

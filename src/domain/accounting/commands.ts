@@ -1,6 +1,15 @@
 import { getProduct } from "@/domain/catalog";
 import type { GoldProduct } from "@/domain/types";
 import { dec, parseDecimalInput, QUANTITY_SCALE, toDecimalString } from "./decimal";
+import { validatePriceSnapshotInput } from "./snapshot";
+import {
+  isValidCalendarDate,
+  isValidTimeOfDay,
+  OCCURRED_AT_FUTURE_TOLERANCE_MS,
+  occurredAtInstantISO,
+  todayISO,
+  zonedToInstantMs,
+} from "./time";
 import type { LedgerAppendRequest, LedgerCommand, PriceSnapshotInput } from "./types";
 
 /**
@@ -8,8 +17,11 @@ import type { LedgerAppendRequest, LedgerCommand, PriceSnapshotInput } from "./t
  *
  * - Ürün katalogdan; birim istemciden ALINMAZ.
  * - Miktar: gram üründe en fazla 6 ondalık, adet üründe yalnızca pozitif tam sayı.
- * - Tutarlar: pozitif ondalık dize; NaN/Infinity/bilimsel gösterim/aşırı büyük değer reddedilir.
- * - Tarih: YYYY-MM-DD, gelecekte olamaz.
+ * - Tutarlar: pozitif ondalık dize; NaN/Infinity/bilimsel gösterim/aşırı büyük değer/
+ *   iç boşluk/belirsiz ayırıcı reddedilir.
+ * - Tarih: gerçek takvim tarihi (YYYY-MM-DD, Europe/Istanbul); isteğe bağlı saat HH:MM;
+ *   gelecekte olamaz (5 dakika tolerans).
+ * - MARKET_BASELINE anlık görüntüsü sunucudan gelir ve ayrıca doğrulanır.
  * Aynı doğrulama istemcide (form) ve sunucuda (servis) çalışır.
  */
 
@@ -19,6 +31,7 @@ export type CommandErrors = Partial<
     | "productId"
     | "quantity"
     | "occurredAt"
+    | "occurredTime"
     | "unitPrice"
     | "totalPaid"
     | "netProceeds"
@@ -35,13 +48,6 @@ export type CommandErrors = Partial<
 export type CommandParseResult =
   | { ok: true; request: LedgerAppendRequest; product: GoldProduct }
   | { ok: false; errors: CommandErrors };
-
-export function todayISO(now: Date = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 const MONEY_INPUT_SCALE = 4;
 const NOTE_MAX = 280;
@@ -65,16 +71,61 @@ function parseMoney(
   return toDecimalString(parsed.value);
 }
 
-function parseDate(raw: unknown, errors: CommandErrors, now?: Date): string {
-  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(raw))) {
-    errors.occurredAt = "Geçerli bir işlem tarihi seçin.";
-    return "";
+interface ParsedWhen {
+  occurredAt: string;
+  occurredTime: string | null;
+  occurredAtInstant: string;
+}
+
+/**
+ * Tarih + isteğe bağlı saat. Gerçek takvim tarihi olmayan değer (2026-02-30) reddedilir;
+ * artık yıl doğru uygulanır (2028-02-29 kabul). Gelecek tarih/saat reddedilir.
+ */
+function parseWhen(
+  rawDate: unknown,
+  rawTime: unknown,
+  errors: CommandErrors,
+  now: Date,
+  options: { defaultToday: boolean },
+): ParsedWhen {
+  const empty: ParsedWhen = { occurredAt: "", occurredTime: null, occurredAtInstant: "" };
+  let date: string;
+  if (rawDate === undefined || rawDate === null || rawDate === "") {
+    if (!options.defaultToday) {
+      errors.occurredAt = "Geçerli bir işlem tarihi seçin.";
+      return empty;
+    }
+    date = todayISO(now);
+  } else if (!isValidCalendarDate(rawDate)) {
+    errors.occurredAt = "Geçerli bir işlem tarihi seçin (takvimde olmayan gün girilemez).";
+    return empty;
+  } else {
+    date = rawDate;
   }
-  if (raw > todayISO(now)) {
+
+  let time: string | null = null;
+  if (rawTime !== undefined && rawTime !== null && rawTime !== "") {
+    if (!isValidTimeOfDay(rawTime)) {
+      errors.occurredTime = "Saat SS:DD biçiminde olmalıdır (örn. 14:30).";
+      return empty;
+    }
+    time = rawTime;
+  }
+
+  if (date > todayISO(now)) {
     errors.occurredAt = "İşlem tarihi gelecekte olamaz.";
-    return "";
+    return empty;
   }
-  return raw;
+  const instant = zonedToInstantMs(date, time);
+  if (instant === null) {
+    errors.occurredAt = "Geçerli bir işlem tarihi seçin.";
+    return empty;
+  }
+  if (instant > now.getTime() + OCCURRED_AT_FUTURE_TOLERANCE_MS) {
+    errors[time ? "occurredTime" : "occurredAt"] = "İşlem zamanı gelecekte olamaz.";
+    return empty;
+  }
+  return { occurredAt: date, occurredTime: time, occurredAtInstant: occurredAtInstantISO(date, time) ?? "" };
 }
 
 function parseNote(raw: unknown, errors: CommandErrors): string {
@@ -122,6 +173,7 @@ export function parseLedgerCommand(
   options: { now?: Date; baselineSnapshot?: PriceSnapshotInput | null } = {},
 ): CommandParseResult {
   const errors: CommandErrors = {};
+  const now = options.now ?? new Date();
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, errors: { form: "Geçersiz işlem verisi." } };
   }
@@ -142,10 +194,7 @@ export function parseLedgerCommand(
   const clientRequestId = parseClientRequestId(body.clientRequestId, errors);
 
   if (kind === "OPENING_BALANCE") {
-    const occurredAt =
-      body.occurredAt === undefined || body.occurredAt === null || body.occurredAt === ""
-        ? todayISO(options.now)
-        : parseDate(body.occurredAt, errors, options.now);
+    const when = parseWhen(body.occurredAt, body.occurredTime, errors, now, { defaultToday: true });
     const method = body.costMethod;
     if (method !== "ACTUAL" && method !== "ESTIMATED" && method !== "MARKET_BASELINE") {
       errors.costMethod = "Maliyet yöntemi seçin.";
@@ -155,6 +204,9 @@ export function parseLedgerCommand(
     if (method === "MARKET_BASELINE") {
       if (!options.baselineSnapshot) {
         errors.form = "Güncel fiyat alınamadığı için takip başlangıcı oluşturulamadı.";
+      } else {
+        const snapshotError = validatePriceSnapshotInput(options.baselineSnapshot, productId, now.getTime());
+        if (snapshotError) errors.form = snapshotError;
       }
       if (Object.keys(errors).length > 0) return { ok: false, errors };
       return {
@@ -165,7 +217,7 @@ export function parseLedgerCommand(
           productId,
           quantity,
           unit: product.unit,
-          occurredAt,
+          ...when,
           pricingInputMode: "MARKET_BASELINE",
           unitPrice: null,
           totalAmount: null,
@@ -195,7 +247,7 @@ export function parseLedgerCommand(
         productId,
         quantity,
         unit: product.unit,
-        occurredAt,
+        ...when,
         pricingInputMode: inputMode === "AVERAGE_UNIT_COST" ? "UNIT_PRICE" : "TOTAL_AMOUNT",
         unitPrice: inputMode === "AVERAGE_UNIT_COST" ? amount : null,
         totalAmount: inputMode === "TOTAL_COST" ? amount : null,
@@ -209,7 +261,7 @@ export function parseLedgerCommand(
     };
   }
 
-  const occurredAt = parseDate(body.occurredAt, errors, options.now);
+  const when = parseWhen(body.occurredAt, body.occurredTime, errors, now, { defaultToday: false });
   const mode = body.pricingInputMode;
   if (mode !== "UNIT_PRICE" && mode !== "TOTAL_AMOUNT") {
     errors.form = "Fiyat giriş yöntemi birim fiyat veya toplam tutar olmalıdır.";
@@ -240,7 +292,7 @@ export function parseLedgerCommand(
         productId,
         quantity,
         unit: product.unit,
-        occurredAt,
+        ...when,
         pricingInputMode: mode,
         unitPrice,
         totalAmount: totalPaid,
@@ -275,7 +327,7 @@ export function parseLedgerCommand(
       productId,
       quantity,
       unit: product.unit,
-      occurredAt,
+      ...when,
       pricingInputMode: mode,
       unitPrice,
       totalAmount: netProceeds,
@@ -290,7 +342,8 @@ export function parseLedgerCommand(
 }
 
 /** Komut nesnesinden (istemci tarafı) doğrudan doğrulama; aynı kuralları uygular. */
-export function validateLedgerCommand(command: LedgerCommand, now?: Date): CommandErrors {
+export function validateLedgerCommand(command: LedgerCommand, now: Date = new Date()): CommandErrors {
+  const nowIso = now.toISOString();
   const result = parseLedgerCommand(command, {
     now,
     // İstemci ön elemesi: piyasa başlangıcı sunucuda oluşturulur; burada yalnızca biçim denetlenir.
@@ -305,8 +358,8 @@ export function validateLedgerCommand(command: LedgerCommand, now?: Date): Comma
             currency: "TRY",
             providerStatus: "ok",
             isRealMarketData: false,
-            providerTimestamp: new Date(0).toISOString(),
-            fetchedAt: new Date(0).toISOString(),
+            providerTimestamp: nowIso,
+            fetchedAt: nowIso,
           }
         : null,
   });

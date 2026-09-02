@@ -7,6 +7,7 @@ import {
   COST_QUALITY_DESCRIPTIONS,
   COST_QUALITY_LABELS,
   dec,
+  PARTIAL_VALUATION_LABEL,
   PNL_LABELS,
   type HoldingView,
 } from "@/domain/accounting";
@@ -178,6 +179,12 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
 
   const isEmpty = summary.positionCount === 0;
   const priceOk = summary.priceStatus === "ok";
+  // Bazı ürünlerin fiyatı yoksa toplamlar yalnızca fiyatı bulunan varlıkları kapsar (KISMİ).
+  const partial = !isEmpty && priceOk && summary.valuationCoverage === "partial";
+  const partialSuffix = partial ? " (kısmi)" : "";
+  const coverageText = partial
+    ? `${PARTIAL_VALUATION_LABEL}: yalnızca fiyatı bulunan ${summary.pricedPositionCount}/${summary.positionCount} varlığın toplamı`
+    : null;
   // Portföy boşsa bütün değerler 0 TL gösterilir; fiyat yoksa ve pozisyon varsa "kullanılamıyor".
   const valuation = (value: string) => (isEmpty || priceOk ? formatMoney(value) : PRICE_UNAVAILABLE);
   const pnlText = PNL_LABELS[summary.pnlLabel];
@@ -196,16 +203,16 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          label="Tahmini bozdurma değeri"
+          label={`Tahmini bozdurma değeri${partialSuffix}`}
           value={valuation(summary.totalLiquidationValue)}
-          hint="Bugün bozdurursanız yaklaşık elinize geçecek tutar (test fiyatı)"
+          hint={coverageText ?? "Bugün bozdurursanız yaklaşık elinize geçecek tutar (test fiyatı)"}
           emphasis
           testId="stat-liquidation"
         />
         <StatCard
-          label="Yeniden alım değeri"
+          label={`Yeniden alım değeri${partialSuffix}`}
           value={valuation(summary.totalReplacementValue)}
-          hint="Aynı miktarı bugün almanın yaklaşık maliyeti"
+          hint={coverageText ?? "Aynı miktarı bugün almanın yaklaşık maliyeti"}
           testId="stat-repurchase"
         />
         <StatCard
@@ -215,7 +222,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           testId="stat-cost"
         />
         <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmemiş K/Z</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmemiş K/Z{partialSuffix}</p>
           <p data-testid="stat-unrealized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
             {isEmpty || priceOk ? (
               <DeltaValue value={summary.totalUnrealizedPnl} formatted={formatSignedMoney(summary.totalUnrealizedPnl)} />
@@ -227,6 +234,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
             {summary.totalUnrealizedPnlPercent !== null && priceOk
               ? `${pnlText} · ${formatPercent(summary.totalUnrealizedPnlPercent)}`
               : pnlText}
+            {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
           </p>
         </Card>
         <Card className="p-4">
@@ -234,10 +242,12 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           <p data-testid="stat-realized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
             <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
           </p>
-          <p className="mt-1 text-xs text-muted">Satışlardan oluşan sonuç; portföy değerine eklenmez.</p>
+          <p className="mt-1 text-xs text-muted">
+            Satışlardan oluşan sonuç; portföy değerine eklenmez{partial ? "; fiyat eksikliğinden etkilenmez" : ""}.
+          </p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z{partialSuffix}</p>
           <p data-testid="stat-total-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
             {isEmpty || priceOk ? (
               <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
@@ -245,7 +255,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               <span className="text-muted">{PRICE_UNAVAILABLE}</span>
             )}
           </p>
-          <p className="mt-1 text-xs text-muted">Gerçekleşmiş + gerçekleşmemiş · {pnlText}</p>
+          <p className="mt-1 text-xs text-muted">
+            Gerçekleşmiş + gerçekleşmemiş · {pnlText}
+            {partial ? " · kesin toplam değildir (fiyatı olmayan varlıklar hariç)" : ""}
+          </p>
         </Card>
       </div>
 
@@ -254,9 +267,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]"
           data-testid="pnl-label-notice"
         >
-          <span className="font-semibold">{PNL_LABELS.SINCE_TRACKING_START}:</span> portföyde takip
-          başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış
-          maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır.
+          <span className="font-semibold">{PNL_LABELS.SINCE_TRACKING_START}:</span>{" "}
+          {summary.holdingHasEstimatedOrBaseline
+            ? "portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
+            : "elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
         </div>
       ) : null}
 
@@ -266,9 +280,14 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           hesaplanmış gibi gösterilmez; başka ürünün fiyatından tahmin yapılmaz.
         </div>
       ) : summary.hasMissingPrices ? (
-        <div className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]">
-          Bazı ürünler için fiyat alınamadı. Bu pozisyonlar (maliyet{" "}
-          {formatMoney(summary.unpricedCostBasis)}) toplam değerlemeye dâhil edilmedi.
+        <div
+          className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]"
+          data-testid="partial-valuation"
+        >
+          <span className="font-semibold">{PARTIAL_VALUATION_LABEL}:</span> {summary.unpricedPositionCount} ürün için
+          fiyat alınamadı. Bozdurma, yeniden alım ve gerçekleşmemiş K/Z toplamları yalnızca fiyatı bulunan{" "}
+          {summary.pricedPositionCount} varlığı kapsar; fiyatı olmayan varlıkların maliyet toplamı{" "}
+          {formatMoney(summary.unpricedCostBasis)}. Gerçekleşmiş K/Z bundan etkilenmez.
         </div>
       ) : null}
 

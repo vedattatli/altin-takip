@@ -1,9 +1,12 @@
 import {
   buildAccountingSummary,
   LedgerOversellError,
+  normalizeLedgerEntry,
   parseLedgerCommand,
   replayProduct,
   resolveLedgerAmounts,
+  sortLedgerDesc,
+  validatePriceSnapshotInput,
   type AccountingSummary,
   type LedgerAppendResult,
   type LedgerCommand,
@@ -21,11 +24,13 @@ import { createId, nowISO } from "./types";
  * Demo depoları (bellek / IndexedDB) için yerel defter motoru.
  *
  * Sunucu deposunda bu iş Postgres RPC'lerinde yapılır; burada aynı kurallar
- * (append-only, VOID/REPLACED, kronolojik negatif miktar kontrolü, idempotency)
- * tarayıcı içinde uygulanır. Demo verisi sunucuya gitmez.
+ * (append-only, VOID/REPLACED, kronolojik negatif miktar kontrolü, idempotency,
+ * anlık görüntü doğrulaması) tarayıcı içinde uygulanır. Demo verisi sunucuya gitmez.
  */
 
 const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
+
+export { sortLedgerDesc };
 
 export async function localSnapshot(): Promise<PriceSnapshot> {
   return getPriceProvider().getQuotes(ALL_PRODUCT_IDS);
@@ -52,7 +57,7 @@ async function baselineFor(command: LedgerCommand): Promise<PriceSnapshotInput |
   if (snapshot.status === "unavailable" || isSnapshotStale(snapshot)) return null;
   const quote = snapshot.quotes[command.productId];
   if (!quote || quote.status !== "ok") return null;
-  return {
+  const input: PriceSnapshotInput = {
     productId: command.productId,
     liquidationPrice: quote.liquidationPrice,
     replacementPrice: quote.replacementPrice,
@@ -64,6 +69,7 @@ async function baselineFor(command: LedgerCommand): Promise<PriceSnapshotInput |
     providerTimestamp: quote.providerTimestamp,
     fetchedAt: quote.fetchedAt,
   };
+  return validatePriceSnapshotInput(input, command.productId, Date.now()) === null ? input : null;
 }
 
 function positionOrThrow(entries: readonly LedgerEntry[], productId: string) {
@@ -84,6 +90,13 @@ function positionOrThrow(entries: readonly LedgerEntry[], productId: string) {
 export interface LocalLedgerState {
   entries: LedgerEntry[];
   nextSequence: number;
+}
+
+/** Eski biçimde saklanmış kayıtları güncel biçime getirir (IndexedDB / bellek). */
+export function normalizeLocalEntries(entries: readonly unknown[]): LedgerEntry[] {
+  return entries
+    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+    .map((entry) => normalizeLedgerEntry(entry));
 }
 
 async function buildEntry(
@@ -116,6 +129,8 @@ async function buildEntry(
     quantity: request.quantity,
     unit: request.unit,
     occurredAt: request.occurredAt,
+    occurredTime: request.occurredTime,
+    occurredAtInstant: request.occurredAtInstant,
     pricingInputMode: request.pricingInputMode,
     ...amounts,
     costBasisOrigin: request.costBasisOrigin,
@@ -210,12 +225,4 @@ export function localVoidAll(state: LocalLedgerState): { count: number; entries:
     return { ...entry, status: "VOID" as const, voidedAt: timestamp, voidReason: "Tüm işlemler iptal edildi", updatedAt: timestamp };
   });
   return { count, entries };
-}
-
-export function sortLedgerDesc(entries: readonly LedgerEntry[]): LedgerEntry[] {
-  return [...entries].sort((a, b) => {
-    if (a.occurredAt !== b.occurredAt) return a.occurredAt < b.occurredAt ? 1 : -1;
-    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-    return b.ledgerSequence - a.ledgerSequence;
-  });
 }

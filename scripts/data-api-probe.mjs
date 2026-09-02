@@ -312,6 +312,46 @@ async function main() {
     });
     expect("service_role bile portfolio_positions'ı elle DEĞİŞTİREMEZ", denied(servicePositionsPatch), `${servicePositionsPatch.status} ${servicePositionsPatch.text.slice(0, 120)}`);
 
+    // --- Sprint 1.1: service_role DOĞRUDAN defter/snapshot yazamaz; yalnızca RPC ---
+    const serviceTxInsert = await call("POST", "/rest/v1/transactions", {
+      token: SERVICE_KEY,
+      prefer: "return=representation",
+      body: {
+        user_id: actualUserId,
+        portfolio_id: portfolioId,
+        product_id: "gram-altin",
+        side: "buy",
+        quantity: 1,
+        unit: "gram",
+        traded_at: "2026-02-01",
+        occurred_at: "2026-01-31T21:00:00Z",
+        unit_price: 5000,
+      },
+    });
+    expect("service_role transactions tablosuna DOĞRUDAN INSERT yapamaz (yalnızca ledger_append)", denied(serviceTxInsert), `${serviceTxInsert.status} ${serviceTxInsert.text.slice(0, 120)}`);
+    const serviceTxPatch = await call("PATCH", `/rest/v1/transactions?user_id=eq.${actualUserId}`, {
+      token: SERVICE_KEY,
+      body: { note: "elle" },
+    });
+    expect("service_role transactions tablosunu DOĞRUDAN UPDATE edemez", denied(serviceTxPatch), `${serviceTxPatch.status} ${serviceTxPatch.text.slice(0, 120)}`);
+    const serviceTxDelete = await call("DELETE", `/rest/v1/transactions?user_id=eq.${actualUserId}`, { token: SERVICE_KEY });
+    expect("service_role transactions tablosundan DOĞRUDAN DELETE edemez", denied(serviceTxDelete), `${serviceTxDelete.status} ${serviceTxDelete.text.slice(0, 120)}`);
+    const serviceSnapshotInsert = await call("POST", "/rest/v1/price_snapshots", {
+      token: SERVICE_KEY,
+      body: {
+        user_id: actualUserId,
+        product_id: "gram-altin",
+        liquidation_price: "1",
+        replacement_price: "1",
+        provider: "elle",
+        market: "ELLE",
+        provider_status: "ok",
+        provider_timestamp: new Date().toISOString(),
+        fetched_at: new Date().toISOString(),
+      },
+    });
+    expect("service_role price_snapshots tablosuna DOĞRUDAN INSERT yapamaz", denied(serviceSnapshotInsert), `${serviceSnapshotInsert.status} ${serviceSnapshotInsert.text.slice(0, 120)}`);
+
     // --- BFF (service_role) yolu çalışır: sınır yanlış tarafı kapatmamış ---
     console.log("service_role (BFF yolu):");
     const bffRpc = await call("POST", "/rest/v1/rpc/create_transaction_checked", {
@@ -349,6 +389,28 @@ async function main() {
       },
     });
     expect("service_role ledger_append ile defter kaydı yazar", ledgerAppend.status === 200 && ledgerAppend.json?.transaction?.quantity === "0.1", `${ledgerAppend.status} ${ledgerAppend.text.slice(0, 160)}`);
+    expect(
+      "ledger_append girilen fiyatı (quoted) ve efektif maliyeti ayrı döner; occurredAtInstant Europe/Istanbul günün başlangıcıdır",
+      ledgerAppend.json?.transaction?.quotedAcquisitionUnitPrice === "5000.33"
+        && ledgerAppend.json?.transaction?.effectiveAcquisitionUnitCost === "5000.33"
+        && ledgerAppend.json?.transaction?.occurredAtInstant === "2026-02-01T21:00:00.000Z"
+        && ledgerAppend.json?.transaction?.occurredTime === null,
+      `${ledgerAppend.status} ${ledgerAppend.text.slice(0, 240)}`,
+    );
+    const badDate = await call("POST", "/rest/v1/rpc/ledger_append", {
+      token: SERVICE_KEY,
+      body: {
+        p_user_id: actualUserId,
+        p_payload: {
+          kind: "BUY", product_id: "gram-altin", quantity: "1", unit: "gram", occurred_at: "2026-02-30",
+          pricing_input_mode: "UNIT_PRICE", unit_price: "5000", total_amount: null, fees: "0", workmanship: "0",
+          cost_basis_origin: "ACTUAL", note: "", client_request_id: null,
+        },
+      },
+    });
+    expect("takvimde olmayan tarih (2026-02-30) RPC'de açık hatayla (P0004) reddedilir", badDate.status >= 400 && badDate.text.includes("P0004"), `${badDate.status} ${badDate.text.slice(0, 160)}`);
+    const verify = await call("POST", "/rest/v1/rpc/ledger_verify", { token: SERVICE_KEY, body: { p_user_id: actualUserId } });
+    expect("RPC sonrası projeksiyon defterle eşleşir (ledger_verify)", verify.status === 200 && Array.isArray(verify.json?.mismatches) && verify.json.mismatches.length === 0, `${verify.status} ${verify.text.slice(0, 160)}`);
     const ledgerReplay = await call("POST", "/rest/v1/rpc/ledger_append", {
       token: SERVICE_KEY,
       body: { p_user_id: actualUserId, p_payload: { ...JSON.parse(JSON.stringify({

@@ -105,6 +105,12 @@ export function formatDate(iso: string): string {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: "medium" }).format(date);
 }
 
+/** İşlem zamanı: tarih, saat girildiyse "10 Oca 2026 14:30". */
+export function formatOccurred(date: string, time: string | null | undefined): string {
+  const base = formatDate(date);
+  return time ? `${base} ${time}` : base;
+}
+
 export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;

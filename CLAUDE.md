@@ -164,7 +164,21 @@ Arayüz yönlendirmesine tek başına güvenme.
   `decimal.js` (`src/domain/accounting`), veritabanında `numeric`. `decimal.js`'te
   `isPositive()` sıfır için de true döner; `> 0` için `greaterThan(0)` kullan.
 - **Defter kaynak gerçektir.** Kayıt silme/güncelleme yok; yalnızca `ledger_append`,
-  `ledger_void`, `ledger_replace` RPC'leri. `portfolio_positions` projeksiyonuna elle yazma.
+  `ledger_void`, `ledger_replace` RPC'leri. `transactions`, `price_snapshots` ve
+  `portfolio_positions` tablolarına uygulama kodundan `.from()` ile ERİŞME; veritabanı
+  `service_role`'e bile doğrudan yazma izni vermez (0011) ve statik test bunu denetler.
+- **Girilen fiyat ile efektif maliyeti karıştırma:** `quotedAcquisitionUnitPrice` kullanıcının
+  girdiği (masraf hariç) fiyattır; `effectiveAcquisitionUnitCost = totalPaid / quantity`.
+  TOTAL_AMOUNT modunda girilen fiyat UYDURULMAZ (null). "Birim alış fiyatı" etiketiyle
+  efektif maliyet gösterme.
+- **Köken bayrakları iki kümedir:** `holdingCostOrigins` (elde kalan; miktar sıfıra inince
+  sıfırlanır) ve `realizedPnlOrigins` (tarihsel; silinmez). K/Z etiketi ikisine birden bakar.
+- **İşlem zamanı Europe/Istanbul'dur:** tarih gerçek takvim günü olmalı (2026-02-30 ret),
+  saat isteğe bağlı; sıralama `occurredAtInstant`/`occurred_at`, `createdAt`, `ledgerSequence`, `id`.
+  Saat girilmeyen kayıt günün başlangıcıdır. Sunucu yerel saatine göre "bugün" hesaplama;
+  `todayISO()` kullan.
+- **Sayı ayrıştırıcıyı gevşetme:** iç boşluk ("1 2") ve belirsiz tek üçlü grup ("5.000")
+  reddedilir; formlar düzeltme değerlerini `toInputDecimal` ile (virgüllü) yükler.
 - **Her mutation `clientRequestId` kabul etsin;** aynı içerik replay, farklı içerik 409.
 - Kullanıcının gerçek işlem fiyatı esastır; piyasa fiyatı maliyeti değiştirmez.
   `MARKET_BASELINE` fiyatını yalnızca sunucu sağlayıcısından al; istemci fiyatını yok say.

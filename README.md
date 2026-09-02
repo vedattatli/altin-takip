@@ -80,6 +80,8 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    0009_portfolio_accounting.sql  -> işlem defteri sütunları, price_snapshots, portfolio_positions,
                                      defter koruma tetikleyicileri, idempotency indeksi
    0010_accounting_rpc.sql        -> atomik defter RPC'leri (ekle / iptal / düzelt / doğrula)
+   0011_accounting_integrity.sql  -> service_role doğrudan yazma izinlerinin kaldırılması,
+                                     köken ayrımı, girilen/efektif fiyat, occurred_at, snapshot kısıtları
    ```
 
    Bakım görevleri (pg_cron) için ayrıca bir kez `supabase/setup/maintenance-cron.sql`
@@ -92,7 +94,7 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    ```
 
    Bu komut `supabase db reset` ile 0001'den itibaren tüm migration'ları temiz bir
-   veritabanına uygular ve 124 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
+   veritabanına uygular ve 156 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
 
    ```bash
    npm run test:data-api
@@ -120,7 +122,7 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0010 uygular, 124 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0011 uygular, 156 pgTAP testi koşar (Supabase CLI + Docker) |
 | `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
@@ -191,9 +193,12 @@ defteri**dir (kayıt silinmez; iptal edilir veya düzeltilir). Üç akış: **Me
 (gerçek / tahmini maliyet veya "bugünden itibaren takip et" = piyasa başlangıç değeri),
 **Yeni Alış Ekle** (birim fiyat + masraflar veya toplam ödenen tutar) ve **Satış Ekle**
 (birim satış fiyatı veya net tahsilat). Bütün miktar ve tutarlar ondalık dize olarak taşınır;
-hesaplar `decimal.js` ve PostgreSQL `numeric` ile yapılır. Her mutation atomik RPC'den geçer,
-eşzamanlı satış eldeki miktarı aşamaz, aynı `clientRequestId` ile tekrar gönderim ikinci kayıt
-oluşturmaz. Ayrıntı ve örnek hesaplar: [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md).
+hesaplar `decimal.js` ve PostgreSQL `numeric` ile yapılır. Her mutation atomik RPC'den geçer
+(veritabanı `service_role`'e bile doğrudan tablo yazımı vermez), eşzamanlı satış eldeki miktarı
+aşamaz, aynı `clientRequestId` ile tekrar gönderim ikinci kayıt oluşturmaz. Girilen birim fiyat
+ile masraflar dâhil efektif maliyet ayrı saklanır; işlemlere isteğe bağlı saat girilerek aynı
+gün içindeki gerçek sıra korunur (Europe/Istanbul). Ayrıntı ve örnek hesaplar:
+[docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md).
 
 > Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girilen verilere ve
 > bilgilendirme amaçlı (bu sürümde test) fiyatlara dayalı bir portföy takip aracıdır.
@@ -216,7 +221,7 @@ oluşturmaz. Ayrıntı ve örnek hesaplar: [docs/ACCOUNTING_MODEL.md](docs/ACCOU
   tablolara **doğrudan yazamaz** (INSERT/UPDATE/DELETE grant'ı yok); kritik
   SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal mutation
   yalnızca BFF + kontrollü RPC yolundan geçer. GRANT ve RLS iki ayrı katmandır ve
-  124 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
+  156 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
 - **Üretim sertleştirme:** `APP_ORIGIN` zorunlu (Host'tan türetilmez),
   `TRUSTED_PROXY_PROVIDER` ile `X-Forwarded-For` yalnızca güvenilir vekilde okunur,
   ham IP hiçbir yere yazılmaz, giriş hız sınırı IP / kullanıcı adı / kombinasyon

@@ -1,9 +1,9 @@
 # Veri Modeli
 
 Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010`.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011`.
 Yetki sınırı ve RLS testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
-(124 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
+(156 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
 Muhasebe kuralları: [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md).
 Bakım görevleri: [`supabase/setup/maintenance-cron.sql`](../supabase/setup/maintenance-cron.sql).
 
@@ -359,8 +359,12 @@ Migration mevcut admin oturumlarını `persistent = false`, 8 saat / 15 dk sın�
 | --- | --- | --- |
 | `transaction_kind` | `text` | `OPENING_BALANCE` \| `BUY` \| `SELL` |
 | `pricing_input_mode` | `text` | `UNIT_PRICE` \| `TOTAL_AMOUNT` \| `MARKET_BASELINE` |
-| `acquisition_unit_price` | `numeric(20,8)` | Kullanıcının ödediği birim fiyat (piyasa fiyatı değil); TOTAL_AMOUNT'ta bilgi amaçlı türetilir |
-| `disposal_unit_price` | `numeric(20,8)` | Kullanıcının aldığı birim fiyat |
+| `quoted_acquisition_unit_price` | `numeric(20,8)` | Kullanıcının UNIT_PRICE modunda GİRDİĞİ birim alış fiyatı (masraf hariç); TOTAL_AMOUNT'ta null; MARKET_BASELINE'da anlık görüntü bozdurma fiyatı (0011) |
+| `effective_acquisition_unit_cost` | `numeric(20,8)` generated | `total_paid / quantity` — masraflar dâhil efektif birim maliyet (0011) |
+| `quoted_disposal_unit_price` | `numeric(20,8)` | Girilen brüt birim satış fiyatı; TOTAL_AMOUNT'ta null (0011) |
+| `effective_net_unit_proceeds` | `numeric(20,8)` generated | `net_proceeds / quantity` (0011) |
+| `occurred_at` | `timestamptz` | İşlem anı: `(traded_at + (occurred_time ?? 00:00)) at time zone 'Europe/Istanbul'`; sıralama anahtarı (0011) |
+| `occurred_time` | `time(0)` | Kullanıcının girdiği isteğe bağlı saat; null ise günün başlangıcı (0011) |
 | `gross_amount`, `fees`, `workmanship` | `numeric(20,8)` | `>= 0` |
 | `total_paid` | `numeric(20,8)` | BUY/OPENING: masraflar dâhil edinim maliyeti |
 | `net_proceeds` | `numeric(20,8)` | SELL: masraflar düşülmüş net tahsilat |
@@ -369,7 +373,7 @@ Migration mevcut admin oturumlarını `persistent = false`, 8 saat / 15 dk sın�
 | `replaces_transaction_id` / `replaced_by_transaction_id` | `uuid` | Düzeltme ilişkisi |
 | `created_by` | `uuid` | |
 | `client_request_id`, `request_hash` | `text` | Idempotency: `(user_id, client_request_id)` benzersiz; içerik md5 ile karşılaştırılır |
-| `ledger_sequence` | `bigint identity` | Deterministik sıra: `traded_at`, `created_at`, `ledger_sequence` |
+| `ledger_sequence` | `bigint identity` | Deterministik sıra: `occurred_at`, `created_at`, `ledger_sequence`, `id` |
 
 Tetikleyiciler `transactions_ledger_guard_update/delete`: finansal alanlar değiştirilemez;
 yalnızca `ACTIVE → VOID/REPLACED` geçişi ve REPLACED kayda bir kez `replaced_by` yazımı;
@@ -385,8 +389,10 @@ UPDATE/DELETE hiçbir role (tetikleyici de reddeder).
 ### 17.3 `portfolio_positions` (türetilmiş projeksiyon)
 
 `(portfolio_id, product_id)` PK, `user_id`, `quantity numeric(20,6)`, `remaining_cost_basis`,
-`average_cost` (miktar 0 ise null), `realized_pnl`, `has_actual/estimated/baseline`,
-`active_transaction_count`, `last_ledger_sequence`, `updated_at`. RLS: kendi satırını SELECT.
+`average_cost` (miktar 0 ise null), `realized_pnl`, `has_actual/estimated/baseline`
+(ELDE KALAN miktarın kökeni; miktar sıfıra inince sıfırlanır), `realized_has_actual/estimated/baseline`
+(gerçekleşmiş K/Z'nin tarihsel kökeni; silinmez — 0011), `active_transaction_count`,
+`last_ledger_sequence`, `updated_at`. RLS: kendi satırını SELECT.
 Grant: authenticated ve service_role yalnızca SELECT — yazma yalnızca SECURITY DEFINER RPC ile.
 `npm run accounting:verify` defterden yeniden hesaplayıp karşılaştırır.
 
@@ -402,3 +408,16 @@ Grant: authenticated ve service_role yalnızca SELECT — yazma yalnızca SECURI
 | `ledger_verify(uuid)` | service_role | Yeniden oynatma ↔ projeksiyon karşılaştırması |
 | `ledger_compute_amounts`, `ledger_replay_product`, `ledger_rebuild_position`, JSON yardımcıları | hiçbiri | Dahili |
 | `create/update/delete_transaction_checked` (eski) | service_role | Yeni deftere yönlendirilir (uyumluluk) |
+
+## 19. Muhasebe bütünlüğü (`0011_accounting_integrity.sql`)
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| Yetkiler | `service_role`'den `transactions` ve `price_snapshots` üzerindeki INSERT/UPDATE/DELETE kaldırıldı (yalnızca SELECT). Finansal yazma yalnızca SECURITY DEFINER RPC'lerle |
+| Sütun yeniden adlandırma | `acquisition_unit_price → quoted_acquisition_unit_price`, `disposal_unit_price → quoted_disposal_unit_price` (guarded rename, idempotent) |
+| Türetilmiş sütunlar | `effective_acquisition_unit_cost`, `effective_net_unit_proceeds` (`generated always ... stored`) |
+| Zaman | `occurred_at timestamptz not null`, `occurred_time time(0)`; kısıtlar `transactions_occurred_date_consistent`, `transactions_occurred_time_consistent`; indeks `transactions_ledger_instant_idx` |
+| Backfill | Yalnızca `occurred_at` boş satırlarda (ilk çalıştırma): quoted = UNIT_PRICE'ta `gross/quantity`, MARKET_BASELINE'da anlık görüntü fiyatı, TOTAL_AMOUNT'ta null; `occurred_at = traded_at 00:00 Europe/Istanbul`. Guard tetikleyicisi bu adım için geçici kapatılır |
+| Kısıtlar | `transactions_quoted_prices_kind`; `price_snapshots_spread_consistent`, `price_snapshots_currency_try`, `price_snapshots_provider_market_nonempty` (mevcut veri önce denetlenir; çakışma varsa migration açık hatayla durur) |
+| Projeksiyon | `realized_has_actual/estimated/baseline`; bütün pozisyonlar `ledger_rebuild_position` ile yeniden oluşturulur |
+| RPC | `ledger_append` sıkı tarih/saat + anlık görüntü doğrulaması; `ledger_replay_product` iki köken kümesi ve `occurred_at` sırası; `ledger_verify` köken bayraklarını da karşılaştırır; JSON yardımcıları yeni alanları döner |

@@ -82,13 +82,28 @@
 - **Doğrulama:** 388 birim testi (kabul örnekleri + özellik testleri), 124 pgTAP, gerçek JWT
   sondası (31), `accounting:verify`, `accounting:smoke`, Playwright.
 
+### Sprint 1.1 — muhasebe bütünlüğü ve veri semantiği
+
+- **Veritabanı sınırı:** `service_role` `transactions` / `price_snapshots` tablolarına doğrudan
+  yazamaz; finansal mutation yalnızca SECURITY DEFINER RPC'lerle (`0011_accounting_integrity.sql`).
+- **Köken ayrımı:** elde kalan pozisyon kökeni (miktar sıfıra inince sıfırlanır) ile gerçekleşmiş
+  K/Z'nin tarihsel kökeni ayrı bayraklarda.
+- **Girilen fiyat ≠ efektif maliyet:** `quoted_*` sütunları ile türetilmiş `effective_*` sütunları;
+  TOTAL_AMOUNT'ta girilen fiyat uydurulmaz.
+- **Zaman:** sıkı takvim doğrulaması, isteğe bağlı saat, `occurred_at timestamptz` sırası
+  (Europe/Istanbul).
+- **Savunma:** anlık görüntü doğrulaması (makas/zaman/para birimi/ürün), kısmi değerleme etiketi,
+  iç boşluk ve belirsiz ayırıcıyı reddeden sayı ayrıştırıcı.
+- **Doğrulama:** 416 birim testi, 156 pgTAP, gerçek JWT sondası (38), `accounting:verify`,
+  `accounting:smoke`, Playwright.
+
 ## Sprint 2 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
 kapatmaktır.
 
-1. Uzak Supabase projesi aç, `0001` → `0010` migration'larını sırayla uygula.
+1. Uzak Supabase projesi aç, `0001` → `0011` migration'larını sırayla uygula.
 2. Aynı projeye karşı `npm run test:db` mantığını (pgTAP) ve `npm run test:data-api`
    sondasını çalıştır (sonda için proje URL / anahtar / JWT secret ortam değişkenleri).
 3. `npm run admin:create` ile gerçek yönetici hesabını oluştur; gerekirse `npm run admin:repair`.

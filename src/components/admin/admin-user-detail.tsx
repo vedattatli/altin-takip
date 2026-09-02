@@ -425,6 +425,13 @@ export function AdminUserDetail({
           </Card>
         </div>
 
+        {summary.valuationCoverage === "partial" ? (
+          <p className="mt-2 text-xs text-[var(--notice)]">
+            Kısmi değerleme: değerleme toplamları yalnızca fiyatı bulunan {summary.pricedPositionCount}/
+            {summary.positionCount} varlığı kapsar.
+          </p>
+        ) : null}
+
         <Card className="mt-3">
           {summary.positionCount === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted">

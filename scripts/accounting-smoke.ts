@@ -14,6 +14,7 @@ loadEnv({ path: ".env", quiet: true });
 
 import { parseLedgerCommand, type LedgerAppendRequest } from "../src/domain/accounting";
 import { createUserActor, ownScope } from "../src/server/auth/actor";
+import { LedgerAmountError } from "../src/domain/accounting/amounts";
 import { IdempotencyConflictError, OversellError } from "../src/server/auth/backend";
 
 function requestOf(command: Parameters<typeof parseLedgerCommand>[0]): LedgerAppendRequest {
@@ -59,6 +60,18 @@ async function main(): Promise<void> {
     await buy("2026-01-11", "5", "4200");
     const third = await buy("2026-01-12", "5", "3700");
     pass("ÖRNEK 1: 15 gram / 57.000 / 3.800", third.position.quantity === "15" && third.position.remainingCostBasis === "57000" && third.position.averageCost === "3800", JSON.stringify(third.position));
+    pass("Girilen birim fiyat korunur (3.700), efektif = total/miktar", third.entry.quotedAcquisitionUnitPrice === "3700" && third.entry.effectiveAcquisitionUnitCost === "3700" && third.entry.occurredAtInstant === "2026-01-11T21:00:00.000Z" && third.entry.occurredTime === null, JSON.stringify(third.entry));
+
+    const withFees = await backend.appendLedgerEntry(scope, requestOf({ kind: "BUY", productId: "has-altin", quantity: "10", occurredAt: "2026-01-15", occurredTime: "14:30", pricingInputMode: "UNIT_PRICE", unitPrice: "5000", fees: "100", workmanship: "500" }));
+    pass("Masraflı alış: quoted 5.000 / efektif 5.060 / saat 14:30", withFees.entry.quotedAcquisitionUnitPrice === "5000" && withFees.entry.effectiveAcquisitionUnitCost === "5060" && withFees.entry.totalPaid === "50600" && withFees.entry.occurredTime === "14:30" && withFees.entry.occurredAtInstant === "2026-01-15T11:30:00.000Z", JSON.stringify(withFees.entry));
+
+    let badDate = false;
+    try {
+      await backend.appendLedgerEntry(scope, { ...requestOf({ kind: "BUY", productId: "has-altin", quantity: "1", occurredAt: "2026-02-01", pricingInputMode: "UNIT_PRICE", unitPrice: "5000" }), occurredAt: "2026-02-30" });
+    } catch (error) {
+      badDate = error instanceof LedgerAmountError;
+    }
+    pass("Takvimde olmayan tarih (2026-02-30) RPC'de açık hatayla reddedilir", badDate);
 
     const sale = await backend.appendLedgerEntry(scope, requestOf({ kind: "SELL", productId: "gram-altin", quantity: "4", occurredAt: "2026-02-01", pricingInputMode: "UNIT_PRICE", unitPrice: "4200" }));
     pass("ÖRNEK 4: net 16.800, gerçekleşmiş 1.600, kalan 11 / 41.800 / 3.800", sale.entry.netProceeds === "16800" && sale.position.realizedPnl === "1600" && sale.position.quantity === "11" && sale.position.remainingCostBasis === "41800" && sale.position.averageCost === "3800", JSON.stringify(sale.position));
@@ -96,6 +109,7 @@ async function main(): Promise<void> {
       kind: "OPENING_BALANCE",
       productId: "yeni-ceyrek",
       quantity: "2",
+      occurredAt: "2026-02-05",
       costMethod: "MARKET_BASELINE",
       liquidationPrice: "1",
     });
@@ -106,6 +120,24 @@ async function main(): Promise<void> {
         baseline.entry.priceSnapshot?.liquidationPrice !== "1",
       JSON.stringify(baseline.entry.priceSnapshot),
     );
+
+    // Aynı gün gerçek sıra: 10:00 alış + 11:00 satış geçer; 10:00 satış + 11:00 alış oversell.
+    await backend.appendLedgerEntry(scope, requestOf({ kind: "BUY", productId: "kulce-24-ayar", quantity: "2", occurredAt: "2026-02-10", occurredTime: "10:00", pricingInputMode: "UNIT_PRICE", unitPrice: "5000" }));
+    const sameDaySell = await backend.appendLedgerEntry(scope, requestOf({ kind: "SELL", productId: "kulce-24-ayar", quantity: "2", occurredAt: "2026-02-10", occurredTime: "11:00", pricingInputMode: "UNIT_PRICE", unitPrice: "5100" }));
+    pass("Aynı gün 10:00 alış / 11:00 satış geçer; pozisyon 0, holding kökeni yok, realized köken ACTUAL", sameDaySell.position.quantity === "0" && !sameDaySell.position.holdingCostOrigins.actual && sameDaySell.position.realizedPnlOrigins.actual, JSON.stringify(sameDaySell.position));
+    let sameDayOversell = false;
+    try {
+      await backend.appendLedgerEntry(scope, requestOf({ kind: "SELL", productId: "kulce-24-ayar", quantity: "1", occurredAt: "2026-02-10", occurredTime: "09:00", pricingInputMode: "UNIT_PRICE", unitPrice: "5100" }));
+    } catch (error) {
+      sameDayOversell = error instanceof OversellError;
+    }
+    pass("Aynı gün alıştan ÖNCEKİ saate satış oversell ile reddedilir", sameDayOversell);
+
+    // Baseline → tam satış → ACTUAL alış: elde kalan kalite ACTUAL, tarihsel köken korunur.
+    const reopened = await backend.appendLedgerEntry(scope, requestOf({ kind: "SELL", productId: "yeni-ceyrek", quantity: "2", occurredAt: "2026-02-06", pricingInputMode: "UNIT_PRICE", unitPrice: "12000" }));
+    pass("Baseline pozisyon tam satılınca holding kökeni sıfırlanır, realized baseline korunur", reopened.position.quantity === "0" && !reopened.position.holdingCostOrigins.baseline && reopened.position.realizedPnlOrigins.baseline, JSON.stringify(reopened.position));
+    const actualAgain = await backend.appendLedgerEntry(scope, requestOf({ kind: "BUY", productId: "yeni-ceyrek", quantity: "1", occurredAt: "2026-02-07", pricingInputMode: "UNIT_PRICE", unitPrice: "12100" }));
+    pass("ACTUAL alışla yeniden açılan pozisyon yalnızca ACTUAL kökenlidir", actualAgain.position.holdingCostOrigins.actual && !actualAgain.position.holdingCostOrigins.baseline && actualAgain.position.realizedPnlOrigins.baseline, JSON.stringify(actualAgain.position));
 
     const verify = await backend.verifyLedger(scope);
     pass("ledger_verify: tutarsızlık yok", verify.mismatches.length === 0 && verify.checked >= 2, JSON.stringify(verify));

@@ -27,7 +27,8 @@ gerçek **append-only işlem defteri**dir (`public.transactions`):
 - "Düzenle": mevcut kayıt `REPLACED` olur, yerine yeni kayıt eklenir; iki kayıt
   `replaces_transaction_id` / `replaced_by_transaction_id` ile birbirine bağlanır;
   tümü **tek veritabanı işlemi** içinde.
-- Deterministik sıra: `occurred_at` (`traded_at`), `created_at`, `ledger_sequence`.
+- Deterministik sıra: `occurred_at` (tarih + isteğe bağlı saat, Europe/Istanbul → UTC an),
+  `created_at`, `ledger_sequence`, `id` (bkz. bölüm 11).
 - Geçmiş tarihli kayıt eklenince, iptal edilince veya düzeltilince ürünün
   pozisyonu defterden **yeniden oynatılır**.
 - Geçmişteki bir değişiklik sonraki bir satışı eldeki miktarın üstüne çıkarıyorsa
@@ -36,6 +37,12 @@ gerçek **append-only işlem defteri**dir (`public.transactions`):
 Türetilmiş projeksiyon `public.portfolio_positions` yalnızca performans içindir;
 elle düzenlenemez (service_role'e bile yalnızca SELECT verilir) ve
 `npm run accounting:verify` ile defterden yeniden hesaplanıp karşılaştırılır.
+
+**Veritabanı sınırı (0011):** `service_role` (BFF) `public.transactions` ve
+`public.price_snapshots` tablolarına da DOĞRUDAN yazamaz (yalnızca SELECT). Bütün
+finansal mutation'lar SECURITY DEFINER `ledger_append` / `ledger_void` /
+`ledger_replace` / `ledger_void_all` RPC'lerinden geçmek zorundadır; yanlışlıkla
+yazılan bir `transactions.insert()` veritabanı tarafından reddedilir.
 
 ## 3. Açılış bakiyesi (mevcut altın) ve maliyet kökeni
 
@@ -214,3 +221,89 @@ mevcut sonuç döner (`replayed: true`, HTTP 200). Aynı anahtar + farklı içer
 Bu örnekler `tests/accounting.test.ts`, `tests/integrity.test.ts`,
 `supabase/tests/rls.test.sql` (Postgres motoru) ve `e2e/portfolio.spec.ts` içinde
 doğrulanır.
+
+## 11. İşlem zamanı ve aynı gün sıralaması
+
+- Kullanıcı tarihi `YYYY-MM-DD`, isteğe bağlı saati `HH:MM` girer. Saat girmek zorunlu değildir.
+- Bütün girdiler **Europe/Istanbul** yerel saatidir (varsayılan kullanıcı saat dilimi).
+  Türkiye 2016'dan beri sabit UTC+03:00 kullanır; daha eski tarihlerde tarihsel yaz saati
+  kuralları IANA tzdata ile (TypeScript'te `Intl`, Postgres'te `at time zone`) uygulanır.
+- Tarih **gerçek bir takvim günü** olmalıdır: `2026-02-30` reddedilir, `2028-02-29` (artık yıl)
+  kabul edilir. Gelecek tarih ve gelecek saat (5 dakika tolerans) reddedilir. Bu doğrulama
+  istemcide, sunucuda ve `ledger_append` içinde (P0004) yapılır; veritabanı hatası genel
+  500'e dönüşmez.
+- Saklama: `traded_at` (tarih), `occurred_time` (saat, null olabilir) ve
+  `occurred_at timestamptz` = `(tarih + (saat ?? 00:00)) at time zone 'Europe/Istanbul'`.
+  Saat girilmeyen kayıt **o günün başlangıcı** sayılır; aynı gün içinde sıra gerekiyorsa her
+  iki kayda da saat girilir.
+- Yeniden oynatma sırası: `occurred_at`, `created_at`, `ledger_sequence`, `id`.
+  Aynı gün 10:00 alış + 11:00 satış geçer; 11:00 alış + 10:00 satış olarak girilirse satış
+  kronolojik olarak alıştan önce oynatılır ve `ALTIN_OVERSELL` ile reddedilir. Bir kaydın
+  tarih/saat düzeltmesi aşırı satış oluşturuyorsa düzeltme reddedilir.
+- Eski (yalnızca tarihli) kayıtlar migration ile deterministik biçimde
+  `traded_at 00:00 Europe/Istanbul` anına taşınmıştır; sıraları değişmemiştir.
+
+## 12. Maliyet kökeni: elde kalan pozisyon ↔ gerçekleşmiş K/Z
+
+İki ayrı bayrak kümesi tutulur (`portfolio_positions` ve `positions_list`):
+
+| Küme | Alan | Anlamı |
+| --- | --- | --- |
+| `holdingCostOrigins` (`has_actual/estimated/baseline`) | Elde kalan miktarın kökenleri | Alışta ilgili bayrak açılır; **kalan miktar tam sıfıra inince sıfırlanır** |
+| `realizedPnlOrigins` (`realized_has_*`) | Gerçekleşmiş K/Z'nin tarihsel kökenleri | Satışta havuzun o andaki kökenleri kopyalanır; **hiç silinmez** |
+
+Sonuçlar:
+
+- 10 g `MARKET_BASELINE` ile açılır, tamamı satılır, 5 g gerçek fiyatla alınırsa elde kalan
+  5 g "Gerçek maliyet" etiketlenir (Karışık değil); gerçekleşmiş K/Z kökeninde
+  `MARKET_BASELINE` korunur.
+- Portföy düzeyindeki "Takip başlangıcından itibaren K/Z" etiketi, açık pozisyonlarda **veya**
+  geçmiş gerçekleşmiş K/Z'de `ESTIMATED` / `MARKET_BASELINE` varsa gösterilmeye devam eder;
+  uygulama gerçek tarihsel maliyet iddiasında bulunmaz.
+- Tamamen kapanmış ve yeniden açılmamış pozisyon: miktar 0, kalan maliyet 0, ortalama null,
+  holding bayrakları false, realized bayrakları korunur.
+
+## 13. Girilen fiyat ≠ efektif birim maliyet
+
+| Alan | Alış | Satış |
+| --- | --- | --- |
+| Girilen (quoted) | `quotedAcquisitionUnitPrice`: UNIT_PRICE modunda kullanıcının girdiği birim fiyat (masraf HARİÇ); TOTAL_AMOUNT'ta **null (uydurulmaz)**; MARKET_BASELINE'da anlık görüntünün bozdurma fiyatı | `quotedDisposalUnitPrice`: girilen brüt birim satış fiyatı; TOTAL_AMOUNT'ta null |
+| Efektif (türetilmiş) | `effectiveAcquisitionUnitCost = total_paid / quantity` (işçilik + masraf dâhil) | `effectiveNetUnitProceeds = net_proceeds / quantity` |
+
+Örnek: 10 g × 5.000 TL + 500 TL işçilik + 100 TL masraf → girilen 5.000, brüt 50.000,
+toplam 50.600, efektif 5.060; pozisyon ortalaması 5.060. Ortalama maliyet her zaman
+`total_paid`, gerçekleşmiş K/Z her zaman `net_proceeds` üzerinden hesaplanır. Arayüzde
+"birim alış fiyatı" adı altında efektif maliyet gösterilmez; işlem geçmişi ikisini ayrı
+etiketler. Eski UNIT_PRICE kayıtlarında girilen fiyat `gross_amount / quantity` ile geriye
+dönük oluşturulmuş, eski TOTAL_AMOUNT kayıtlarında null bırakılmıştır (0011). Veritabanında
+efektif değerler `generated always as ... stored` sütunlardır; elle tutarsız hâle getirilemez.
+
+## 14. Fiyat anlık görüntüsü doğrulaması ve kısmi değerleme
+
+`MARKET_BASELINE` anlık görüntüsü (sunucudan gelse bile) hem TypeScript
+(`validatePriceSnapshotInput`) hem `ledger_append` içinde denetlenir:
+`liquidation_price > 0`, `replacement_price > 0`, `replacement_price >= liquidation_price`,
+`currency = TRY`, ürün eşleşmesi, `provider_status = ok`, sağlayıcı/piyasa boş değil, geçerli
+zaman damgaları, gelecekte en fazla 5 dakika, en fazla 15 dakika eski. Tablo kısıtları
+(`price_snapshots_spread_consistent`, `price_snapshots_currency_try`) aynı kuralı sahip
+bağlamında bile uygular. `isSnapshotStale` geçersiz, fazla eski ve toleransı aşan gelecek
+zaman için `true` döner. Başka ürün veya piyasadan sessiz ikame yapılmaz.
+
+Kısmi fiyat durumunda (`valuationCoverage = "partial"`): bozdurma, yeniden alım,
+gerçekleşmemiş ve toplam K/Z kartları "(kısmi)" etiketiyle yalnızca fiyatı bulunan
+varlıkların toplamını gösterir; fiyatı olmayan varlıkların maliyet toplamı ayrıca bildirilir;
+gerçekleşmiş K/Z fiyattan bağımsızdır ve tamdır; toplam K/Z kesin toplam gibi etiketlenmez.
+
+## 15. Sayı girdisi kuralları (istemci ve sunucuda aynı ayrıştırıcı)
+
+| Girdi | Sonuç |
+| --- | --- |
+| `12`, `12,5`, `12.5`, `0.125` | kabul (virgül ve nokta ondalık ayırıcı) |
+| `1.234,56`, `1.234.567`, `1.234.567,89` | kabul (Türkçe gruplu; iki+ üçlü grup binlik) |
+| `1 2` | **ret** — sayının içinde boşluk (12'ye dönüşmez) |
+| `5.000`, `1.234`, `12.500` | **ret** — belirsiz (5 mi, 5.000 mi?); `5,000`, `5.000,00` veya `5000` istenir |
+| `1,234.56`, `1.2.3`, `1,2,3`, `1e5`, `NaN`, `0x10` | ret |
+
+Gram miktarında en fazla 6 ondalık, adet ürününde yalnızca pozitif tam sayı; tutarlarda en
+fazla 4 ondalık, en fazla 12 tam basamak. Formlar düzeltme için değerleri virgüllü Türkçe
+biçimde (`toInputDecimal`) yeniden yükler; API kanonik `1234.56` dizesi alır.

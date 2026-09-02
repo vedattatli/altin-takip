@@ -349,6 +349,82 @@ test.describe("portföy akışı", () => {
     await expect(page.getByTestId("holdings-list")).not.toContainText("0,30000000000000004");
   });
 
+  test("aynı gün saatli işlemler gerçek sırayla oynatılır; takvimde olmayan tarih 400 döner", async ({ page }) => {
+    const username = scopedUsername("saatsira");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    const base = { productId: "kulce-24-ayar", pricingInputMode: "UNIT_PRICE" };
+
+    const badDate = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY", ...base, quantity: "1", occurredAt: "2026-02-30", unitPrice: "5000",
+    });
+    expect(badDate.status).toBe(400);
+    const leap = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY", ...base, quantity: "1", occurredAt: "2024-02-29", unitPrice: "5000",
+    });
+    expect(leap.status).toBe(201);
+
+    const buy = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY", ...base, quantity: "2", occurredAt: "2026-02-10", occurredTime: "10:00", unitPrice: "5000",
+    });
+    expect(buy.status).toBe(201);
+    const sell = await browserApi<{ entry: { occurredTime: string | null; occurredAtInstant: string } }>(
+      page,
+      "POST",
+      "/api/transactions",
+      { kind: "SELL", ...base, quantity: "3", occurredAt: "2026-02-10", occurredTime: "11:00", unitPrice: "5100" },
+    );
+    expect(sell.status).toBe(201);
+    expect(sell.data?.entry.occurredTime).toBe("11:00");
+    expect(sell.data?.entry.occurredAtInstant).toBe("2026-02-10T08:00:00.000Z");
+
+    // Aynı gün, alıştan ÖNCEKİ saate satış: kronolojik olarak eldeki 1 gramı aşar.
+    const early = await browserApi(page, "POST", "/api/transactions", {
+      kind: "SELL", ...base, quantity: "2", occurredAt: "2026-02-10", occurredTime: "09:00", unitPrice: "5100",
+    });
+    expect(early.status).toBe(400);
+
+    await gotoReady(page, "/islemler");
+    await expect(page.getByTestId("transaction-list")).toContainText("11:00");
+    await expect(page.getByTestId("transaction-list")).toContainText("10:00");
+  });
+
+  test("sayı girişi: iç boşluk ve belirsiz ayırıcı reddedilir; girilen fiyat ile efektif maliyet ayrı gösterilir", async ({ page }) => {
+    const username = scopedUsername("sayigirdi");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+    await gotoReady(page, "/islemler");
+    await page.getByTestId("add-buy").click();
+    await page.getByLabel(/^Miktar/).fill("1 2");
+    await page.getByLabel(/^Birim alış fiyatı/).fill("5.000");
+    await page.getByTestId("submit-buy").click();
+    await expect(page.getByText(/boşluk/)).toBeVisible();
+    await expect(page.getByText(/belirsiz/)).toBeVisible();
+
+    await page.getByLabel(/^Miktar/).fill("10");
+    await page.getByLabel("İşlem tarihi").fill("2026-02-10");
+    await page.getByTestId("occurred-time").fill("14:30");
+    await page.getByLabel(/^Birim alış fiyatı/).fill("5000");
+    await page.getByLabel(/^İşçilik/).fill("500");
+    await page.getByLabel(/^Komisyon/).fill("100");
+    await expect(page.getByTestId("buy-preview-prices")).toContainText("5.000,00");
+    await expect(page.getByTestId("buy-preview-prices")).toContainText("5.060,00");
+    await page.getByTestId("submit-buy").click();
+    await expect(page.getByTestId("transaction-list")).toBeVisible();
+    await expect(page.getByTestId("transaction-list")).toContainText("Birim fiyat ₺5.000,00");
+    await expect(page.getByTestId("transaction-list")).toContainText("Efektif ₺5.060,00");
+    await expect(page.getByTestId("transaction-list")).toContainText("14:30");
+    await expectNoHorizontalOverflow(page);
+
+    const summary = await browserApi<{ holdings: { position: { averageCost: string; holdingCostOrigins: { actual: boolean } } }[] }>(
+      page,
+      "GET",
+      "/api/portfolio/summary",
+    );
+    expect(summary.data?.holdings[0]?.position.averageCost).toBe("5060");
+    expect(summary.data?.holdings[0]?.position.holdingCostOrigins.actual).toBe(true);
+  });
+
   test("GET uçları veri değiştirmez", async ({ page }) => {
     const username = scopedUsername("getyanetkisiz");
     await createReadyUser(username);

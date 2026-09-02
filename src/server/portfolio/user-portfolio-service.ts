@@ -3,6 +3,7 @@ import "server-only";
 import {
   buildAccountingSummary,
   parseLedgerCommand,
+  validatePriceSnapshotInput,
   valuePositions,
   type AccountingSummary,
   type LedgerAppendRequest,
@@ -138,14 +139,15 @@ export class UserPortfolioService {
 
   /**
    * MARKET_BASELINE için sunucu fiyatı: istemciden gelen fiyat KABUL EDİLMEZ.
-   * Fiyat yoksa, geçersizse veya bayatsa null döner (açılış bakiyesi oluşturulmaz).
+   * Fiyat yoksa, geçersizse, bayatsa, makası tersse veya zamanı gelecekteyse null döner
+   * (açılış bakiyesi oluşturulmaz; başka ürün/piyasadan ikame yapılmaz).
    */
   async baselineSnapshotFor(productId: string): Promise<PriceSnapshotInput | null> {
     const snapshot = await this.currentSnapshot();
     if (snapshot.status === "unavailable" || isSnapshotStale(snapshot, this.now())) return null;
     const quote = snapshot.quotes[productId];
     if (!quote || quote.status !== "ok") return null;
-    return {
+    const input: PriceSnapshotInput = {
       productId,
       liquidationPrice: quote.liquidationPrice,
       replacementPrice: quote.replacementPrice,
@@ -157,6 +159,7 @@ export class UserPortfolioService {
       providerTimestamp: quote.providerTimestamp,
       fetchedAt: quote.fetchedAt,
     };
+    return validatePriceSnapshotInput(input, productId, this.now()) === null ? input : null;
   }
 
   /**
@@ -175,7 +178,7 @@ export class UserPortfolioService {
       if (!baselineSnapshot) throw priceUnavailable();
     }
 
-    const parsed = parseLedgerCommand(body, { baselineSnapshot });
+    const parsed = parseLedgerCommand(body, { baselineSnapshot, now: new Date(this.now()) });
     if (!parsed.ok) {
       const firstError = Object.values(parsed.errors).find(Boolean);
       throw badRequest(firstError ?? "İşlem verisi geçersiz.");

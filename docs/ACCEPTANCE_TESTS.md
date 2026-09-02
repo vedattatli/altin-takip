@@ -14,7 +14,7 @@ Ek komutlar:
 npm run test:db
 ```
 
-(Supabase CLI + Docker; temiz veritabanına 0001→0010 uygular, 124 pgTAP testi koşar.)
+(Supabase CLI + Docker; temiz veritabanına 0001→0011 uygular, 156 pgTAP testi koşar.)
 
 ```bash
 npm run accounting:verify
@@ -285,8 +285,8 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 ## 20. Veritabanı yetki sınırı ve RLS testleri (pgTAP + gerçek JWT)
 
-`supabase/tests/rls.test.sql` — **124 test**. Çalıştırma: `npm run test:db`
-(Supabase CLI + Docker; `supabase db reset` ile 0001→0010 temiz uygulanır).
+`supabase/tests/rls.test.sql` — **156 test**. Çalıştırma: `npm run test:db`
+(Supabase CLI + Docker; `supabase db reset` ile 0001→0011 temiz uygulanır).
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
@@ -311,7 +311,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 > Çıkış kodları: `0` geçti, `1` başarısız, **`2` çalıştırılamadı** (CLI veya
 > Docker yok). Komut ortam uygun değilse testleri çalıştırılmış gibi
-> raporlamaz. Son koşum: yerel Supabase yığınında 124/124 geçti; uzak proje yok.
+> raporlamaz. Son koşum: yerel Supabase yığınında 156/156 geçti; uzak proje yok.
 
 ## 21. Temiz kaynak paketi
 
@@ -352,3 +352,22 @@ Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop
 | 22.20 | Özellik testleri: miktar negatif olmaz, sıfırda maliyet sıfır, satış ortalamayı korur, bölünmüş alış = toplu alış, replay deterministik | `tests/accounting.test.ts` → "özellik testleri" |
 | 22.21 | Defter ↔ projeksiyon tutarlılığı | `npm run accounting:verify`; pgTAP "ledger_verify" |
 | 22.22 | 390/768/1440 px görünümleri geçer | Playwright projeleri; E2E "tüm ekranlarda yatay taşma yoktur" |
+
+## 23. Muhasebe bütünlüğü (Sprint 1.1)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 23.1 | service_role transactions tablosuna doğrudan INSERT/UPDATE/DELETE yapamaz | pgTAP §11 "service_role transactions … (0011)"; `scripts/data-api-probe.mjs` |
+| 23.2 | service_role price_snapshots tablosuna doğrudan INSERT yapamaz | pgTAP §11; Data API sondası |
+| 23.3 | Aynı rol `ledger_append` ile yazabilir; projeksiyon defterle eşleşir | pgTAP §11 lives_ok + ledger_verify; sonda "ledger_verify" |
+| 23.4 | Uygulama kodunda defter tablolarına `.from()` erişimi yok | `tests/accounting-integrity.test.ts` → "statik sınır" |
+| 23.5 | Baseline pozisyon tam kapanıp ACTUAL ile yeniden açılınca kalite ACTUAL; tarihsel köken korunur | `tests/accounting-integrity.test.ts` §1; pgTAP §13 "cumhuriyet-altini"; `accounting:smoke` |
+| 23.6 | Tam kapanmış pozisyon: 0 / 0 / null / holding false / realized korunur | `tests/accounting-integrity.test.ts` §1; pgTAP §13 |
+| 23.7 | Girilen birim fiyat ile efektif maliyet ayrı (5.000 / 5.060); TOTAL_AMOUNT'ta quoted null | `tests/accounting-integrity.test.ts` §2; pgTAP ÖRNEK 5/6; E2E "sayı girişi" |
+| 23.8 | 2026-02-30 reddedilir, 2028-02-29 kabul; 400 döner (500 değil) | `tests/accounting-integrity.test.ts` §3; pgTAP §13; E2E "aynı gün saatli işlemler" |
+| 23.9 | Aynı gün 10:00 alış / 11:00 satış geçer; ters sıra oversell; tarih/saat düzeltmesi oversell yaratırsa reddedilir | `tests/accounting-integrity.test.ts` §3; pgTAP §13; E2E |
+| 23.10 | Gelecek / bayat / ters makaslı / başka ürünlü / TL dışı anlık görüntü reddedilir | `tests/accounting-integrity.test.ts` §4; pgTAP §13 |
+| 23.11 | Kısmi değerleme etiketlenir; gerçekleşmiş K/Z etkilenmez | `tests/accounting-integrity.test.ts` §5; `src/components/dashboard-view.tsx` (`partial-valuation`) |
+| 23.12 | "1 2" ve "5.000" reddedilir; Türkçe biçimler doğru okunur; istemci-sunucu aynı sonuç | `tests/accounting-integrity.test.ts` §6; E2E "sayı girişi" |
+| 23.13 | Eski kayıtlar migration/normalizasyon sonrası doğru okunur | `tests/accounting-integrity.test.ts` §2 "eski kayıtlar"; 0011 backfill + `accounting:verify` |
+| 23.14 | 0011 idempotent; `accounting:verify` tutarsızlık 0 | `npm run test:db`; migration ikinci kez uygulanır; `npm run accounting:verify` |

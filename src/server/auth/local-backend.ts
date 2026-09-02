@@ -10,10 +10,15 @@ import {
   type UserStatus,
 } from "@/auth/types";
 import {
+  LedgerAmountError,
   LedgerOversellError,
+  normalizeLedgerEntry,
+  occurredAtInstantISO,
   replayLedger,
   replayProduct,
   resolveLedgerAmounts,
+  sortLedgerDesc,
+  validatePriceSnapshotInput,
   type LedgerAppendRequest,
   type LedgerEntry,
   type PriceSnapshotRecord,
@@ -120,7 +125,7 @@ interface StoreShape {
   ledgerSequence: number;
 }
 
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 
 function emptyStore(): StoreShape {
   return {
@@ -175,6 +180,8 @@ function legacyToLedger(row: LegacyTransaction, sequence: number): StoredLedgerE
     quantity,
     unit: row.unit,
     occurredAt: row.tradedAt,
+    occurredTime: null,
+    occurredAtInstant: occurredAtInstantISO(row.tradedAt, null) ?? row.tradedAt,
     pricingInputMode: "UNIT_PRICE",
     ...amounts,
     costBasisOrigin: "ACTUAL",
@@ -300,6 +307,12 @@ export class LocalAuthBackend implements AuthBackend {
         );
         merged.ledger = sorted.map((row, index) => legacyToLedger(row, index + 1));
         merged.ledgerSequence = sorted.length;
+      }
+      if (version < 5) {
+        // Sprint 1.1: quoted/efektif fiyat ayrımı, occurredTime / occurredAtInstant alanları.
+        merged.ledger = merged.ledger.map(
+          (row) => normalizeLedgerEntry(row as unknown as Record<string, unknown>) as StoredLedgerEntry,
+        );
       }
       delete (merged as { transactions?: unknown }).transactions;
       return merged;
@@ -754,11 +767,7 @@ export class LocalAuthBackend implements AuthBackend {
 
   async listLedger(scope: DataScope): Promise<LedgerEntry[]> {
     this.refresh();
-    return this.userLedger(scope.userId).sort((a, b) => {
-      if (a.occurredAt !== b.occurredAt) return a.occurredAt < b.occurredAt ? 1 : -1;
-      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-      return b.ledgerSequence - a.ledgerSequence;
-    });
+    return sortLedgerDesc(this.userLedger(scope.userId));
   }
 
   async listPositions(scope: DataScope): Promise<ProductPosition[]> {
@@ -785,9 +794,8 @@ export class LocalAuthBackend implements AuthBackend {
       if (request.kind !== "OPENING_BALANCE" || !request.baselineSnapshot) {
         throw new Error("Piyasa başlangıcı yalnızca mevcut altın için ve fiyat anlık görüntüsüyle kullanılabilir.");
       }
-      if (request.baselineSnapshot.providerStatus !== "ok") {
-        throw new Error("Fiyat verisi kullanılamıyor; takip başlangıcı oluşturulamaz.");
-      }
+      const snapshotError = validatePriceSnapshotInput(request.baselineSnapshot, request.productId, Date.now());
+      if (snapshotError) throw new LedgerAmountError(snapshotError);
       snapshot = {
         ...request.baselineSnapshot,
         id: randomUUID(),
@@ -810,6 +818,8 @@ export class LocalAuthBackend implements AuthBackend {
       quantity: request.quantity,
       unit: product.unit,
       occurredAt: request.occurredAt,
+      occurredTime: request.occurredTime,
+      occurredAtInstant: request.occurredAtInstant,
       pricingInputMode: request.pricingInputMode,
       ...amounts,
       costBasisOrigin: request.costBasisOrigin,

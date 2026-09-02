@@ -1,4 +1,4 @@
-import { dec, toDecimalString, ZERO, type Dec } from "./decimal";
+import { dec, roundMoney, toDecimalString, ZERO, type Dec } from "./decimal";
 import type { LedgerAmounts, LedgerAppendRequest } from "./types";
 
 /**
@@ -7,18 +7,21 @@ import type { LedgerAmounts, LedgerAppendRequest } from "./types";
  * ALIŞ (BUY / OPENING_BALANCE)
  *   UNIT_PRICE      : gross = quantity × unit_price
  *                     total_paid = gross + workmanship + fees
+ *                     quoted_acquisition_unit_price = unit_price   (GİRİLEN, masraf hariç)
  *   TOTAL_AMOUNT    : total_paid = kullanıcının girdiği toplam (masraflar DÂHİL)
- *                     gross = total_paid − workmanship − fees   (yalnızca bilgi amaçlı ayrıştırma;
- *                     masraf ikinci kez eklenmez)
+ *                     gross = total_paid − workmanship − fees   (bilgi amaçlı ayrıştırma;
+ *                     masraf ikinci kez eklenmez); quoted fiyat UYDURULMAZ (null)
  *   MARKET_BASELINE : unit = snapshot bozdurma fiyatı, gross = total_paid = quantity × unit,
- *                     masraf yok
- *   acquisition_unit_price = total_paid / quantity  (bilgi amaçlı; 8 ondalık)
+ *                     masraf yok; quoted = snapshot bozdurma fiyatı (değişmeden)
+ *   effective_acquisition_unit_cost = total_paid / quantity  (masraflar DÂHİL; 8 ondalık)
  *
  * SATIŞ (SELL)
  *   UNIT_PRICE      : gross = quantity × unit_price, net = gross − fees
- *   TOTAL_AMOUNT    : net = kullanıcının girdiği net tahsilat, gross = net + fees
- *   disposal_unit_price = gross / quantity (bilgi amaçlı; 8 ondalık)
+ *                     quoted_disposal_unit_price = unit_price (GİRİLEN brüt)
+ *   TOTAL_AMOUNT    : net = kullanıcının girdiği net tahsilat, gross = net + fees; quoted null
+ *   effective_net_unit_proceeds = net / quantity (8 ondalık)
  *
+ * Ortalama maliyet HER ZAMAN total_paid, gerçekleşmiş K/Z HER ZAMAN net_proceeds üzerinden.
  * Aynı kurallar Postgres tarafında `ledger_compute_amounts` içinde uygulanır.
  */
 export class LedgerAmountError extends Error {
@@ -28,8 +31,8 @@ export class LedgerAmountError extends Error {
   }
 }
 
-function informationalUnit(amount: Dec, quantity: Dec): Dec {
-  return amount.div(quantity).toDecimalPlaces(8);
+function effectiveUnit(amount: Dec, quantity: Dec): string {
+  return toDecimalString(roundMoney(amount.div(quantity)));
 }
 
 export function resolveLedgerAmounts(
@@ -57,11 +60,13 @@ export function resolveLedgerAmounts(
     if (!workmanship.isZero()) throw new LedgerAmountError("Satışta işçilik alanı kullanılmaz.");
     let gross: Dec;
     let net: Dec;
+    let quoted: string | null = null;
     if (request.pricingInputMode === "UNIT_PRICE") {
       const unit = dec(request.unitPrice ?? "");
       if (!unit.greaterThan(0)) throw new LedgerAmountError("Birim satış fiyatı sıfırdan büyük olmalıdır.");
       gross = quantity.times(unit);
       net = gross.minus(fees);
+      quoted = toDecimalString(unit);
     } else if (request.pricingInputMode === "TOTAL_AMOUNT") {
       net = dec(request.totalAmount ?? "");
       if (net.isNegative()) throw new LedgerAmountError("Net tahsilat negatif olamaz.");
@@ -73,8 +78,10 @@ export function resolveLedgerAmounts(
       throw new LedgerAmountError("Satış masrafları satış tutarını aşamaz.");
     }
     return {
-      acquisitionUnitPrice: null,
-      disposalUnitPrice: toDecimalString(informationalUnit(gross, quantity)),
+      quotedAcquisitionUnitPrice: null,
+      effectiveAcquisitionUnitCost: null,
+      quotedDisposalUnitPrice: quoted,
+      effectiveNetUnitProceeds: effectiveUnit(net, quantity),
       grossAmount: toDecimalString(gross),
       fees: toDecimalString(fees),
       workmanship: "0",
@@ -88,6 +95,7 @@ export function resolveLedgerAmounts(
   let totalPaid: Dec;
   let feesOut = fees;
   let workmanshipOut = workmanship;
+  let quoted: string | null = null;
 
   if (request.pricingInputMode === "MARKET_BASELINE") {
     const snapshot = request.baselineSnapshot;
@@ -98,11 +106,13 @@ export function resolveLedgerAmounts(
     totalPaid = gross;
     feesOut = ZERO;
     workmanshipOut = ZERO;
+    quoted = toDecimalString(unit);
   } else if (request.pricingInputMode === "UNIT_PRICE") {
     const unit = dec(request.unitPrice ?? "");
     if (!unit.greaterThan(0)) throw new LedgerAmountError("Birim alış fiyatı sıfırdan büyük olmalıdır.");
     gross = quantity.times(unit);
     totalPaid = gross.plus(workmanship).plus(fees);
+    quoted = toDecimalString(unit);
   } else {
     totalPaid = dec(request.totalAmount ?? "");
     if (!totalPaid.greaterThan(0)) throw new LedgerAmountError("Toplam tutar sıfırdan büyük olmalıdır.");
@@ -113,8 +123,10 @@ export function resolveLedgerAmounts(
   }
 
   return {
-    acquisitionUnitPrice: toDecimalString(informationalUnit(totalPaid, quantity)),
-    disposalUnitPrice: null,
+    quotedAcquisitionUnitPrice: quoted,
+    effectiveAcquisitionUnitCost: effectiveUnit(totalPaid, quantity),
+    quotedDisposalUnitPrice: null,
+    effectiveNetUnitProceeds: null,
     grossAmount: toDecimalString(gross),
     fees: toDecimalString(feesOut),
     workmanship: toDecimalString(workmanshipOut),

@@ -9,7 +9,7 @@ import {
   type LedgerEntry,
 } from "@/domain/accounting";
 import { requireProduct } from "@/domain/catalog";
-import { formatDate, formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
+import { formatDateTime, formatMoney, formatOccurred, formatQuantity } from "@/lib/format";
 import { usePortfolio } from "@/state/portfolio-store";
 import { BuyForm, OpeningBalanceForm, SellForm } from "./ledger-forms";
 import { Alert, Card, EmptyState, Field, SectionTitle, cx } from "./ui";
@@ -27,6 +27,37 @@ const STATUS_LABELS: Record<LedgerEntry["status"], string> = {
   VOID: "İptal edildi",
   REPLACED: "Düzeltildi",
 };
+
+/**
+ * Fiyat satırı: GİRİLEN fiyat ile masraflar dâhil EFEKTİF birim değer ayrı etiketlenir;
+ * "birim alış fiyatı" adı altında efektif maliyet gösterilmez.
+ */
+function priceLine(entry: LedgerEntry): string {
+  const unit = entry.unit;
+  if (entry.kind === "SELL") {
+    if (entry.quotedDisposalUnitPrice) {
+      const net =
+        entry.effectiveNetUnitProceeds && entry.effectiveNetUnitProceeds !== entry.quotedDisposalUnitPrice
+          ? ` · Net ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit}`
+          : "";
+      return `Birim satış ${formatMoney(entry.quotedDisposalUnitPrice)}/${unit}${net}`;
+    }
+    return entry.effectiveNetUnitProceeds
+      ? `Net birim tahsilat ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit} (net tutardan)`
+      : "";
+  }
+  if (entry.quotedAcquisitionUnitPrice) {
+    const effective =
+      entry.effectiveAcquisitionUnitCost && entry.effectiveAcquisitionUnitCost !== entry.quotedAcquisitionUnitPrice
+        ? ` · Efektif ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit} (masraflar dâhil)`
+        : "";
+    const label = entry.costBasisOrigin === "MARKET_BASELINE" ? "Başlangıç fiyatı" : "Birim fiyat";
+    return `${label} ${formatMoney(entry.quotedAcquisitionUnitPrice)}/${unit}${effective}`;
+  }
+  return entry.effectiveAcquisitionUnitCost
+    ? `Efektif birim maliyet ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit} (toplam tutardan)`
+    : "";
+}
 
 function originLabel(entry: LedgerEntry): string | null {
   if (entry.kind === "SELL") return null;
@@ -50,7 +81,7 @@ function LedgerRow({
   const isSell = entry.kind === "SELL";
   const isActive = entry.status === "ACTIVE";
   const amount = isSell ? entry.netProceeds : entry.totalPaid;
-  const unitPrice = isSell ? entry.disposalUnitPrice : entry.acquisitionUnitPrice;
+  const prices = priceLine(entry);
   const origin = originLabel(entry);
   const hasFees = !dec(entry.fees).isZero();
   const hasWorkmanship = !dec(entry.workmanship).isZero();
@@ -75,10 +106,10 @@ function LedgerRow({
             {origin ? <span className="badge">{origin}</span> : null}
             <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
           </div>
-          <p className="tabular mt-1 text-xs text-muted">
-            {formatQuantity(entry.quantity, entry.unit)}
-            {unitPrice ? ` · ${formatMoney(unitPrice)}/${entry.unit}` : ""} · {formatDate(entry.occurredAt)}
+          <p className="tabular mt-1 text-xs text-muted" data-testid="ledger-row-summary">
+            {formatQuantity(entry.quantity, entry.unit)} · {formatOccurred(entry.occurredAt, entry.occurredTime)}
           </p>
+          {prices ? <p className="tabular mt-0.5 text-xs text-muted">{prices}</p> : null}
           {hasFees || hasWorkmanship ? (
             <p className="tabular mt-0.5 text-xs text-subtle">
               {hasWorkmanship ? `İşçilik: ${formatMoney(entry.workmanship)}` : ""}
@@ -89,9 +120,8 @@ function LedgerRow({
           ) : null}
           {entry.costBasisOrigin === "MARKET_BASELINE" && entry.priceSnapshot ? (
             <p className="mt-0.5 text-xs text-subtle">
-              Başlangıç fiyatı: {formatMoney(entry.priceSnapshot.liquidationPrice)}/{entry.unit} ·{" "}
-              {entry.priceSnapshot.provider} · {formatDateTime(entry.priceSnapshot.providerTimestamp)} ·
-              gerçek tarihsel maliyet değildir
+              Anlık görüntü: {entry.priceSnapshot.provider} · {entry.priceSnapshot.market} ·{" "}
+              {formatDateTime(entry.priceSnapshot.providerTimestamp)} · gerçek tarihsel maliyet değildir
             </p>
           ) : null}
           {entry.note ? <p className="mt-1 break-words text-xs text-subtle">{entry.note}</p> : null}
@@ -243,7 +273,8 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
           <p className="text-sm font-semibold text-ink">İşlem iptal edilsin mi?</p>
           <p className="text-sm text-muted">
             {requireProduct(pendingVoid.productId).name} ·{" "}
-            {formatQuantity(pendingVoid.quantity, pendingVoid.unit)} · {formatDate(pendingVoid.occurredAt)}.
+            {formatQuantity(pendingVoid.quantity, pendingVoid.unit)} ·{" "}
+            {formatOccurred(pendingVoid.occurredAt, pendingVoid.occurredTime)}.
             Kayıt silinmez; &quot;İptal edildi&quot; olarak listede kalır ve toplamlar yeniden hesaplanır.
             Bir alışın iptali sonraki bir satışı eldeki miktarın üstüne çıkarıyorsa iptal reddedilir.
           </p>

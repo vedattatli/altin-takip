@@ -1,4 +1,5 @@
 import {
+  occurredAtInstantISO,
   resolveLedgerAmounts,
   type BuyCommand,
   type LedgerEntry,
@@ -52,6 +53,8 @@ export function makeEntry(
   });
 
   const { unitPrice: _u, totalAmount: _t, ...rest } = overrides;
+  const occurredAt = overrides.occurredAt ?? "2026-01-15";
+  const occurredTime = overrides.occurredTime ?? null;
   return {
     id: overrides.id ?? `tx-${counter}`,
     portfolioId: "portfolio-1",
@@ -59,7 +62,9 @@ export function makeEntry(
     kind,
     quantity,
     unit: product.unit,
-    occurredAt: overrides.occurredAt ?? "2026-01-15",
+    occurredAt,
+    occurredTime,
+    occurredAtInstant: occurredAtInstantISO(occurredAt, occurredTime) ?? occurredAt,
     pricingInputMode: mode,
     ...amounts,
     costBasisOrigin: overrides.costBasisOrigin ?? (mode === "MARKET_BASELINE" ? "MARKET_BASELINE" : "ACTUAL"),

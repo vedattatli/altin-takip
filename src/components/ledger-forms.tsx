@@ -9,6 +9,7 @@ import {
   resolveLedgerAmounts,
   todayISO,
   toDecimalString,
+  toInputDecimal,
   type AccountingSummary,
   type BuyCommand,
   type CommandErrors,
@@ -184,6 +185,50 @@ function QuantityField({
   );
 }
 
+/** Tarih zorunlu, saat isteğe bağlı (aynı gün birden fazla işlemde gerçek sırayı belirler). */
+function DateTimeFields({
+  formId,
+  date,
+  time,
+  onDate,
+  onTime,
+  errors,
+}: {
+  formId: string;
+  date: string;
+  time: string;
+  onDate: (value: string) => void;
+  onTime: (value: string) => void;
+  errors: CommandErrors;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] gap-2">
+      <Field label="İşlem tarihi" htmlFor={`${formId}-date`} error={errors.occurredAt}>
+        <input
+          id={`${formId}-date`}
+          type="date"
+          className="control tabular min-h-11"
+          max={todayISO()}
+          value={date}
+          onChange={(event) => onDate(event.target.value)}
+          aria-invalid={Boolean(errors.occurredAt)}
+        />
+      </Field>
+      <Field label="Saat" htmlFor={`${formId}-time`} error={errors.occurredTime} hint="İsteğe bağlı">
+        <input
+          id={`${formId}-time`}
+          type="time"
+          className="control tabular min-h-11 w-28"
+          value={time}
+          onChange={(event) => onTime(event.target.value)}
+          aria-invalid={Boolean(errors.occurredTime)}
+          data-testid="occurred-time"
+        />
+      </Field>
+    </div>
+  );
+}
+
 function PreviewBox({ label, value, children }: { label: string; value: string; children?: ReactNode }) {
   return (
     <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3">
@@ -239,6 +284,8 @@ interface BuyState {
   productId: string;
   quantity: string;
   occurredAt: string;
+  /** İsteğe bağlı saat (HH:MM); aynı gün içindeki sırayı belirler. */
+  occurredTime: string;
   mode: PriceMode;
   unitPrice: string;
   totalPaid: string;
@@ -253,6 +300,7 @@ function buyInitial(editing: LedgerEntry | null): BuyState {
       productId: "gram-altin",
       quantity: "",
       occurredAt: todayISO(),
+      occurredTime: "",
       mode: "UNIT_PRICE",
       unitPrice: "",
       totalPaid: "",
@@ -263,17 +311,20 @@ function buyInitial(editing: LedgerEntry | null): BuyState {
   }
   const mode: PriceMode = editing.pricingInputMode === "TOTAL_AMOUNT" ? "TOTAL_AMOUNT" : "UNIT_PRICE";
   const quantity = dec(editing.quantity);
-  // Birim fiyat modunda gerçek birim fiyat = brüt tutar / miktar (masraflar hariç).
-  const unitPrice = quantity.greaterThan(0) ? toDecimalString(dec(editing.grossAmount).div(quantity)) : "";
+  // Düzeltmede GİRİLEN birim fiyat (masraflar hariç) geri yüklenir; efektif maliyet değil.
+  const quoted =
+    editing.quotedAcquisitionUnitPrice ??
+    (quantity.greaterThan(0) ? toDecimalString(dec(editing.grossAmount).div(quantity)) : "");
   return {
     productId: editing.productId,
-    quantity: editing.quantity,
+    quantity: toInputDecimal(editing.quantity),
     occurredAt: editing.occurredAt,
+    occurredTime: editing.occurredTime ?? "",
     mode,
-    unitPrice: mode === "UNIT_PRICE" ? unitPrice : "",
-    totalPaid: mode === "TOTAL_AMOUNT" ? (editing.totalPaid ?? "") : "",
-    workmanship: dec(editing.workmanship).isZero() ? "" : editing.workmanship,
-    fees: dec(editing.fees).isZero() ? "" : editing.fees,
+    unitPrice: mode === "UNIT_PRICE" && quoted ? toInputDecimal(quoted) : "",
+    totalPaid: mode === "TOTAL_AMOUNT" && editing.totalPaid ? toInputDecimal(editing.totalPaid) : "",
+    workmanship: dec(editing.workmanship).isZero() ? "" : toInputDecimal(editing.workmanship),
+    fees: dec(editing.fees).isZero() ? "" : toInputDecimal(editing.fees),
     note: editing.note,
   };
 }
@@ -301,6 +352,7 @@ export function BuyForm({
     productId: state.productId,
     quantity: state.quantity,
     occurredAt: state.occurredAt,
+    occurredTime: state.occurredTime || undefined,
     pricingInputMode: state.mode,
     unitPrice: state.mode === "UNIT_PRICE" ? state.unitPrice : undefined,
     totalPaid: state.mode === "TOTAL_AMOUNT" ? state.totalPaid : undefined,
@@ -360,17 +412,14 @@ export function BuyForm({
             onChange={(value) => update("quantity", value)}
             error={errors.quantity}
           />
-          <Field label="İşlem tarihi" htmlFor={`${formId}-date`} error={errors.occurredAt}>
-            <input
-              id={`${formId}-date`}
-              type="date"
-              className="control tabular min-h-11"
-              max={todayISO()}
-              value={state.occurredAt}
-              onChange={(event) => update("occurredAt", event.target.value)}
-              aria-invalid={Boolean(errors.occurredAt)}
-            />
-          </Field>
+          <DateTimeFields
+            formId={formId}
+            date={state.occurredAt}
+            time={state.occurredTime}
+            onDate={(value) => update("occurredAt", value)}
+            onTime={(value) => update("occurredTime", value)}
+            errors={errors}
+          />
         </div>
 
         <ModeToggle
@@ -384,7 +433,12 @@ export function BuyForm({
         />
 
         {state.mode === "UNIT_PRICE" ? (
-          <Field label="Birim alış fiyatı (TL)" htmlFor={`${formId}-unit-price`} error={errors.unitPrice}>
+          <Field
+            label="Birim alış fiyatı (TL)"
+            htmlFor={`${formId}-unit-price`}
+            error={errors.unitPrice}
+            hint="Masraflar hariç, gerçekten ödediğiniz birim fiyat. Ondalık için virgül kullanın (5.400,00 veya 5400)."
+          >
             <DecimalInput
               id={`${formId}-unit-price`}
               value={state.unitPrice}
@@ -459,8 +513,11 @@ export function BuyForm({
 
         {preview?.totalPaid ? (
           <PreviewBox label="Toplam edinim maliyeti" value={formatMoney(preview.totalPaid)}>
-            <p className="mt-1 text-xs text-muted">
-              Birim maliyet (masraflar dâhil): {formatMoney(preview.acquisitionUnitPrice ?? "0")}
+            <p className="mt-1 text-xs text-muted" data-testid="buy-preview-prices">
+              {preview.quotedAcquisitionUnitPrice
+                ? `Girilen birim fiyat: ${formatMoney(preview.quotedAcquisitionUnitPrice)} · `
+                : ""}
+              Masraflar dâhil efektif birim maliyet: {formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}
             </p>
           </PreviewBox>
         ) : null}
@@ -485,6 +542,7 @@ interface SellState {
   productId: string;
   quantity: string;
   occurredAt: string;
+  occurredTime: string;
   mode: PriceMode;
   unitPrice: string;
   netProceeds: string;
@@ -498,6 +556,7 @@ function sellInitial(editing: LedgerEntry | null, defaultProductId: string): Sel
       productId: defaultProductId,
       quantity: "",
       occurredAt: todayISO(),
+      occurredTime: "",
       mode: "UNIT_PRICE",
       unitPrice: "",
       netProceeds: "",
@@ -507,15 +566,18 @@ function sellInitial(editing: LedgerEntry | null, defaultProductId: string): Sel
   }
   const mode: PriceMode = editing.pricingInputMode === "TOTAL_AMOUNT" ? "TOTAL_AMOUNT" : "UNIT_PRICE";
   const quantity = dec(editing.quantity);
-  const unitPrice = quantity.greaterThan(0) ? toDecimalString(dec(editing.grossAmount).div(quantity)) : "";
+  const quoted =
+    editing.quotedDisposalUnitPrice ??
+    (quantity.greaterThan(0) ? toDecimalString(dec(editing.grossAmount).div(quantity)) : "");
   return {
     productId: editing.productId,
-    quantity: editing.quantity,
+    quantity: toInputDecimal(editing.quantity),
     occurredAt: editing.occurredAt,
+    occurredTime: editing.occurredTime ?? "",
     mode,
-    unitPrice: mode === "UNIT_PRICE" ? unitPrice : "",
-    netProceeds: mode === "TOTAL_AMOUNT" ? (editing.netProceeds ?? "") : "",
-    fees: dec(editing.fees).isZero() ? "" : editing.fees,
+    unitPrice: mode === "UNIT_PRICE" && quoted ? toInputDecimal(quoted) : "",
+    netProceeds: mode === "TOTAL_AMOUNT" && editing.netProceeds ? toInputDecimal(editing.netProceeds) : "",
+    fees: dec(editing.fees).isZero() ? "" : toInputDecimal(editing.fees),
     note: editing.note,
   };
 }
@@ -556,6 +618,7 @@ export function SellForm({
     productId: state.productId,
     quantity: state.quantity,
     occurredAt: state.occurredAt,
+    occurredTime: state.occurredTime || undefined,
     pricingInputMode: state.mode,
     unitPrice: state.mode === "UNIT_PRICE" ? state.unitPrice : undefined,
     netProceeds: state.mode === "TOTAL_AMOUNT" ? state.netProceeds : undefined,
@@ -623,17 +686,14 @@ export function SellForm({
             error={errors.quantity}
             hint={`Elinizde ${formatQuantity(availableForSale, product?.unit ?? "gram")} var.`}
           />
-          <Field label="İşlem tarihi" htmlFor={`${formId}-date`} error={errors.occurredAt}>
-            <input
-              id={`${formId}-date`}
-              type="date"
-              className="control tabular min-h-11"
-              max={todayISO()}
-              value={state.occurredAt}
-              onChange={(event) => update("occurredAt", event.target.value)}
-              aria-invalid={Boolean(errors.occurredAt)}
-            />
-          </Field>
+          <DateTimeFields
+            formId={formId}
+            date={state.occurredAt}
+            time={state.occurredTime}
+            onDate={(value) => update("occurredAt", value)}
+            onTime={(value) => update("occurredTime", value)}
+            errors={errors}
+          />
         </div>
 
         <ModeToggle
@@ -647,7 +707,12 @@ export function SellForm({
         />
 
         {state.mode === "UNIT_PRICE" ? (
-          <Field label="Birim satış fiyatı (TL)" htmlFor={`${formId}-unit-price`} error={errors.unitPrice}>
+          <Field
+            label="Birim satış fiyatı (TL)"
+            htmlFor={`${formId}-unit-price`}
+            error={errors.unitPrice}
+            hint="Masraflar düşülmeden önceki brüt birim fiyat."
+          >
             <DecimalInput
               id={`${formId}-unit-price`}
               value={state.unitPrice}
@@ -700,7 +765,14 @@ export function SellForm({
         </Field>
 
         {preview?.netProceeds ? (
-          <PreviewBox label="Net satış geliri" value={formatMoney(preview.netProceeds)} />
+          <PreviewBox label="Net satış geliri" value={formatMoney(preview.netProceeds)}>
+            <p className="mt-1 text-xs text-muted" data-testid="sell-preview-prices">
+              {preview.quotedDisposalUnitPrice
+                ? `Girilen brüt birim fiyat: ${formatMoney(preview.quotedDisposalUnitPrice)} · `
+                : ""}
+              Net birim tahsilat: {formatMoney(preview.effectiveNetUnitProceeds ?? "0")}
+            </p>
+          </PreviewBox>
         ) : null}
 
         {errors.form ? <Alert tone="danger">{errors.form}</Alert> : null}
@@ -880,7 +952,7 @@ export function OpeningBalanceForm({
     if (state.costMethod === "MARKET_BASELINE" || !preview?.totalPaid) return null;
     return state.costInputMode === "AVERAGE_UNIT_COST"
       ? `Toplam maliyet: ${formatMoney(preview.totalPaid)}`
-      : `Ortalama birim maliyet: ${formatMoney(preview.acquisitionUnitPrice ?? "0")}`;
+      : `Ortalama birim maliyet: ${formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}`;
   })();
 
   return (
@@ -1033,7 +1105,7 @@ export function OpeningBalanceForm({
                 value={formatMoney(preview.totalPaid)}
               >
                 <p className="mt-1 text-xs text-muted">
-                  Ortalama birim maliyet: {formatMoney(preview.acquisitionUnitPrice ?? "0")}
+                  Ortalama birim maliyet: {formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}
                   {state.costMethod === "ESTIMATED" ? " · Tahmini maliyet olarak etiketlenir." : ""}
                 </p>
               </PreviewBox>

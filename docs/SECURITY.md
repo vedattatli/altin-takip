@@ -22,7 +22,8 @@
 | Eşzamanlı isteklerle aşırı satış | Portföy satırı + ürün advisory kilidiyle atomik Postgres RPC; her mutation defteri yeniden oynatır |
 | Çift tıklama / mobil ağ yeniden denemesi | `clientRequestId` idempotency: aynı içerik replay, farklı içerik 409 |
 | Pozisyon projeksiyonunun elle değiştirilmesi | `portfolio_positions`'a service_role bile yazamaz; yalnızca RPC yeniden oluşturur |
-| Sahte başlangıç fiyatı (MARKET_BASELINE) | İstemci fiyatı yok sayılır; sunucu sağlayıcısından alınır, anlık görüntü değiştirilemez |
+| Sahte başlangıç fiyatı (MARKET_BASELINE) | İstemci fiyatı yok sayılır; sunucu sağlayıcısından alınır, anlık görüntü doğrulanır (makas/zaman/para birimi/ürün) ve değiştirilemez |
+| RPC dışı doğrudan tablo yazımı (yanlış sunucu kodu) | `service_role` `transactions` / `price_snapshots` / `portfolio_positions` tablolarına yazamaz; yalnızca SECURITY DEFINER RPC (0011) |
 | Finansal kaydın sessizce silinmesi/değiştirilmesi | Defter append-only; hard delete ve finansal alan güncellemesi tetikleyiciyle reddedilir |
 | Uzun ömürlü admin oturumu | Admin için tercihten bağımsız 8 saat / 15 dk; kalıcı işaretli admin oturumu reddedilir |
 
@@ -588,10 +589,14 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
 
 ## 24. Muhasebe defteri sınırı (`0009` / `0010`)
 
-- **Finansal mutation yalnızca BFF + kontrollü RPC:** `ledger_append`, `ledger_void`,
-  `ledger_replace`, `ledger_void_all` SECURITY DEFINER'dır ve yalnızca `service_role`
-  çağırabilir; `ledger_list` / `positions_list` / `ledger_verify` de öyle. authenticated JWT
-  ile hiçbiri çağrılamaz (pgTAP + `npm run test:data-api`).
+- **Finansal mutation yalnızca BFF + kontrollü RPC — veritabanı bunu ZORUNLU kılar (0011):**
+  `service_role` `public.transactions` ve `public.price_snapshots` tablolarına doğrudan
+  INSERT/UPDATE/DELETE yapamaz (yalnızca SELECT); `portfolio_positions` zaten kapalıdır.
+  `ledger_append`, `ledger_void`, `ledger_replace`, `ledger_void_all` SECURITY DEFINER'dır
+  (sabit `search_path`, sahip `postgres`) ve yalnızca `service_role` çağırabilir;
+  `ledger_list` / `positions_list` / `ledger_verify` de öyle. Yardımcı fonksiyonlar hiçbir role
+  açık değildir. authenticated JWT ile hiçbiri çağrılamaz (pgTAP + `npm run test:data-api`);
+  statik test uygulama kodunda bu tablolara `.from()` erişimi bulunmadığını doğrular.
 - **Kullanıcı kimliği actor'dan gelir:** hiçbir uç gövdeden `userId` almaz; başka kullanıcının
   işlem kimliği tahmin edilse bile `404` döner (kapsam dışı kayıt "yok" sayılır).
 - **Admin salt okur:** `AdminService` içinde BUY/SELL/OPENING_BALANCE/VOID/REPLACE metodu
@@ -600,13 +605,16 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
   hesap cascade'inde; iptal/düzeltme sebep ve tarihle kayıt altındadır (audit trail).
 - **Projeksiyon elle değişmez:** `portfolio_positions` tablosuna `service_role` dâhil hiçbir rol
   INSERT/UPDATE/DELETE yapamaz; yalnızca RPC (sahip yetkisiyle) yeniden oluşturur.
-- **Fiyat anlık görüntüsü:** `price_snapshots` yalnızca sunucu fiyat sağlayıcısından yazılır;
-  istemci fiyat gönderemez; UPDATE/DELETE reddedilir. Bayat/kullanılamaz fiyatla başlangıç
-  oluşturulmaz.
+- **Fiyat anlık görüntüsü:** `price_snapshots` yalnızca `ledger_append` içinde, sunucu fiyat
+  sağlayıcısından yazılır; istemci fiyat gönderemez; UPDATE/DELETE reddedilir. Makas
+  (`replacement >= liquidation`), para birimi, ürün eşleşmesi, sağlayıcı/piyasa ve zaman
+  (geçersiz / gelecek / bayat) hem RPC'de hem tablo kısıtında denetlenir.
+- **İşlem zamanı:** takvimde olmayan tarih ve gelecek zaman RPC'de P0004 ile reddedilir;
+  `occurred_at` / `occurred_time` guard tetikleyicisiyle değiştirilemez.
 - **Idempotency:** `(user_id, client_request_id)` benzersiz; aynı içerik replay (200), farklı
   içerik `409 idempotency_conflict`. Anahtar kullanıcı kapsamlıdır.
 - **Girdi sertleştirme:** miktar/tutar dizeleri sıkı desenle ayrıştırılır; NaN, Infinity,
   bilimsel gösterim, aşırı büyük değer ve fazla ondalık reddedilir; birim istemciden alınmaz.
-- **Doğrulama durumu:** yerel Supabase yığınında 124 pgTAP testi, gerçek JWT sondası
-  (31 beklenti), `npm run accounting:smoke` (gerçek RPC yolu) ve `npm run accounting:verify`
+- **Doğrulama durumu:** yerel Supabase yığınında 156 pgTAP testi, gerçek JWT sondası
+  (38 beklenti), `npm run accounting:smoke` (gerçek RPC yolu) ve `npm run accounting:verify`
   geçti. Uzak proje yok.
