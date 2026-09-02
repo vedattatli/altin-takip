@@ -10,5 +10,12 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const actor = await requireCurrentAdmin();
   // Görüntüleme denetim kaydı bu çağrı içinde yazılır.
   const view = await getAdminService().getUserPortfolio(actor, id);
-  return <AdminUserDetail initial={view} isSelf={actor.profile.id === view.user.id} />;
+  const sessions = await getAdminService().listUserSessions(actor, id);
+  return (
+    <AdminUserDetail
+      initial={view}
+      initialSessions={sessions}
+      isSelf={actor.profile.id === view.user.id}
+    />
+  );
 }

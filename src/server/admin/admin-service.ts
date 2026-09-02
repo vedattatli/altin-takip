@@ -5,6 +5,7 @@ import {
   ADMIN_CAN_EDIT_USER_PORTFOLIO,
   type AdminAction,
   type AdminAuditLog,
+  type SessionSummary,
   type UserProfile,
   type UserStatus,
 } from "@/auth/types";
@@ -42,8 +43,20 @@ export interface DeleteUserResult {
 /** Denetim kaydı yazılamadığında operasyonel olarak fark edilebilir iz. */
 export const AUDIT_WRITE_FAILURE_MARKER = "ALTIN_AUDIT_WRITE_FAILURE";
 
+export interface AdminServiceOptions {
+  /** Testlerde sabitlenebilir zaman kaynağı. */
+  now?: () => number;
+}
+
 export class AdminService {
-  constructor(private readonly backend: AuthBackend) {}
+  private readonly now: () => number;
+
+  constructor(
+    private readonly backend: AuthBackend,
+    options: AdminServiceOptions = {},
+  ) {
+    this.now = options.now ?? (() => Date.now());
+  }
 
   private async audit(
     actor: AdminActor,
@@ -190,6 +203,65 @@ export class AdminService {
     }
     await this.audit(actor, action, updated, true);
     return updated;
+  }
+
+  // ---------------------------------------------------------------- oturumlar
+
+  /**
+   * Kullanıcının aktif oturumları. Yalnızca güvenli metadata döner:
+   * cihaz etiketi, oluşturulma, son görülme ve bitiş zamanı. Ham IP veya
+   * User-Agent saklanmadığı için gösterilemez de.
+   */
+  async listUserSessions(actor: AdminActor, userId: string): Promise<SessionSummary[]> {
+    const target = await this.backend.getProfile(userId);
+    if (!target) {
+      await this.audit(actor, "user.sessions_view", null, false, { userId });
+      throw notFound("Kullanıcı bulunamadı.");
+    }
+    const rows = await this.backend.listSessionsForUser(userId, this.now());
+    await this.audit(actor, "user.sessions_view", target, true, { sessionCount: rows.length });
+    return rows.map((row) => ({ ...row, current: row.id === actor.sessionId }));
+  }
+
+  /** Kullanıcının TÜM oturumlarını kapatır; kullanıcı her cihazda yeniden giriş yapar. */
+  async revokeUserSessions(
+    actor: AdminActor,
+    userId: string,
+  ): Promise<{ closedSessions: number }> {
+    const target = await this.backend.getProfile(userId);
+    if (!target) {
+      await this.audit(actor, "user.sessions_revoke", null, false, { userId });
+      throw notFound("Kullanıcı bulunamadı.");
+    }
+    const closedSessions = await this.backend.destroyAllSessionsForUser(userId);
+    await this.audit(actor, "user.sessions_revoke", target, true, {
+      scope: "all",
+      closedSessions,
+    });
+    return { closedSessions };
+  }
+
+  /** Kullanıcının belirli bir oturumunu kapatır. */
+  async revokeUserSession(
+    actor: AdminActor,
+    userId: string,
+    sessionId: string,
+  ): Promise<{ closed: boolean }> {
+    const target = await this.backend.getProfile(userId);
+    if (!target) {
+      await this.audit(actor, "user.sessions_revoke", null, false, { userId });
+      throw notFound("Kullanıcı bulunamadı.");
+    }
+    const closed = await this.backend.destroySessionById(userId, sessionId);
+    if (!closed) {
+      await this.audit(actor, "user.sessions_revoke", target, false, {
+        scope: "single",
+        reason: "not_found",
+      });
+      throw notFound("Oturum bulunamadı.");
+    }
+    await this.audit(actor, "user.sessions_revoke", target, true, { scope: "single" });
+    return { closed: true };
   }
 
   async resetUserPassword(

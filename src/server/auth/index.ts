@@ -1,5 +1,6 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { cookies, headers } from "next/headers";
 
 import type { UserProfile } from "@/auth/types";
@@ -7,10 +8,12 @@ import { AdminService } from "@/server/admin/admin-service";
 import { UserPortfolioService } from "@/server/portfolio/user-portfolio-service";
 import { getLoginRateLimiter } from "@/server/rate-limit";
 import { resolveAuthBackendId, serverEnv } from "@/server/env";
+import { resolveClientIp } from "@/server/security/client-ip";
 import type { AdminActor, UserActor } from "./actor";
-import type { AuthBackend, ResolvedSession } from "./backend";
+import type { AuthBackend } from "./backend";
+import { sessionCookieOptions } from "./cookies";
 import { LocalAuthBackend } from "./local-backend";
-import { AuthService } from "./service";
+import { AuthService, type SessionContext } from "./service";
 import { SupabaseAuthBackend } from "./supabase-backend";
 
 export { AuthService } from "./service";
@@ -23,9 +26,14 @@ export type { AdminActor, UserActor } from "./actor";
  *
  * GUARD'LAR
  * - requireAuthenticatedUser: oturum yeter. Geçici parolalı kullanıcı da geçer.
- *   YALNIZCA /api/auth/session, /logout ve /change-password bunu kullanır.
+ *   YALNIZCA /api/auth/session, /logout, /logout-all ve /change-password bunu kullanır.
  * - requireUsableUser: geçici parolalı kullanıcı GEÇEMEZ (PASSWORD_CHANGE_REQUIRED).
  * - requireCurrentAdmin: ek olarak veritabanındaki rolü admin olmalı.
+ *
+ * İSTEK KAPSAMLI OTURUM ÖNBELLEĞİ
+ * apiRoute() her isteği `runWithSessionCache` içinde çalıştırır; aynı istekte
+ * oturum bir kez çözülür. İstek sonunda `commitSessionCookie` süre uzatma
+ * veya kimlik yenileme olduysa çerezi tazeler (bkz. security/route.ts).
  */
 
 let backendInstance: AuthBackend | null = null;
@@ -67,39 +75,97 @@ export function getUserPortfolioService(): UserPortfolioService {
 
 export const SESSION_COOKIE = serverEnv.sessionCookieName;
 
+// ------------------------------------------------- istek kapsamlı oturum önbelleği
+
+interface SessionCache {
+  resolved: boolean;
+  token: string | null;
+  session: SessionContext | null;
+  /** Çıkış yapıldıysa istek sonunda çerez ASLA yeniden yazılmaz. */
+  ended: boolean;
+}
+
+const sessionCacheStorage = new AsyncLocalStorage<SessionCache>();
+
+/** apiRoute tarafından kullanılır: isteği oturum önbelleğiyle çalıştırır. */
+export function runWithSessionCache<T>(fn: () => Promise<T>): Promise<T> {
+  return sessionCacheStorage.run({ resolved: false, token: null, session: null, ended: false }, fn);
+}
+
+/** Çıkış uçları çağırır: bu istekte çerez yeniden yazılmaz. */
+export function markSessionEnded(): void {
+  const cache = sessionCacheStorage.getStore();
+  if (cache) {
+    cache.ended = true;
+    cache.session = null;
+  }
+}
+
 export async function readSessionToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(SESSION_COOKIE)?.value ?? null;
 }
 
-export async function getSessionContext(): Promise<ResolvedSession | null> {
-  return getAuthService().resolveSessionContext(await readSessionToken());
+export async function getSessionContext(): Promise<SessionContext | null> {
+  const cache = sessionCacheStorage.getStore();
+  if (cache?.resolved) return cache.session;
+
+  const token = await readSessionToken();
+  const session = await getAuthService().resolveSessionContext(token);
+  if (cache) {
+    cache.resolved = true;
+    cache.token = token;
+    cache.session = session;
+  }
+  return session;
+}
+
+/**
+ * İstek sonunda: süre uzatıldıysa veya kimlik yenileme zamanı geldiyse oturum
+ * çerezini tazeler. Kullanıcı bunu fark etmez. Yalnızca route handler'larda
+ * (çerez yazılabilen bağlamda) çağrılır.
+ */
+export async function commitSessionCookie(): Promise<void> {
+  const cache = sessionCacheStorage.getStore();
+  if (!cache?.resolved || cache.ended || !cache.session || !cache.token) return;
+
+  const rotatedToken = await getAuthService().rotateSessionIfDue(cache.session);
+  if (!rotatedToken && !cache.session.renewed) return;
+
+  const store = await cookies();
+  store.set(
+    SESSION_COOKIE,
+    rotatedToken ?? cache.token,
+    sessionCookieOptions(cache.session.expiresAt, await isSecureRequest()),
+  );
 }
 
 export async function getCurrentUser(): Promise<UserProfile | null> {
-  return getAuthService().resolveSession(await readSessionToken());
+  return (await getSessionContext())?.profile ?? null;
 }
 
 /** Oturum yeter; geçici parolalı kullanıcı da geçer. */
 export async function requireAuthenticatedUser(): Promise<UserActor> {
-  return getAuthService().requireAuthenticatedUser(await readSessionToken());
+  return getAuthService().userActorFrom(await getSessionContext());
 }
 
 /** Geçici parolalı kullanıcı PASSWORD_CHANGE_REQUIRED ile reddedilir. */
 export async function requireUsableUser(): Promise<UserActor> {
-  return getAuthService().requireUsableUser(await readSessionToken());
+  return getAuthService().usableActorFrom(await getSessionContext());
 }
 
 export async function requireCurrentAdmin(): Promise<AdminActor> {
-  return getAuthService().requireAdmin(await readSessionToken());
+  return getAuthService().adminActorFrom(await getSessionContext());
 }
 
-/** Hız sınırlaması için istemci anahtarı. Proxy arkasında X-Forwarded-For kullanılır. */
+/**
+ * Hız sınırlaması için istemci anahtarı.
+ * X-Forwarded-For yalnızca güvenilir vekil sağlayıcısında dikkate alınır;
+ * aksi hâlde saldırganın belirlediği başlık YOK SAYILIR (bkz. client-ip.ts).
+ * Ham IP hiçbir yere yazılmaz; sınırlayıcı anahtarı HMAC ile gizler.
+ */
 export async function clientKey(): Promise<string> {
-  const headerList = await headers();
-  const forwarded = headerList.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]!.trim();
-  return headerList.get("x-real-ip") ?? "unknown";
+  return resolveClientIp(await headers(), serverEnv.trustedProxyProvider);
 }
 
 /** İstek HTTPS üzerinden mi geliyor? Ters vekil arkasında başlıktan okunur. */

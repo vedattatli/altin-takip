@@ -1,49 +1,29 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { type DeviceMode } from "@/auth/types";
 import { useHydrated } from "@/components/hydration-marker";
 import { apiFetch, ApiError } from "@/lib/api-client";
-import { Alert, Field, cx } from "@/components/ui";
+import { Alert, Field } from "@/components/ui";
 
 /**
  * Giriş formu.
  *
- * YALNIZCA kullanıcı adı, parola ve cihaz türü sorulur.
- * E-posta, telefon, tek kullanımlık kod, sihirli bağlantı, "beni hatırla"
- * kutusu veya kayıt bağlantısı YOKTUR.
+ * YALNIZCA kullanıcı adı ve parola sorulur. E-posta, telefon, tek kullanımlık
+ * kod, sihirli bağlantı, cihaz türü seçimi, "beni hatırla" kutusu veya kayıt
+ * bağlantısı YOKTUR: oturum her cihazda zaten kalıcıdır ve yalnızca kullanıcı
+ * çıkış yapınca kapanır.
  * Hata mesajı "kullanıcı yok" ile "parola yanlış" ayrımını yapmaz.
  */
-
-const DEVICE_OPTIONS: { value: DeviceMode; label: string; description: string }[] = [
-  {
-    value: "shared",
-    label: "Şirket / ortak cihaz",
-    description:
-      "Oturum tarayıcı kapanınca silinir, 15 dakika hareketsizlikte otomatik çıkış yapılır ve cihazda veri bırakılmaz.",
-  },
-  {
-    value: "personal",
-    label: "Kişisel cihaz",
-    description: "Oturumunuz bu cihazda hatırlanır.",
-  },
-];
-
 export function LoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  // Güvenli varsayılan: aksi açıkça seçilmedikçe ortak cihaz kabul edilir.
-  const [deviceMode, setDeviceMode] = useState<DeviceMode>("shared");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hydrated = useHydrated();
-
-  const timedOut = searchParams.get("sebep") === "zaman-asimi";
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -53,7 +33,7 @@ export function LoginForm() {
     try {
       const result = await apiFetch<{ user: { mustChangePassword: boolean } }>(
         "/api/auth/login",
-        { method: "POST", body: JSON.stringify({ username, password, deviceMode }) },
+        { method: "POST", body: JSON.stringify({ username, password }) },
       );
       router.replace(result.user.mustChangePassword ? "/parola-degistir" : "/panel");
       router.refresh();
@@ -73,12 +53,6 @@ export function LoginForm() {
     // method="post": hidrasyon tamamlanmadan bir gönderim olursa bile
     // kimlik bilgileri adres çubuğuna (GET sorgusuna) YAZILMAZ.
     <form className="space-y-4" method="post" onSubmit={handleSubmit} noValidate>
-      {timedOut && !error ? (
-        <Alert tone="notice">
-          Hareketsizlik nedeniyle oturumunuz güvenlik için kapatıldı. Lütfen tekrar giriş yapın.
-        </Alert>
-      ) : null}
-
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
       <Field label="Kullanıcı adı" htmlFor="username">
@@ -119,38 +93,9 @@ export function LoginForm() {
         </div>
       </Field>
 
-      <fieldset>
-        <legend className="field-label">Bu cihaz</legend>
-        <div className="space-y-2" role="radiogroup" aria-label="Bu cihaz">
-          {DEVICE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={deviceMode === option.value}
-              onClick={() => setDeviceMode(option.value)}
-              className={cx(
-                "w-full rounded-[var(--radius-sm)] border px-3 py-2.5 text-left transition-colors",
-                deviceMode === option.value
-                  ? "border-accent-line bg-accent-soft"
-                  : "border-line-strong bg-surface hover:bg-surface-3",
-              )}
-            >
-              <span
-                className={cx(
-                  "block text-sm font-semibold",
-                  deviceMode === option.value ? "text-accent" : "text-ink",
-                )}
-              >
-                {option.label}
-              </span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-                {option.description}
-              </span>
-            </button>
-          ))}
-        </div>
-      </fieldset>
+      <p className="text-xs leading-relaxed text-subtle">
+        Bu cihazda bir kez giriş yaparsınız; siz çıkış yapana kadar oturumunuz açık kalır.
+      </p>
 
       <button type="submit" className="btn btn-primary w-full" disabled={busy || !hydrated}>
         {busy ? "Giriş yapılıyor…" : "Giriş yap"}

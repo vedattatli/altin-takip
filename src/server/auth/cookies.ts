@@ -1,5 +1,3 @@
-import type { SessionPolicy } from "@/auth/types";
-
 /**
  * Oturum çerezi seçenekleri.
  *
@@ -7,17 +5,16 @@ import type { SessionPolicy } from "@/auth/types";
  * - Secure: HTTPS üzerinde her zaman açıktır (yerel http geliştirme hariç).
  * - SameSite=Lax: siteler arası istekle gönderilmez.
  * - Path=/ ve Domain YOK: üretimdeki __Host- öneki bunu zorunlu kılar.
- * - Şirket / ortak cihazda çerez KALICI DEĞİLDİR: son kullanma tarihi
- *   verilmez, böylece tarayıcı kapandığında oturum silinir. Asıl güvenlik
- *   sınırı yine de sunucudaki idle/absolute süre kontrolüdür.
+ * - KALICI: son kullanma tarihi oturumun sunucudaki bitiş zamanıdır. Tarayıcı
+ *   kapatılıp açıldığında, PWA yeniden başlatıldığında veya cihaz yeniden
+ *   başladığında oturum devam eder. Sunucu süreyi uzattıkça çerez de tazelenir.
  */
-export function sessionCookieOptions(expiresAt: string, policy: SessionPolicy, secure: boolean) {
-  const base = {
+export function sessionCookieOptions(expiresAt: string, secure: boolean) {
+  return {
     httpOnly: true,
     secure,
     sameSite: "lax" as const,
     path: "/",
+    expires: new Date(expiresAt),
   };
-  if (!policy.persistentCookie) return base;
-  return { ...base, expires: new Date(expiresAt) };
 }

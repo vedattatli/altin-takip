@@ -46,20 +46,20 @@ export class PostgresLoginRateLimiter implements LoginRateLimiter {
     };
   }
 
-  private params(keyHash: string): Record<string, unknown> {
+  private params(keyHash: string, settings: RateLimitSettings): Record<string, unknown> {
     return {
       p_key_hash: keyHash,
-      p_max_attempts: this.settings.maxAttempts,
-      p_window_ms: this.settings.windowMs,
-      p_base_lock_ms: this.settings.baseLockMs,
-      p_max_lock_ms: this.settings.maxLockMs,
+      p_max_attempts: settings.maxAttempts,
+      p_window_ms: settings.windowMs,
+      p_base_lock_ms: settings.baseLockMs,
+      p_max_lock_ms: settings.maxLockMs,
     };
   }
 
-  async check(key: string): Promise<RateLimitDecision> {
+  async check(key: string, settings = this.settings): Promise<RateLimitDecision> {
     const { data, error } = await this.client.rpc(
       "login_rate_limit_check",
-      this.params(this.hash(key)),
+      this.params(this.hash(key), settings),
     );
     if (error) {
       // Sınırlayıcı çalışmıyorsa AÇIK KALINMAZ: istek reddedilir.
@@ -68,10 +68,10 @@ export class PostgresLoginRateLimiter implements LoginRateLimiter {
     return this.toDecision(Array.isArray(data) ? data[0] : data);
   }
 
-  async recordFailure(key: string): Promise<RateLimitDecision> {
+  async recordFailure(key: string, settings = this.settings): Promise<RateLimitDecision> {
     const { data, error } = await this.client.rpc(
       "login_rate_limit_record_failure",
-      this.params(this.hash(key)),
+      this.params(this.hash(key), settings),
     );
     if (error) {
       throw new Error(`Hız sınırlayıcı güncellenemedi: ${error.message}`);

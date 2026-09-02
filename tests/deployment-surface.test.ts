@@ -77,10 +77,10 @@ describe("PWA kurulumu isteğe bağlıdır", () => {
     }
   });
 
-  it("servis çalışanı yalnızca kişisel cihazda kaydedilir", () => {
+  it("servis çalışanı yalnızca üretim derlemesinde kaydedilir; cihaz türüne bakmaz", () => {
     const registrar = read(join("src", "components", "service-worker-registrar.tsx"));
-    expect(registrar).toMatch(/enabled/);
-    expect(registrar).toMatch(/!enabled \|\| process\.env\.NODE_ENV !== "production"/);
+    expect(registrar).toContain('process.env.NODE_ENV !== "production"');
+    expect(registrar).not.toMatch(/deviceMode|shared|personal/);
   });
 });
 
@@ -154,25 +154,29 @@ describe("servis çalışanı hassas yanıtları önbelleğe almaz", () => {
   });
 });
 
-describe("giriş ekranı cihaz seçimi", () => {
+describe("giriş ekranı: tek ve kalıcı oturum modeli", () => {
   const form = readCode(join("src", "app", "giris", "login-form.tsx"));
 
-  it("kişisel ve ortak cihaz seçenekleri sunar", () => {
-    expect(form).toContain("Şirket / ortak cihaz");
-    expect(form).toContain("Kişisel cihaz");
+  it("cihaz türü seçimi SUNMAZ", () => {
+    expect(form).not.toContain("Şirket / ortak cihaz");
+    expect(form).not.toContain("Kişisel cihaz");
+    expect(form).not.toMatch(/deviceMode/);
   });
 
-  it('"beni hatırla" seçeneği bulunmaz', () => {
+  it('"beni hatırla" seçeneği bulunmaz (oturum zaten kalıcıdır)', () => {
     expect(form).not.toMatch(/beni hatırla/i);
     expect(form).not.toMatch(/rememberMe|remember_me/);
   });
 
-  it("güvenli varsayılan ortak cihazdır", () => {
-    expect(form).toMatch(/useState<DeviceMode>\("shared"\)/);
+  it("sunucu istemciden cihaz türü okumaz", () => {
+    const route = readCode(join("src", "app", "api", "auth", "login", "route.ts"));
+    expect(route).not.toMatch(/deviceMode/);
   });
 
-  it("sunucu yalnızca açık seçimde kalıcı oturum verir", () => {
-    const route = read(join("src", "app", "api", "auth", "login", "route.ts"));
-    expect(route).toMatch(/body\.deviceMode === "personal" \? "personal" : "shared"/);
+  it("istemcide hareketsizlik sayacı veya otomatik çıkış yoktur", () => {
+    for (const file of SOURCE_FILES) {
+      const source = readCode(file);
+      expect(source, file).not.toMatch(/zaman-asimi|IDLE_TIMEOUT|idleTimeoutMs|DeviceGuard/);
+    }
   });
 });

@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { CsrfMeta } from "@/components/csrf-meta";
 import { BrandMark } from "@/components/ui";
-import { DeviceGuard } from "@/components/device-guard";
 import { appConfig } from "@/config/app.config";
 import { getSessionContext } from "@/server/auth";
 import { ChangePasswordForm } from "./change-password-form";
@@ -34,8 +33,6 @@ export default async function ChangePasswordPage() {
         <div className="card p-5 sm:p-6">
           <ChangePasswordForm forced={user.mustChangePassword} />
         </div>
-
-        <DeviceGuard deviceMode={session.deviceMode} authenticated />
       </div>
     </main>
   );

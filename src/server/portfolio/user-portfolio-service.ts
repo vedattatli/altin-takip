@@ -4,8 +4,12 @@ import { getProduct } from "@/domain/catalog";
 import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
 import { validateTransaction } from "@/domain/validation";
 import { ownScope, type UserActor } from "@/server/auth/actor";
-import { OversellError, type AuthBackend } from "@/server/auth/backend";
-import { badRequest, notFound } from "@/server/auth/errors";
+import {
+  OversellError,
+  PortfolioNotProvisionedError,
+  type AuthBackend,
+} from "@/server/auth/backend";
+import { badRequest, notFound, portfolioNotProvisioned } from "@/server/auth/errors";
 
 /**
  * Kullanıcının KENDİ portföyü.
@@ -16,11 +20,26 @@ import { badRequest, notFound } from "@/server/auth/errors";
  *
  * Başka kullanıcıyı hedefleyen işlemler AdminService'tedir.
  */
+/** Sayısal alanlar: yalnızca sonlu sayı veya sayı biçimli dize kabul edilir. */
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export class UserPortfolioService {
   constructor(private readonly backend: AuthBackend) {}
 
+  /** Salt okuma: hiçbir koşulda veritabanını değiştirmez. */
   async getPortfolio(actor: UserActor): Promise<PortfolioMeta> {
-    return this.backend.getPortfolio(ownScope(actor));
+    try {
+      return await this.backend.getPortfolio(ownScope(actor));
+    } catch (error) {
+      this.toAppError(error);
+    }
   }
 
   async renamePortfolio(
@@ -36,7 +55,11 @@ export class UserPortfolioService {
     if (clean.name !== undefined && clean.name.length === 0) {
       throw badRequest("Portföy adı boş olamaz.");
     }
-    return this.backend.updatePortfolio(ownScope(actor), clean);
+    try {
+      return await this.backend.updatePortfolio(ownScope(actor), clean);
+    } catch (error) {
+      this.toAppError(error);
+    }
   }
 
   async listTransactions(actor: UserActor): Promise<Transaction[]> {
@@ -56,19 +79,38 @@ export class UserPortfolioService {
       throw badRequest("Geçersiz işlem verisi.");
     }
     const body = raw as Record<string, unknown>;
-    const productId = String(body.productId ?? "");
+
+    // Ürün katalogda YOKSA açıkça reddedilir; birim istemciden alınmaz.
+    const productId = typeof body.productId === "string" ? body.productId : "";
     const product = getProduct(productId);
+    if (!product) throw badRequest("Lütfen listeden geçerli bir altın türü seçin.");
+
+    // side yalnızca "buy" veya "sell" olabilir; başka değer sessizce çevrilmez.
+    if (body.side !== "buy" && body.side !== "sell") {
+      throw badRequest("İşlem türü yalnızca alış veya satış olabilir.");
+    }
+
+    const quantity = toFiniteNumber(body.quantity);
+    const unitPrice = toFiniteNumber(body.unitPrice);
+    const feeAmount = body.feeAmount === undefined ? 0 : toFiniteNumber(body.feeAmount);
+
+    if (quantity === null || quantity <= 0) throw badRequest("Miktar sıfırdan büyük olmalıdır.");
+    if (unitPrice === null || unitPrice <= 0) {
+      throw badRequest("Birim fiyat sıfırdan büyük olmalıdır.");
+    }
+    if (feeAmount === null || feeAmount < 0) {
+      throw badRequest("İşçilik/komisyon negatif olamaz.");
+    }
 
     const input: TransactionInput = {
       productId,
-      side: body.side === "sell" ? "sell" : "buy",
-      quantity: Number(body.quantity),
-      // Birim istemciden DEĞİL, katalogdan alınır.
-      unit: product?.unit ?? "gram",
-      tradedAt: String(body.tradedAt ?? ""),
-      unitPrice: Number(body.unitPrice),
-      feeAmount: Number(body.feeAmount ?? 0),
-      note: String(body.note ?? "").slice(0, 280),
+      side: body.side,
+      quantity,
+      unit: product.unit,
+      tradedAt: typeof body.tradedAt === "string" ? body.tradedAt : "",
+      unitPrice,
+      feeAmount,
+      note: typeof body.note === "string" ? body.note.slice(0, 280) : "",
     };
 
     const existing = await this.backend.listTransactions(ownScope(actor));
@@ -84,10 +126,13 @@ export class UserPortfolioService {
     return input;
   }
 
-  /** Aşırı satış kontrolü arka uçta ATOMİK yapılır; buradaki kontrol ön eleme sağlar. */
+  /** Arka uç hatalarını HTTP hatalarına çevirir; iç detay sızdırmaz. */
   private toAppError(error: unknown): never {
     if (error instanceof OversellError) {
       throw badRequest("Satış miktarı elinizdeki miktarı aşamaz.");
+    }
+    if (error instanceof PortfolioNotProvisionedError) {
+      throw portfolioNotProvisioned();
     }
     if (error instanceof Error && /İşlem bulunamadı/.test(error.message)) {
       throw notFound("İşlem bulunamadı.");

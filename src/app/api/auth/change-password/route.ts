@@ -1,16 +1,15 @@
-import { cookies } from "next/headers";
-
-import { getAuthService, requireAuthenticatedUser, SESSION_COOKIE } from "@/server/auth";
+import { getAuthService, requireAuthenticatedUser } from "@/server/auth";
 import { ok, readJson } from "@/server/http";
 import { apiRoute } from "@/server/security/route";
 
 /**
  * Kullanıcının kendi parolasını değiştirmesi.
  *
- * Geçici parolalı kullanıcının kullanabildiği ÜÇ uçtan biridir; bu yüzden
+ * Geçici parolalı kullanıcının kullanabildiği uçlardan biridir; bu yüzden
  * requireUsableUser değil requireAuthenticatedUser kullanılır.
- * Mevcut parola doğrulanmadan yeni parola kabul edilmez ve başarılı
- * değişiklikten sonra TÜM oturumlar düşer.
+ * Mevcut parola doğrulanmadan yeni parola kabul edilmez. Başarılı
+ * değişiklikten sonra BU cihazdaki oturum korunur; diğer bütün cihazlar
+ * güvenlik için kapatılır.
  */
 export const POST = apiRoute(async (request) => {
   const body = await readJson<{ currentPassword?: string; newPassword?: string }>(request);
@@ -22,7 +21,5 @@ export const POST = apiRoute(async (request) => {
     body.newPassword ?? "",
   );
 
-  const store = await cookies();
-  store.delete(SESSION_COOKIE);
   return ok({ changed: true });
 });

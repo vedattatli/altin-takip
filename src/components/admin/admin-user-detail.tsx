@@ -4,7 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { generateTemporaryPassword } from "@/auth/password";
-import { ROLE_LABELS, STATUS_LABELS, type UserProfile } from "@/auth/types";
+import {
+  ROLE_LABELS,
+  STATUS_LABELS,
+  type SessionSummary,
+  type UserProfile,
+} from "@/auth/types";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
 import { apiFetch } from "@/lib/api-client";
 import {
@@ -18,13 +23,16 @@ import { Alert, Card, DeltaValue, Field, SectionTitle, cx } from "../ui";
 
 export function AdminUserDetail({
   initial,
+  initialSessions,
   isSelf,
 }: {
   initial: AdminUserPortfolioView;
+  initialSessions: SessionSummary[];
   isSelf: boolean;
 }) {
   const router = useRouter();
   const [user, setUser] = useState<UserProfile>(initial.user);
+  const [sessions, setSessions] = useState<SessionSummary[]>(initialSessions);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,7 +73,32 @@ export function AdminUserDetail({
         ? "Kullanıcı pasifleştirildi. Açık oturumları kapatıldı."
         : "Kullanıcı yeniden aktifleştirildi.",
     );
-    if (updated) setUser(updated);
+    if (updated) {
+      setUser(updated);
+      if (status === "inactive") setSessions([]);
+    }
+  }
+
+  async function revokeAllSessions() {
+    const result = await run(
+      () =>
+        apiFetch<{ closedSessions: number }>(`/api/admin/users/${user.id}/sessions`, {
+          method: "DELETE",
+        }),
+      "Kullanıcının tüm oturumları kapatıldı. Her cihazda yeniden giriş yapması gerekir.",
+    );
+    if (result) setSessions([]);
+  }
+
+  async function revokeSession(sessionId: string) {
+    const result = await run(
+      () =>
+        apiFetch<{ closed: boolean }>(`/api/admin/users/${user.id}/sessions/${sessionId}`, {
+          method: "DELETE",
+        }),
+      "Oturum kapatıldı.",
+    );
+    if (result?.closed) setSessions((current) => current.filter((row) => row.id !== sessionId));
   }
 
   async function resetPassword(event: React.FormEvent) {
@@ -80,6 +113,7 @@ export function AdminUserDetail({
     );
     if (updated) {
       setUser(updated);
+      setSessions([]);
       setIssuedPassword(temporaryPassword);
       setTemporaryPassword("");
       setResetOpen(false);
@@ -290,6 +324,59 @@ export function AdminUserDetail({
               </button>
             </form>
           ) : null}
+        </Card>
+      </section>
+
+      <section>
+        <SectionTitle
+          title="Aktif oturumlar"
+          description="Cihaz etiketi, oluşturulma ve son görülme zamanı. Ham IP veya cihaz parmak izi saklanmaz."
+        />
+        <Card>
+          {sessions.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-muted">Açık oturum yok.</p>
+          ) : (
+            <ul data-testid="admin-session-list">
+              {sessions.map((session) => (
+                <li
+                  key={session.id}
+                  className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">
+                      {session.deviceLabel}
+                      {session.current ? (
+                        <span className="badge badge-notice ml-2">Bu oturum</span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-muted">
+                      Giriş: {formatDateTime(session.createdAt)} · Son görülme:{" "}
+                      {formatDateTime(session.lastSeenAt)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost shrink-0 text-sm"
+                    onClick={() => void revokeSession(session.id)}
+                    disabled={busy}
+                  >
+                    Kapat
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="border-t border-line p-4">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              data-testid="revoke-all-sessions"
+              onClick={() => void revokeAllSessions()}
+              disabled={busy || sessions.length === 0}
+            >
+              Tüm oturumları kapat
+            </button>
+          </div>
         </Card>
       </section>
 

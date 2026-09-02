@@ -95,9 +95,12 @@ test.describe("ilk giriş ve parola değiştirme", () => {
     await page.getByRole("button", { name: "Parolayı değiştir" }).click();
 
     await expect(page.getByText("Parolanız güncellendi")).toBeVisible();
-    await page.waitForURL("**/giris", { timeout: 15_000 });
+    // Bu cihazdaki oturum sürer; yeniden giriş gerekmez.
+    await page.waitForURL("**/panel", { timeout: 15_000 });
 
-    // Eski parola artık çalışmaz.
+    // Açıkça çıkış yapılır ve eski parola artık çalışmaz.
+    await page.getByRole("button", { name: "Çıkış" }).click();
+    await page.waitForURL("**/giris");
     await login(page, username, TEST_PASSWORD);
     await expect(page.getByTestId("alert-danger")).toContainText("Kullanıcı adı veya parola hatalı.");
 

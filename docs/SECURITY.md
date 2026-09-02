@@ -6,7 +6,7 @@
 | --- | --- |
 | Yetkisiz hesap açma | Herkese açık kayıt ucu yok; hesapları yalnızca yönetici açar |
 | Hesap keşfi (enumeration) | Giriş hatasında tek genel mesaj; kullanıcı/parola ayrımı yapılmaz |
-| Kaba kuvvet parola denemesi | İstemci + kullanıcı bazlı hız sınırı, artan bekleme |
+| Kaba kuvvet parola denemesi | IP, kullanıcı adı ve IP+kullanıcı adı için üç ayrı sayaç; artan bekleme |
 | Başka kullanıcının verisine erişim | Sunucu tarafı oturum sahipliği + Postgres RLS |
 | Yetki yükseltme | Rol istemciden alınmaz; RLS tetikleyicisi rol/durum değişimini engeller |
 | Anahtar sızıntısı | `service_role` yalnızca `server-only` modüllerde; testle denetlenir |
@@ -14,7 +14,10 @@
 | Yönetici yetkisinin izlenememesi | `admin_audit_logs` ile değiştirilemez denetim kaydı |
 | Siteler arası istek sahteciliği (CSRF) | Origin + Sec-Fetch-Site kontrolü ve imzalı senkronizasyon jetonu |
 | Geçici parolayla uygulamayı kullanma | requireUsableUser guard'ı; UI yönlendirmesi tek önlem değildir |
-| Ortak cihazda açık kalan oturum | Sunucu tarafında hareketsizlik (15 dk) ve mutlak (8 sa) süre |
+| Çalınan veya eski oturum kimliği | Kimlik 7 günde bir sessizce yenilenir; iptal/silme anında geçerliliği bitirir; kaydırmalı ömür 180 gün |
+| BFF atlanarak Data API'ye doğrudan yazma | anon/authenticated için INSERT/UPDATE/DELETE grant'ı yok; kritik RPC'ler yalnızca `service_role` (0006) |
+| Sahte `X-Forwarded-For` ile hız sınırı atlatma | Başlık yalnızca güvenilir vekilde (`TRUSTED_PROXY_PROVIDER`) okunur; üç ayrı sayaç |
+| `Host` başlığıyla origin sahteciliği | Üretimde `APP_ORIGIN` zorunlu; başlıktan türetme yok (fail closed) |
 | Çok örnekli dağıtımda hız sınırının bölünmesi | Postgres tabanlı paylaşımlı sayaç; üretimde zorunlu |
 | Eşzamanlı isteklerle aşırı satış | Portföy satırı kilidiyle atomik Postgres RPC |
 
@@ -54,10 +57,7 @@ AUTH_ALLOW_LOCAL_BACKEND=yalnizca-test-icin
 - Ayarlanmadığında üretim derlemesi Supabase yapılandırması ister ve yerel arka uç yapıcısında
   hata fırlatır.
 - Üretim dağıtımlarında **asla** ayarlanmaz ve `.env.example` içinde yer almaz.
-- `tests/device-mode.test.ts` → "yerel arka uç üretim koruması" bu davranışı doğrular.
-
-Aynı belirteç, ortak cihaz hareketsizlik süresini testte kısaltmak için de gerekir
-(`NEXT_PUBLIC_ALLOW_TEST_OVERRIDES`); o olmadan süre her zaman 15 dakikadır.
+- `tests/session-cookie.test.ts` → "yerel arka uç üretim koruması" bu davranışı doğrular.
 
 ## 3. Kullanıcı adı → dahili kimlik
 
@@ -74,52 +74,100 @@ normalizeUsername(girdi) + "@" + AUTH_INTERNAL_EMAIL_DOMAIN
 - Normalizasyon büyük/küçük harf ve Türkçe karakter farklarını ortadan kaldırdığı için
   `Ayşe`, `AYSE` ve `ayse` **aynı** hesaba karşılık gelir; farklı hesap açılamaz.
 
-## 4. Oturum yönetimi
+## 4. Oturum yönetimi (kalıcı oturum modeli)
 
-- Oturum jetonu kriptografik olarak rastgele 32 bayttır; **yalnızca SHA-256 özeti** saklanır.
-- Çerez: `httpOnly`, `sameSite=lax`, HTTPS üzerinde `secure`. Kişisel cihazda açık son
-  kullanma tarihi verilir; şirket/ortak cihazda verilmez (tarayıcı kapanınca silinir).
+Kullanıcılar sık sık yeniden giriş yapmaz. Cihaz türü seçimi, 15 dakikalık
+hareketsizlik zaman aşımı ve kısa mutlak süreler **kaldırılmıştır**; bütün
+cihazlarda aynı, sade ve kalıcı oturum kullanılır.
+
+- Oturum kimliği kriptografik olarak rastgele 32 bayttır; **yalnızca SHA-256
+  özeti** saklanır. Tarayıcıda yalnızca bu opak kimlik bulunur.
+- Çerez: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Domain` verilmez, HTTPS üzerinde
+  `Secure`, üretimde `__Host-` önekli. **Kalıcıdır**: son kullanma tarihi
+  oturumun sunucudaki bitiş zamanıdır.
+- **Kaydırmalı ömür:** 180 gün. Geçerli kullanıcı aktivitesinde bitiş zamanı
+  sessizce ileri alınır; veritabanına en fazla 24 saatte bir yazılır
+  (`SESSION_RENEWAL_INTERVAL_MS`). Aktif kullanıcı süresiz oturumda kalır.
+- **Kimlik yenileme (rotation):** oturum kimliği 7 günde bir sessizce yenilenir;
+  eski kimlik 60 saniyelik tolerans süresi boyunca (uçuştaki istekler için)
+  kabul edilir, sonra reddedilir. Hiç bitmeyen ve hiç değişmeyen jeton yoktur.
+- Çerez tazeleme yalnızca route handler'larda yapılır (`apiRoute()` istek sonunda
+  `commitSessionCookie`); sunucu süresi zaten uzatıldığı için gecikme güvenlik
+  sınırını etkilemez.
 - Her istekte profil yeniden okunur; `status !== 'active'` ise oturum reddedilir.
-- Her istekte hem hareketsizlik hem mutlak süre SUNUCUDA denetlenir (bölüm 16).
-- Oturumlar şu durumlarda topluca silinir:
-  - kullanıcı kendi parolasını değiştirdiğinde,
-  - yönetici parolayı sıfırladığında,
-  - yönetici hesabı pasifleştirdiğinde,
-  - hesap kalıcı olarak silindiğinde.
+- **Hareketsizlik zaman aşımı YOKTUR.** 15 dakika, 1 saat veya 24 saat
+  hareketsizlik, sayfa yenileme, tarayıcı/PWA kapatıp açma veya cihazı yeniden
+  başlatma oturumu sonlandırmaz.
+
+Oturumun zorunlu olarak sonlandığı durumlar:
+
+| Olay | Etki |
+| --- | --- |
+| Kullanıcı "Çıkış" | Yalnızca bu cihazın oturum kaydı ve çerezi silinir |
+| Kullanıcı "Tüm cihazlardan çıkış yap" (Ayarlar) | Kullanıcının bütün oturum kayıtları iptal edilir |
+| Kullanıcı kendi parolasını değiştirir | **Diğer** cihazlar kapanır; bu cihaz devam eder |
+| Yönetici parolayı sıfırlar | Bütün oturumlar kapanır |
+| Yönetici hesabı pasifleştirir | Bütün oturumlar anında geçersiz olur |
+| Yönetici belirli bir oturumu / tümünü iptal eder | İlgili oturum(lar) kapanır (denetim kaydı: `user.sessions_revoke`) |
+| Hesap silinir | Bütün oturumlar kapanır |
+
+Silinmiş, iptal edilmiş veya süresi dolmuş oturum kimliği hiçbir istekte kabul
+edilmez (`tests/persistent-session.test.ts`, `e2e/session.spec.ts`).
+
+Oturum kaydında yalnızca güvenli metadata tutulur: kaba cihaz etiketi
+("Chrome · Windows"), oluşturulma, son görülme ve bitiş zamanı. **Ham IP veya
+User-Agent saklanmaz.**
 
 ## 5. Hız sınırlama
 
-`src/auth/rate-limit.ts` — kayan pencere + artan bekleme.
+`src/auth/rate-limit.ts` — kayan pencere + artan bekleme. Giriş denemesi **üç ayrı
+sayaçtan** geçer; herhangi biri kilitliyse istek reddedilir:
 
-- Anahtar: `istemci IP | kullanıcı adı`
-- Varsayılan: 15 dakikada 5 başarısız deneme → 60 sn bekleme, her ihlalde ikiye katlanır (en fazla 15 dk).
+| Sayaç | Anahtar | Varsayılan |
+| --- | --- | --- |
+| IP | `ip:<istemci>` | 15 dakikada 20 başarısız deneme (kilit en fazla 30 dk) |
+| Kullanıcı adı | `user:<ad>` | 15 dakikada 10 başarısız deneme |
+| Kombinasyon | `pair:<istemci>\|<ad>` | 15 dakikada 5 başarısız deneme → 60 sn bekleme, her ihlalde ikiye katlanır (en fazla 15 dk) |
+
+- Tek sayaç iki saldırıyı kaçırırdı: aynı IP'den çok sayıda kullanıcı adı
+  (credential stuffing) ve bir kullanıcı adını çok sayıda IP'den denemek.
+- Başarılı girişte **yalnızca kombinasyon** sayacı sıfırlanır; IP ve kullanıcı
+  adı sayaçları saldırı korumasını sürdürür.
 - Bekleme sırasında **doğru parola bile** kabul edilmez.
+- Anahtarlar `RATE_LIMIT_PEPPER` ile HMAC'lenir; ham IP veya kullanıcı adı
+  saklanmaz. İstemci IP'si yalnızca güvenilir vekilde başlıktan okunur (bölüm 23).
 
 > **Üretimde sayaç Postgres'te paylaşılır.** Süreç belleğindeki uygulama yalnızca
 > geliştirme/test içindir ve üretimde sessizce kullanılamaz. Ayrıntı: bölüm 18.
 
-## 6. Satır düzeyi güvenlik (RLS)
+## 6. Satır düzeyi güvenlik (RLS) ve tablo yetkileri
 
 Politikalar: [`supabase/migrations/0002_rls.sql`](../supabase/migrations/0002_rls.sql)
-Davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql) — `npm run test:db`
+(yazma politikaları `0006` ile kaldırıldı)
+Grant'lar: [`supabase/migrations/0006_database_boundary.sql`](../supabase/migrations/0006_database_boundary.sql)
+Davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql) — `npm run test:db` (73 test)
 
-> **Önemli:** RLS, BFF içinden yapılan `service_role` sorgularında UYGULANMAZ.
-> Burada tanımlı politikalar, Supabase Data API'ye kullanıcı JWT'siyle doğrudan
-> erişim girişimlerine karşı **ikinci savunma katmanıdır**. Birincil sınır
-> sunucu tarafı actor authorization'dır (bölüm 14).
+> **Önemli:** RLS, BFF içinden yapılan `service_role` / secret key sorgularında
+> UYGULANMAZ. Politikalar ve grant'lar, Supabase Data API'ye kullanıcı JWT'siyle
+> doğrudan erişim girişimlerine karşı **ikinci savunma katmanıdır**. Birincil
+> sınır sunucu tarafı actor authorization'dır (bölüm 14).
 
-| Tablo | Normal kullanıcı | Yönetici | Notlar |
-| --- | --- | --- | --- |
-| `profiles` | Yalnızca kendi satırını okur/günceller | Tümünü okur | Rol/durum/kullanıcı adı değişimi tetikleyici ile engellenir |
-| `portfolios` | Kendi kayıtları (tam yetki) | Salt okunur | |
-| `transactions` | Kendi kayıtları (tam yetki) | Salt okunur | Yönetici için yazma politikası **yok** |
-| `user_preferences` | Kendi kaydı | — | |
-| `admin_audit_logs` | Erişim yok | Salt okunur | UPDATE/DELETE politikası **yok** (değiştirilemez) |
-| `app_sessions` | Erişim yok | Erişim yok | Yalnızca `service_role` |
-| `gold_products`, `price_sources`, `current_prices` | Okuma | Okuma | Yazma yalnızca `service_role` |
+**İki ayrı katman:** tablo GRANT'ı "bu rol bu tabloya bu işlemi hiç yapabilir
+mi?" sorusunu, RLS "hangi satırlara?" sorusunu yanıtlar. Hangi katmanın
+reddettiği pgTAP'ta hata mesajıyla kanıtlanır: GRANT katmanı
+`permission denied for table X`, RLS katmanı `row-level security policy`.
 
-Tüm tablolarda `enable row level security` **ve** `force row level security` açıktır; politika
-tanımlanmayan tabloya hiçbir istemci erişemez.
+| Tablo | anon | authenticated (normal) | authenticated (admin) | service_role (BFF) |
+| --- | --- | --- | --- | --- |
+| `profiles` | — | Kendi satırını **okur** | Tümünü okur | Tam yetki |
+| `portfolios`, `transactions`, `user_preferences` | — | Kendi satırlarını **okur** | Okur | Tam yetki (finansal yazma yalnızca kontrollü RPC ile) |
+| `admin_audit_logs` | — | — (RLS boş liste) | Okur | SELECT + INSERT; UPDATE/DELETE kimseye yok |
+| `app_sessions`, `login_rate_limits` | — | — (SELECT grant'ı bile yok) | — | Tam yetki |
+| `gold_products`, `price_sources`, `current_prices` | — | Okur | Okur | Tam yetki |
+
+İstemci rolleri hiçbir tabloya **INSERT/UPDATE/DELETE yapamaz**; profil bile
+salt okunurdur (görünen ad değişikliği BFF üzerinden yapılır). Tüm tablolarda
+`enable row level security` **ve** `force row level security` açıktır.
 
 ### 6.1 Yetki yükseltmenin engellenmesi
 
@@ -130,7 +178,13 @@ tanımlanmayan tabloya hiçbir istemci erişemez.
 `is_admin()` ve `current_role_name()` fonksiyonları `SECURITY DEFINER` ve sabit `search_path` ile
 tanımlanır; böylece politikaların içinde `profiles` okunurken RLS özyinelemesi oluşmaz.
 
-## 7. `service_role` anahtarı
+## 7. Sunucu anahtarı (`SUPABASE_SECRET_KEY` / `service_role`)
+
+Tercih edilen değişken `SUPABASE_SECRET_KEY` (yeni `sb_secret_...` biçimi);
+`SUPABASE_SERVICE_ROLE_KEY` yalnızca geriye uyumluluk için okunur ve ikisi de
+yoksa üretim açık hata verir. Bu anahtar RLS'yi atlar; hiçbir `NEXT_PUBLIC_`
+değişkenine, API yanıtına veya istemci paketine girmez
+(`npm run verify:bundle` hem adları hem `sb_secret_` önekini tarar).
 
 - Yalnızca `src/server/` altındaki `import "server-only"` işaretli modüller okur.
 - `NEXT_PUBLIC_` öneki verilmesi yasaktır.
@@ -177,9 +231,10 @@ Kayıtlar değiştirilemez ve silinemez: `UPDATE`/`DELETE` politikası tanımlan
 
 | Sınır | Etki | Plan |
 | --- | --- | --- |
-| Supabase ortamı olmadan SupabaseAuthBackend ve SQL yolları çalıştırılamadı | RPC'ler, tetikleyiciler ve RLS testleri gerçek veritabanında doğrulanmadı | Supabase projesi açıldığında `npm run test:db` ve entegrasyon testleri |
+| Uzak (production) Supabase projesi henüz yok | Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında** (CLI + Docker, `supabase db reset` + 73 pgTAP + gerçek JWT sondası) doğrulandı; uzak projede henüz çalıştırılmadı | Uzak proje açıldığında aynı komutlar |
+| `SupabaseAuthBackend` uçtan uca yalnızca yerel yığına karşı sondalandı | Oturum rotation/renewal SQL yolu birim ve pgTAP düzeyinde doğrulandı; tarayıcı E2E testleri yerel arka uçla koşar | Uzak projede entegrasyon testi |
 | CSP script-src satır içi koda izin verir | Next.js bootstrap script'i için gereklidir | Nonce tabanlı CSP (middleware ile) |
-| purge_expired_sessions() otomatik çağrılmıyor | Süresi geçen satırlar birikir (erişim yine reddedilir) | pg_cron zamanlanmış görevi |
+| `purge_expired_sessions()` / `login_rate_limit_cleanup()` otomatik çalışmıyor | Süresi geçen satırlar birikir (erişim yine reddedilir) | `supabase/setup/maintenance-cron.sql` idempotent pg_cron kurulumu sağlar; **çalıştığı iddia edilmez**, panelden kurulmalı ve `cron.job_run_details` ile doğrulanmalıdır |
 
 ## 12. Şirket bilgisayarları ve ortak cihaz kullanımı
 
@@ -189,35 +244,38 @@ olarak çalışır. PWA kurulumu tamamen isteğe bağlıdır; hiçbir özellik k
 ve kurulu PWA ile normal tarayıcı kullanımı arasında görsel veya işlevsel fark yoktur.
 `tests/deployment-surface.test.ts` bu kısıtları depo üzerinde denetler.
 
-### 12.1 Cihaz türü seçimi
+### 12.1 Tek ve kalıcı oturum modeli
 
-Giriş ekranında iki seçenek vardır. **Güvenli varsayılan "Şirket / ortak cihaz"dır**; kalıcı
-oturum yalnızca kullanıcı açıkça "Kişisel cihaz" seçtiğinde verilir. Sunucu da aynı kuralı
-uygular: `deviceMode` değeri tam olarak `"personal"` değilse `"shared"` kabul edilir.
+Giriş ekranında cihaz türü **sorulmaz**; "Kişisel / Şirket cihazı" ayrımı,
+15 dakikalık hareketsizlik çıkışı ve cihaz türüne bağlı davranışlar
+(servis çalışanı temizleme, PWA kurulum çağrısının bastırılması)
+**kaldırılmıştır**. Kullanıcı her cihazda **bir kez** giriş yapar; oturum siz
+çıkış yapana kadar veya bir güvenlik olayına kadar açık kalır (bölüm 4 ve 16).
 
-Cihaz türü oturum kaydında (`app_sessions.device_mode`) saklanır; istemciden gelen bir değere
-sonradan güvenilmez.
+`app_sessions.device_mode` yalnızca eski veriyle uyumluluk için durur (0007 ile
+null'lanır, kısıtları kaldırıldı) ve iş mantığında **kullanılmaz**.
 
-### 12.2 Şirket / ortak cihaz kısıtları
+### 12.2 Her cihazda geçerli kısıtlar
 
 | Kısıt | Uygulama |
 | --- | --- |
-| Kalıcı oturum yok | Oturum çerezine son kullanma tarihi verilmez; tarayıcı kapanınca silinir (`src/server/auth/cookies.ts`) |
-| "Beni hatırla" yok | Giriş ekranında böyle bir seçenek bulunmaz |
+| "Beni hatırla" yok | Oturum zaten kalıcıdır; giriş ekranında böyle bir seçenek bulunmaz |
 | Token/portföy tarayıcı deposuna yazılmaz | `localStorage` ve `sessionStorage` uygulama kodunda hiç kullanılmaz; IndexedDB yalnızca geliştirme demo modundadır |
-| Hassas yanıtlar önbelleğe alınmaz | Servis çalışanı `/api/*` isteklerini ve kimliği doğrulanmış SAYFA yanıtlarını **hiç** önbelleğe yazmaz |
-| Servis çalışanı kaydedilmez | Ortak cihazda kayıt yapılmaz; varsa kaldırılır ve tüm önbellekler temizlenir (`src/components/device-guard.tsx`) |
-| PWA kurulum çağrısı gösterilmez | `beforeinstallprompt` bastırılır; uygulama hiçbir yerde `prompt()` çağırmaz |
+| Hassas yanıtlar önbelleğe alınmaz | Servis çalışanı `/api/*` isteklerini ve kimliği doğrulanmış SAYFA yanıtlarını **hiç** önbelleğe yazmaz; internet yokken oturum varmış gibi finansal işlem kabul edilmez |
+| Servis çalışanı | Yalnızca üretim derlemesinde kaydedilir; statik varlıklar ve çevrimdışı bilgi sayfası için |
+| PWA kurulumu | İsteğe bağlı; uygulama hiçbir yerde `prompt()` çağırmaz ve kurulum bastırılmaz |
 | Cihaz izni istenmez | Bildirim, push, konum veya kamera izni hiçbir kod yolunda talep edilmez |
-| 15 dakika hareketsizlikte otomatik çıkış | `SHARED_DEVICE_IDLE_TIMEOUT_MS`; süre üretimde sabittir, yalnızca geliştirme/test ortamında kısaltılabilir |
+| Cihaz metadata'sı | Yalnızca kaba etiket (tarayıcı · sistem), oluşturulma ve son görülme zamanı; ham IP / UA / parmak izi saklanmaz |
 
-Otomatik çıkışta sunucudaki oturum kaydı da silinir; kullanıcı `/giris?sebep=zaman-asimi`
-adresine yönlendirilir ve nedeni ekranda açıkça yazılır.
+Tarayıcıdan giriş yapan kullanıcı PWA simgesinden açtığında platform aynı
+çerez alanını paylaşıyorsa mevcut oturum kullanılır; ayrı saklama alanı
+kullanan platformda kullanıcı o PWA bağlamında bir kez daha giriş yapar ve
+sonra kalıcı kalır. Her cihaz aynı bulut portföyünü gösterir.
 
 ### 12.3 Oturum jetonu
 
 - Jeton **yalnızca** `HttpOnly` çerezde taşınır; JavaScript ile okunamaz (`document.cookie`
-  istemci kodunda hiç kullanılmaz ve `e2e/device.spec.ts` bunu tarayıcıda doğrular).
+  istemci kodunda hiç kullanılmaz ve `e2e/session.spec.ts` bunu tarayıcıda doğrular).
 - `Secure` bayrağı HTTPS üzerinde her zaman açıktır (yalnızca yerel http geliştirmede kapalıdır).
 - `SameSite=Lax` ile siteler arası isteklerde gönderilmez.
 - Parola hiçbir zaman istemcide saklanmaz; giriş formu `method="post"` kullandığı ve düğme
@@ -251,6 +309,12 @@ gerçekten çalıştığı `supabase/tests/rls.test.sql` ile doğrulanır.
 **Yanlış olurdu:** "Veriler RLS ile korunuyor." — BFF sorguları için bu ifade
 DOĞRU DEĞİLDİR ve dokümanda bu şekilde geçmemelidir.
 
+**Data API doğrudan mutation için kapalıdır (0006).** anon ve authenticated
+rolleri kişisel/finansal tablolara INSERT/UPDATE/DELETE yapamaz; kritik
+SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal
+mutation **yalnızca** BFF + kontrollü RPC (`*_transaction_checked`) yolundan
+geçer. Ayrıntı: bölüm 22.
+
 ### 14.1 Actor tipleri ile derleme zamanı koruma
 
 `src/server/auth/actor.ts` markalanmış (branded) tipler tanımlar:
@@ -283,32 +347,39 @@ tablo hâlinde doğrular; yeni bir uç eklenirse tablo güncellenmeden test geç
 
 | Guard | Geçici parolalı kullanıcı | Kullanıldığı uçlar |
 | --- | --- | --- |
-| `requireAuthenticatedUser` | **Geçer** | `/api/auth/session`, `/api/auth/logout`, `/api/auth/change-password` |
+| `requireAuthenticatedUser` | **Geçer** | `/api/auth/session`, `/api/auth/logout`, `/api/auth/logout-all`, `/api/auth/change-password` |
 | `requireUsableUser` | **Geçemez** | Portföy, işlemler, ayarlar |
 | `requireCurrentAdmin` | **Geçemez** | Tüm yönetim uçları |
 
 Reddedilen istek `403` ve `code: "PASSWORD_CHANGE_REQUIRED"` döner. Arayüz
 yönlendirmesi tek önlem DEĞİLDİR; sunucu bağımsız olarak reddeder.
-Parola değiştikten sonra tüm oturumlar düşer ve kullanıcı yeniden giriş yapar.
+Parola değiştikten sonra **bu cihazdaki oturum korunur**; diğer cihazlardaki
+oturumlar güvenlik için kapatılır. `/api/auth/logout-all` da bu guard'ı kullanır.
 
-## 16. Sunucu tarafı oturum süresi
+## 16. Sunucu tarafı oturum geçerliliği
 
-| | Kişisel cihaz | Şirket / ortak cihaz |
+| Parametre | Değer | Sabit |
 | --- | --- | --- |
-| Hareketsizlik | Yok | **15 dakika** |
-| Mutlak süre | 14 gün | **8 saat** |
-| Çerez | Kalıcı | Tarayıcı kapanınca silinir |
+| Kaydırmalı ömür | 180 gün | `SESSION_ROLLING_LIFETIME_MS` |
+| Süre uzatma sıklığı | en fazla 24 saatte bir | `SESSION_RENEWAL_INTERVAL_MS` |
+| `last_seen_at` yazma sıklığı | en fazla 15 dakikada bir | `SESSION_TOUCH_INTERVAL_MS` |
+| Kimlik yenileme aralığı | 7 gün | `SESSION_ROTATION_INTERVAL_MS` |
+| Eski kimlik tolerans süresi | 60 sn | `SESSION_ROTATION_GRACE_MS` |
+| Hareketsizlik zaman aşımı | **yok** | — |
 
-`app_sessions` tablosunda `device_mode`, `last_seen_at`, `idle_expires_at`,
-`absolute_expires_at` ve `revoked_at` alanları tutulur. `resolveSession()` her
-istekte **hem** hareketsizlik **hem** mutlak süreyi kontrol eder; süresi geçen
-oturum reddedilir ve kaydı silinir.
+`app_sessions` tablosunda `expires_at` (kaydırmalı bitiş), `renewed_at`,
+`rotated_at`, `previous_token_hash` / `previous_token_valid_until`,
+`device_label`, `last_seen_at` ve `revoked_at` alanları tutulur (`0007`).
+`resolveSession()` her istekte iptal, bitiş ve hesap durumunu kontrol eder;
+süresi geçen oturumun kaydı silinir. `idle_expires_at` ve `device_mode`
+deprecated'dır ve yetkilendirme kararında **kullanılmaz**.
 
-- `last_seen_at` her istekte yazılmaz: en fazla 60 saniyede bir tazelenir.
-- İstemcideki 15 dakikalık sayaç yalnızca kullanıcı deneyimi içindir; askıya
-  alınmış sekme veya tarayıcı oturum geri yükleme senaryolarında bile
-  **güvenlik sınırı sunucudadır** (`tests/session-expiry.test.ts`).
-- `purge_expired_sessions()` SQL fonksiyonu zamanlanmış görevle çağrılabilir.
+- Yenileme her API çağrısında DB yazmaz (`tests/persistent-session.test.ts` →
+  "her API çağrısında veritabanına YAZILMAZ").
+- İstemcide hareketsizlik sayacı veya otomatik çıkış **yoktur**; güvenlik
+  sınırı sunucudadır (iptal listesi + kaydırmalı bitiş + rotation).
+- `purge_expired_sessions()` iptal edilmiş ve süresi dolmuş satırları temizler
+  (`supabase/setup/maintenance-cron.sql`).
 
 Üretimde çerez adı `__Host-` öneklidir: tarayıcı bu öneki yalnızca `Secure`,
 `Path=/` ve `Domain` verilmemiş çerezlerde kabul eder; alt alan adından çerez
@@ -366,7 +437,11 @@ CSP, Next.js'in satır içi bootstrap script'lerini bozmayacak biçimde yazılm�
 - **Fail closed:** üretimde Supabase yapılandırması veya `RATE_LIMIT_PEPPER`
   eksikse bellek sınırlayıcısına sessizce DÜŞÜLMEZ; açık bir yapılandırma hatası
   verilir. Sınırlayıcı sorgusu hata verirse istek reddedilir, geçilmez.
-- `login_rate_limit_cleanup()` eski sayaçları temizler.
+- `login_rate_limit_cleanup()` eski sayaçları temizler (pg_cron kurulumu:
+  `supabase/setup/maintenance-cron.sql`).
+- Üç sayaç (IP, kullanıcı adı, kombinasyon) aynı Postgres tablosunda farklı
+  eşiklerle tutulur; her sayacın anahtarı ayrı HMAC'lenir. Bellek uygulaması
+  da her eşik seti için ayrı kayan pencere kullanır.
 
 ## 19. Veritabanı bütünlüğü
 
@@ -379,6 +454,7 @@ CSP, Next.js'in satır içi bootstrap script'lerini bozmayacak biçimde yazılm�
 | Birim ürün kataloğuyla uyumlu | `enforce_transaction_unit()` tetikleyicisi |
 | Adet ürününde tam sayı miktar | Aynı tetikleyici |
 | Aşırı satış engeli (eşzamanlı dâhil) | `lock_user_portfolio()` + `assert_no_oversell()` içeren atomik RPC'ler |
+| Portföy yalnızca provisioning ile oluşur | `profiles` AFTER INSERT tetikleyicisi (`0006`); `lock_user_portfolio()` artık portföy **oluşturmaz**, yoksa `ALTIN_PORTFOLIO_NOT_PROVISIONED` verir |
 
 Yazma yolları `create_transaction_checked`, `update_transaction_checked` ve
 `delete_transaction_checked` fonksiyonlarıdır. Her biri kullanıcının portföy
@@ -408,3 +484,87 @@ sayılır ve varsa açık bir hata ile durdurulur.
 - Depoya **yalnızca** `.env.example` girer ve içinde gerçek değer bulunmaz.
 - `.gitignore` tüm `.env*` dosyalarını dışlar (`.env.example` hariç) ve `.data/` klasörünü kapsar.
 - `npm run admin:create` parolayı ekrana yazdırmaz, kabuk geçmişine düşürmez ve loglamaz.
+
+## 22. Veritabanı yetki sınırı (`0006_database_boundary.sql`)
+
+Tarayıcı Supabase'e doğrudan yazmaz; bütün mutation'lar
+`Next.js BFF → doğrulanmış app_session → markalanmış actor/scope → server-only
+secret key client → PostgreSQL` yolundan geçer. `0006`, bu yolun **atlanmasını**
+PostgreSQL yetkileriyle engeller.
+
+### 22.1 Fonksiyon yetki matrisi
+
+| Fonksiyon | anon | authenticated | service_role |
+| --- | --- | --- | --- |
+| `create_transaction_checked`, `update_transaction_checked`, `delete_transaction_checked` | — | — | EXECUTE |
+| `login_rate_limit_check`, `_record_failure`, `_reset`, `_cleanup` | — | — | EXECUTE |
+| `purge_expired_sessions`, `provision_missing_defaults` | — | — | EXECUTE |
+| `assert_no_oversell`, `lock_user_portfolio`, `provision_user_defaults` | — | — | — |
+| Tetikleyici fonksiyonları (`reject_audit_mutation`, `enforce_transaction_unit`, `touch_updated_at`, `prevent_profile_privilege_escalation`, `provision_user_defaults_trigger`) | — | — | — |
+| `current_role_name`, `is_admin` (RLS yardımcıları) | — | EXECUTE | — |
+
+Dahili yardımcılar hiçbir role açık değildir; SECURITY DEFINER fonksiyonlar
+onları sahip yetkisiyle çağırır, tetikleyiciler EXECUTE yetkisine bakmaz.
+Migration, yetkileri **tam imzayla** ve her rolden ayrı ayrı alır
+(`revoke ... from public` tek başına yeterli değildir).
+
+**Varsayılan yetkiler:** PostgreSQL yeni fonksiyonlara örtük olarak PUBLIC
+EXECUTE verir ve şema düzeyi varsayılan ACL'yi global varsayılanla
+birleştirir. `0006` bu yüzden hem global hem `public` şeması için `postgres`
+rolünün varsayılan fonksiyon yetkilerinden PUBLIC/anon/authenticated'ı kaldırır
+(yalnızca migration rolü `postgres` üyesiyse; değilse NOTICE ile bildirir).
+pgTAP testi bunu gerçek bir fonksiyon oluşturarak doğrular.
+
+### 22.2 Tablo yetkileri
+
+Bölüm 6'daki matris. anon hiçbir şey okuyamaz; authenticated yalnızca SELECT
+(satır kapsamı RLS ile); `app_sessions` ve `login_rate_limits` istemci
+rollerine tamamen kapalı; `admin_audit_logs` için UPDATE/DELETE grant'ı
+**hiçbir role** yok (tetikleyici ayrıca engeller).
+
+### 22.3 Kaldırılan yazma politikaları
+
+`portfolios_insert/update/delete_own`, `transactions_insert/update/delete_own`,
+`user_preferences_all_own` ve `profiles_update_self` kaldırıldı; yerine yalnızca
+`user_preferences_select_own` eklendi. `public` şemasında SELECT dışında RLS
+politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
+
+### 22.4 Varsayılan portföy provisioning
+
+- Profil eklenince `profiles_provision_defaults` (AFTER INSERT) tetikleyicisi
+  portföyü ve tercih kaydını **aynı transaction** içinde hazırlar; yarım hesap
+  kalmaz. `provision_user_defaults()` idempotenttir (`on conflict do nothing`).
+- `GET /api/portfolio` **hiçbir koşulda veri oluşturmaz**; portföy yoksa
+  `500 portfolio_not_provisioned` döner (`tests/provisioning.test.ts` yazma
+  sayacıyla kanıtlar). `LocalAuthBackend` aynı davranışı yansıtır.
+- Onarım: `provision_missing_defaults()` (yalnızca `service_role`) veya
+  `npm run admin:repair`; idempotenttir, ikinci çağrı 0 döner.
+
+### 22.5 Doğrulama durumu (dürüst)
+
+- `npm run test:db`: yerel Supabase yığınında (CLI 2.116, Docker) `supabase db
+  reset` ile 0001→0007 temiz uygulandı; **73 pgTAP testinin tamamı geçti**.
+  0006 iki kez uygulanarak idempotentlik doğrulandı.
+- `npm run test:data-api`: gerçek anon anahtarı ve yerel JWT secret'ıyla
+  imzalanmış authenticated JWT ile PostgREST üzerinden 21 beklenti karşılandı
+  (okuma RLS kapsamlı, yazma/RPC 401/403 `42501`, BFF yolu çalışır).
+- Uzak production Supabase projesi **oluşturulmadı**; bu sonuçlar yerel yığına aittir.
+
+## 23. Üretim sertleştirme: origin, vekil, anahtar
+
+- **`APP_ORIGIN` üretimde zorunludur.** `Host` / `X-Forwarded-Host`
+  başlıklarından origin türetilmez; eksikse durum değiştiren istekler
+  `500 misconfigured` ile reddedilir (fail closed). E2E testleri değişkeni
+  açıkça ayarlar; başka bir "override" yolu yoktur (`tests/production-origin.test.ts`).
+- **`TRUSTED_PROXY_PROVIDER`** = `vercel` \| `local` \| `none`.
+  `X-Forwarded-For` / `X-Real-IP` yalnızca güvenilir sağlayıcıda okunur;
+  bilinmeyen değer veya boş (üretimde) → `none`: başlıklar yok sayılır, saldırgan
+  kendine IP uyduramaz (`tests/client-ip.test.ts`). Ham IP hiçbir loga veya
+  tabloya yazılmaz; yalnızca HMAC'li sayaç anahtarına girer.
+- **`SUPABASE_SECRET_KEY`** tercih edilir, `SUPABASE_SERVICE_ROLE_KEY`
+  geriye uyumluluk; üretimde ikisi de yoksa açık hata. İstemci paketi
+  taraması her iki adı ve `sb_secret_` önekini arar.
+- **Kaynak paketi** saf Node ile yazılır: giriş adları her platformda `/`
+  ayraçlıdır, arşiv yeniden açılıp her girişin CRC'si kaynakla karşılaştırılır,
+  giriş sayısı manifestle eşleştirilir; `.git`, `node_modules`, `.next`,
+  `.data`, `.env*` (örnek hariç), test çıktıları dışlanır.

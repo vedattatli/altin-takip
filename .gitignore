@@ -58,3 +58,7 @@ next-env.d.ts
 
 # Kaynak paketi çıktısı
 /dist/
+
+# Supabase CLI yerel çalışma dosyaları
+/supabase/.temp/
+/supabase/.branches/

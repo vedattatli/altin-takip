@@ -35,10 +35,10 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
         body: JSON.stringify({ currentPassword, newPassword }),
       });
 
-      // Güvenlik gereği tüm oturumlar düştü; kullanıcı yeni parolayla tekrar girer.
+      // Bu cihazdaki oturum korunur; diğer cihazlar güvenlik için kapatıldı.
       setDone(true);
       setTimeout(() => {
-        router.replace("/giris");
+        router.replace("/panel");
         router.refresh();
       }, 1800);
     } catch (cause) {
@@ -55,7 +55,8 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
   if (done) {
     return (
       <Alert tone="success" title="Parolanız güncellendi">
-        Güvenlik için tüm cihazlardaki oturumlar kapatıldı. Giriş ekranına yönlendiriliyorsunuz…
+        Bu cihazdaki oturumunuz devam ediyor; diğer cihazlardaki oturumlar güvenlik için
+        kapatıldı. Panele yönlendiriliyorsunuz…
       </Alert>
     );
   }

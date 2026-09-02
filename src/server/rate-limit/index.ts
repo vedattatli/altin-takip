@@ -41,7 +41,7 @@ export function createLoginRateLimiter(): LoginRateLimiter {
         "RATE_LIMIT_PEPPER tanımlı değil. Üretimde hız sınırlayıcı anahtarları gizlenmeden çalıştırılamaz.",
       );
     }
-    const client = createClient(serverEnv.supabaseUrl, serverEnv.supabaseServiceRoleKey, {
+    const client = createClient(serverEnv.supabaseUrl, serverEnv.supabaseSecretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
     return new PostgresLoginRateLimiter(client, serverEnv.rateLimitPepper);
@@ -49,7 +49,7 @@ export function createLoginRateLimiter(): LoginRateLimiter {
 
   // Geliştirme/test: Supabase varsa yine paylaşımlı sınırlayıcı tercih edilir.
   if (hasSupabaseConfig() && serverEnv.rateLimitPepper) {
-    const client = createClient(serverEnv.supabaseUrl, serverEnv.supabaseServiceRoleKey, {
+    const client = createClient(serverEnv.supabaseUrl, serverEnv.supabaseSecretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
     return new PostgresLoginRateLimiter(client, serverEnv.rateLimitPepper);

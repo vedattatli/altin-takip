@@ -1,8 +1,10 @@
 # Veri Modeli
 
 Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla
-`0001` → `0002` → `0003` → `0004` → `0005`.
-RLS davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007`.
+Yetki sınırı ve RLS testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
+(73 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
+Bakım görevleri: [`supabase/setup/maintenance-cron.sql`](../supabase/setup/maintenance-cron.sql).
 
 ## 1. İlişki şeması
 
@@ -58,13 +60,15 @@ cihazlardaki oturumlar** geçersiz kılınır.
 | `id` | `uuid` PK | |
 | `user_id` | `uuid` | `profiles(id)` → `CASCADE` |
 | `token_hash` | `text` UNIQUE | Jetonun kendisi değil, **SHA-256 özeti** |
-| `expires_at` | `timestamptz` | Eski alan; `absolute_expires_at` ile aynı değeri taşır |
+| `expires_at` | `timestamptz` | **Kaydırmalı bitiş** (0007); `absolute_expires_at` aynı değeri taşır |
 | `created_at` | `timestamptz` | |
 
-`0005` ile eklenen süre alanları için bkz. bölüm 13.1.
+`0005` ve `0007` ile eklenen alanlar için bkz. bölüm 13.1 ve 15.
 
-İndeksler: `app_sessions_user_id_idx`, `app_sessions_expires_at_idx`
-RLS: politika **yok** — yalnızca `service_role` erişir.
+İndeksler: `app_sessions_user_id_idx`, `app_sessions_expires_at_idx`,
+`app_sessions_previous_token_hash_idx` (kısmi)
+RLS: politika **yok**; `0006` ile anon/authenticated için SELECT grant'ı da yoktur —
+yalnızca `service_role` erişir.
 
 ## 4. `gold_products`
 
@@ -195,20 +199,20 @@ Alış ve satışın ters kaydedilmesi veritabanı düzeyinde engellenir.
 
 ## 13. Sprint 0.5 eklemeleri (`0005_security_hardening.sql`)
 
-### 13.1 `app_sessions` — oturum süreleri
+### 13.1 `app_sessions` — 0005 alanları (bir kısmı 0007 ile deprecated)
 
 | Sütun | Tip | Notlar |
 | --- | --- | --- |
-| `device_mode` | `text` | `personal` \| `shared` |
-| `last_seen_at` | `timestamptz` | En fazla 60 saniyede bir güncellenir |
-| `idle_expires_at` | `timestamptz` | Ortak cihazda dolu, kişiselde `null` |
-| `absolute_expires_at` | `timestamptz` | **Her zaman dolu** |
+| `device_mode` | `text` | **DEPRECATED (0007):** nullable, kısıtsız; yeni oturumlarda `null`, iş mantığında kullanılmaz |
+| `last_seen_at` | `timestamptz` | En fazla 15 dakikada bir güncellenir |
+| `idle_expires_at` | `timestamptz` | **DEPRECATED (0007):** her zaman `null`; yetkilendirme kararında kullanılmaz |
+| `absolute_expires_at` | `timestamptz` | `expires_at` ile aynı değeri taşır (uyumluluk) |
 | `revoked_at` | `timestamptz` | Dolu ise oturum geçersiz |
 
-- `app_sessions_shared_needs_idle` kısıtı: `device_mode = 'shared'` ise
-  `idle_expires_at` boş olamaz.
-- İndeksler: `app_sessions_idle_expires_idx` (kısmi), `app_sessions_absolute_expires_idx`
-- `purge_expired_sessions()` süresi geçmiş satırları siler.
+- `app_sessions_shared_needs_idle` ve `app_sessions_device_mode_check` kısıtları
+  0007 ile kaldırıldı.
+- `purge_expired_sessions()` (0007 sürümü) iptal edilmiş ve `expires_at` geçmiş
+  satırları siler; hareketsizlik alanına bakmaz.
 
 ### 13.2 Portföy ve işlem bütünlüğü
 
@@ -238,7 +242,7 @@ zorunlu kılar. Bilinmeyen `product_id` reddedilir.
 
 | Fonksiyon | İş |
 | --- | --- |
-| `lock_user_portfolio(user_id)` | Portföy satırını `FOR UPDATE` ile kilitler, yoksa oluşturur |
+| `lock_user_portfolio(user_id)` | Portföy satırını `FOR UPDATE` ile kilitler; **yoksa oluşturmaz**, `ALTIN_PORTFOLIO_NOT_PROVISIONED` (P0002) verir (0006) |
 | `assert_no_oversell(user_id, product_id)` | Kronolojik bakiyeyi doğrular; ihlalde `ALTIN_OVERSELL` |
 | `create_transaction_checked(...)` | Kilitle → ekle → doğrula |
 | `update_transaction_checked(...)` | Kilitle → güncelle → eski ve yeni ürünü doğrula |
@@ -247,8 +251,8 @@ zorunlu kılar. Bilinmeyen `product_id` reddedilir.
 Kontrol ile yazma **aynı transaction** içindedir; iki eşzamanlı satış birlikte
 eldeki miktarı aşamaz. İhlalde transaction geri alınır.
 
-Bu fonksiyonlar yalnızca `service_role` tarafından çağrılabilir
-(`revoke all ... from public`).
+Bu fonksiyonlar yalnızca `service_role` tarafından çağrılabilir; `0006` yetkileri
+tam imzayla ve her rolden (public, anon, authenticated) ayrı ayrı alır.
 
 ### 13.5 `login_rate_limits`
 
@@ -273,3 +277,60 @@ Fonksiyonlar: `login_rate_limit_check`, `login_rate_limit_record_failure`
 `DELETE` işlemlerini `42501` hatasıyla reddeder. Bu kural RLS'ten bağımsızdır ve
 `service_role` için de geçerlidir.
 
+## 14. Veritabanı yetki sınırı (`0006_database_boundary.sql`)
+
+### 14.1 Fonksiyon yetkileri
+
+| Grup | Fonksiyonlar | Yetki |
+| --- | --- | --- |
+| Üst seviye BFF RPC'leri | `purge_expired_sessions()`, `create/update/delete_transaction_checked(...)`, `login_rate_limit_check/record_failure/reset/cleanup(...)`, `provision_missing_defaults()` | Yalnızca `service_role` EXECUTE |
+| Dahili yardımcılar | `assert_no_oversell(uuid, text)`, `lock_user_portfolio(uuid)`, `provision_user_defaults(uuid)` | Hiçbir role açık değil |
+| Tetikleyici fonksiyonları | `reject_audit_mutation()`, `enforce_transaction_unit()`, `touch_updated_at()`, `prevent_profile_privilege_escalation()`, `provision_user_defaults_trigger()` | Hiçbir role açık değil |
+| RLS yardımcıları | `current_role_name()`, `is_admin()` | `authenticated` EXECUTE |
+
+Varsayılan yetkiler: `postgres` rolünün global ve `public` şeması varsayılan
+fonksiyon ACL'sinden PUBLIC/anon/authenticated kaldırılır (korumalı DO bloğu).
+
+### 14.2 Tablo yetkileri
+
+| Tablo | anon | authenticated | service_role |
+| --- | --- | --- | --- |
+| `profiles`, `portfolios`, `transactions`, `user_preferences` | — | SELECT | SELECT, INSERT, UPDATE, DELETE |
+| `app_sessions`, `login_rate_limits` | — | — | SELECT, INSERT, UPDATE, DELETE |
+| `admin_audit_logs` | — | SELECT | SELECT, INSERT |
+| `gold_products`, `price_sources`, `current_prices` | — | SELECT | SELECT, INSERT, UPDATE, DELETE |
+
+GRANT katmanı ("bu rol bu işlemi yapabilir mi?") ile RLS katmanı ("hangi
+satırlar?") **ayrı ayrı** test edilir; GRANT reddi `permission denied for table`
+mesajıyla, RLS reddi `row-level security policy` mesajıyla ayırt edilir.
+
+### 14.3 Politika değişiklikleri
+
+Kaldırılan: `portfolios_insert/update/delete_own`, `transactions_insert/update/delete_own`,
+`user_preferences_all_own`, `profiles_update_self`.
+Eklenen: `user_preferences_select_own`. `public` şemasında SELECT dışında politika yoktur.
+
+### 14.4 Provisioning
+
+| Nesne | İş |
+| --- | --- |
+| `provision_user_defaults(uuid)` | Portföy (`Portföyüm`) + tercih kaydı, `on conflict do nothing`; oluşturulan satır sayısını döner |
+| `profiles_provision_defaults` (AFTER INSERT tetikleyicisi) | Profil ile birlikte aynı transaction içinde çalışır |
+| `provision_missing_defaults()` | Eksik kaydı olan kullanıcıları tamamlar; `(user_id, created_rows)` döner; idempotent; yalnızca `service_role` |
+
+Migration mevcut veriyi bir kez onarır ve tekrar çalıştırılabilir.
+
+## 15. Kalıcı oturum modeli (`0007_persistent_sessions.sql`)
+
+| Sütun | Tip | Notlar |
+| --- | --- | --- |
+| `expires_at` | `timestamptz` | Kaydırmalı bitiş; aktivitede (≤ 24 saatte bir) `now() + 180 gün` |
+| `renewed_at` | `timestamptz` | Bitişin en son ileri alındığı an |
+| `rotated_at` | `timestamptz` | Oturum kimliğinin en son yenilendiği an (7 günde bir) |
+| `previous_token_hash` | `text` | Yenileme sonrası eski kimliğin özeti (kısmi indeks) |
+| `previous_token_valid_until` | `timestamptz` | Eski kimlik bu ana kadar (60 sn) kabul edilir |
+| `device_label` | `text` | Kaba cihaz tanımı ("Chrome · Windows"); ham User-Agent / IP saklanmaz |
+
+Dönüşüm: eski `shared` oturumlar iptal edilir (zaten kalıcı değildi), `personal`
+oturumlar hareketsizlik sınırı olmadan kaydırmalı ömre taşınır; `device_mode`
+null'lanır, kısıtları ve `idle_expires_at` kullanımı kaldırılır.

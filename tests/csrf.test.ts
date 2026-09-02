@@ -107,7 +107,7 @@ describe("origin kontrolü", () => {
 
 describe("beklenen origin çözümü", () => {
   it("APP_ORIGIN verilmişse yalnızca o kabul edilir", () => {
-    const result = expectedOrigins(headersOf({ host: "baska.example" }), "https://ornek.com/");
+    const result = expectedOrigins(headersOf({ host: "baska.example" }), "https://ornek.com/", false);
     expect(result).toEqual(["https://ornek.com"]);
   });
 
@@ -115,12 +115,13 @@ describe("beklenen origin çözümü", () => {
     const result = expectedOrigins(
       headersOf({ host: "localhost:3000", "x-forwarded-proto": "http" }),
       "",
+      false,
     );
     expect(result).toEqual(["http://localhost:3000"]);
   });
 
   it("host yoksa hiçbir origin kabul edilmez", () => {
-    expect(expectedOrigins(headersOf({}), "")).toEqual([]);
+    expect(expectedOrigins(headersOf({}), "", false)).toEqual([]);
   });
 });
 

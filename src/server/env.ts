@@ -16,11 +16,29 @@ function read(name: string): string {
   return (process.env[name] ?? "").trim();
 }
 
+function stripTrailingSlashes(value: string): string {
+  let result = value;
+  while (result.endsWith("/")) result = result.slice(0, -1);
+  return result;
+}
+
+export type TrustedProxyProvider = "vercel" | "local" | "none";
+
+function normalizeProxyProvider(value: string): TrustedProxyProvider {
+  if (value === "vercel" || value === "local" || value === "none") return value;
+  // Belirtilmemişse: üretimde hiçbir vekil başlığına güvenilmez.
+  return process.env.NODE_ENV === "production" ? "none" : "local";
+}
+
 export const serverEnv = {
   supabaseUrl: read("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseAnonKey: read("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  /** Yalnızca sunucuda. İstemciye sızmadığı testle doğrulanır. */
-  supabaseServiceRoleKey: read("SUPABASE_SERVICE_ROLE_KEY"),
+  /**
+   * Sunucu anahtarı. Yalnızca sunucuda; istemciye sızmadığı testle doğrulanır.
+   * Tercih: SUPABASE_SECRET_KEY (yeni sb_secret_... biçimi).
+   * Geriye uyumluluk: SUPABASE_SERVICE_ROLE_KEY. İkisi varsa SECRET_KEY kazanır.
+   */
+  supabaseSecretKey: read("SUPABASE_SECRET_KEY") || read("SUPABASE_SERVICE_ROLE_KEY"),
   /**
    * Kullanıcı adından türetilen dahili kimliğin alan adı.
    * Bu adrese asla e-posta gönderilmez; yalnızca Supabase Auth'un
@@ -42,10 +60,16 @@ export const serverEnv = {
   rateLimitPepper: read("RATE_LIMIT_PEPPER"),
   /**
    * Uygulamanın beklenen origin'i (örn. https://altin-takip.ornek.com).
-   * Boşsa istek başlıklarından türetilir; üretimde açıkça verilmesi önerilir.
+   * ÜRETİMDE ZORUNLUDUR; üretimde Host/X-Forwarded-Host'tan türetme yapılmaz.
+   * Geliştirmede boşsa istek başlıklarından türetilir.
    */
-  appOrigin: read("APP_ORIGIN"),
-  sessionTtlHours: Number(read("AUTH_SESSION_TTL_HOURS") || "336"),
+  appOrigin: stripTrailingSlashes(read("APP_ORIGIN")),
+  /**
+   * Güvenilir ters vekil sağlayıcısı: "vercel" | "local" | "none".
+   * X-Forwarded-For yalnızca güvenilir sağlayıcıda dikkate alınır;
+   * bilinmeyen/none durumunda saldırganın belirlediği başlık YOK SAYILIR.
+   */
+  trustedProxyProvider: normalizeProxyProvider(read("TRUSTED_PROXY_PROVIDER")),
   isProduction: process.env.NODE_ENV === "production",
   /**
    * Yerel geliştirme arka ucunun üretim derlemesinde çalışmasına izin verir.
@@ -58,9 +82,7 @@ export const serverEnv = {
 } as const;
 
 export function hasSupabaseConfig(): boolean {
-  return Boolean(
-    serverEnv.supabaseUrl && serverEnv.supabaseAnonKey && serverEnv.supabaseServiceRoleKey,
-  );
+  return Boolean(serverEnv.supabaseUrl && serverEnv.supabaseAnonKey && serverEnv.supabaseSecretKey);
 }
 
 /**
@@ -76,7 +98,7 @@ export function resolveAuthBackendId(): AuthBackendId {
   if (serverEnv.isProduction && !serverEnv.allowLocalBackendInProduction) {
     throw new Error(
       "Supabase yapılandırması eksik. Üretim ortamında NEXT_PUBLIC_SUPABASE_URL, " +
-        "NEXT_PUBLIC_SUPABASE_ANON_KEY ve SUPABASE_SERVICE_ROLE_KEY zorunludur.",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY ve SUPABASE_SECRET_KEY (veya SUPABASE_SERVICE_ROLE_KEY) zorunludur.",
     );
   }
   return "local";

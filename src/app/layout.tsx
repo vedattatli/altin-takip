@@ -42,8 +42,8 @@ export const viewport: Viewport = {
  * Kök yerleşim bilinçli olarak oturum veya çerez OKUMAZ.
  *
  * Böylece çevrimdışı sayfası ve 404 gibi statik sayfalar Supabase yapılandırması
- * olmadan da derlenebilir. Cihaz moduna bağlı davranışlar (DeviceGuard,
- * servis çalışanı kaydı) oturumu zaten çözen alt yerleşimlerde uygulanır.
+ * olmadan da derlenebilir. Servis çalışanı kaydı oturumu zaten çözen alt
+ * yerleşimde yapılır.
  */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

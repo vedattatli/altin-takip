@@ -3,13 +3,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { normalizeUsername } from "@/auth/username";
-import { TEST_OVERRIDE_TOKEN } from "@/auth/types";
-import type {
-  AdminAuditLog,
-  DeviceMode,
-  SessionPolicy,
-  UserProfile,
-  UserStatus,
+import {
+  SESSION_ROLLING_LIFETIME_MS,
+  TEST_OVERRIDE_TOKEN,
+  type AdminAuditLog,
+  type UserProfile,
+  type UserStatus,
 } from "@/auth/types";
 import { requireProduct } from "@/domain/catalog";
 import { findNegativeHolding } from "@/domain/portfolio";
@@ -17,10 +16,13 @@ import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/type
 import type { DataScope } from "./actor";
 import {
   OversellError,
+  PortfolioNotProvisionedError,
   type AuthBackend,
   type CreateUserRequest,
   type ResolvedSession,
   type SessionRecord,
+  type SessionTouch,
+  type StoredSessionSummary,
 } from "./backend";
 
 /**
@@ -51,15 +53,22 @@ interface StoredUser {
   passwordHash: string;
 }
 
+/** Kalıcı oturum kaydı. Çerezdeki jetonun kendisi değil, özeti saklanır. */
 interface StoredSession {
   id: string;
   tokenHash: string;
+  /** Kimlik yenilemesinden sonra eski özet; validUntil dolana kadar kabul edilir. */
+  previousTokenHash: string | null;
+  previousTokenValidUntil: string | null;
   userId: string;
-  deviceMode: DeviceMode;
+  /** Kaba cihaz tanımı; ham User-Agent veya IP saklanmaz. */
+  deviceLabel: string;
   createdAt: string;
   lastSeenAt: string;
-  idleExpiresAt: string | null;
-  absoluteExpiresAt: string;
+  renewedAt: string;
+  rotatedAt: string;
+  /** Kaydırmalı bitiş zamanı. */
+  expiresAt: string;
   revokedAt: string | null;
 }
 
@@ -76,8 +85,17 @@ interface StoreShape {
   transactions: (Transaction & { userId: string })[];
 }
 
+const STORE_VERSION = 3;
+
 function emptyStore(): StoreShape {
-  return { version: 2, users: [], sessions: [], audit: [], portfolios: [], transactions: [] };
+  return {
+    version: STORE_VERSION,
+    users: [],
+    sessions: [],
+    audit: [],
+    portfolios: [],
+    transactions: [],
+  };
 }
 
 /** Depo dosyası her zaman proje kökündeki .data klasöründedir (git dışı). */
@@ -162,8 +180,12 @@ export class LocalAuthBackend implements AuthBackend {
   private read(): StoreShape {
     if (!this.filePath || !existsSync(this.filePath)) return emptyStore();
     try {
-      const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as StoreShape;
-      return { ...emptyStore(), ...parsed };
+      const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoreShape>;
+      const merged: StoreShape = { ...emptyStore(), ...parsed, version: STORE_VERSION };
+      // Eski sürümün cihaz modlu / hareketsizlik süreli oturumları taşınmaz;
+      // kullanıcı bir kez yeniden giriş yapar ve kalıcı oturum alır.
+      if ((parsed.version ?? 0) < STORE_VERSION) merged.sessions = [];
+      return merged;
     } catch {
       return emptyStore();
     }
@@ -238,47 +260,51 @@ export class LocalAuthBackend implements AuthBackend {
     return user;
   }
 
-  // --- Oturum ---
+  // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
 
-  async createSession(
-    userId: string,
-    deviceMode: DeviceMode,
-    policy: SessionPolicy,
-    now: number,
-  ): Promise<SessionRecord> {
+  async createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord> {
     this.refresh();
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
-    const idleExpiresAt =
-      policy.idleTimeoutMs === null ? null : new Date(now + policy.idleTimeoutMs).toISOString();
-    const absoluteExpiresAt = new Date(now + policy.absoluteLifetimeMs).toISOString();
     const timestamp = new Date(now).toISOString();
+    const expiresAt = new Date(now + SESSION_ROLLING_LIFETIME_MS).toISOString();
 
     this.store.sessions.push({
       id,
       tokenHash: hashToken(token),
+      previousTokenHash: null,
+      previousTokenValidUntil: null,
       userId,
-      deviceMode,
+      deviceLabel,
       createdAt: timestamp,
       lastSeenAt: timestamp,
-      idleExpiresAt,
-      absoluteExpiresAt,
+      renewedAt: timestamp,
+      rotatedAt: timestamp,
+      expiresAt,
       revokedAt: null,
     });
     this.write();
-    return { id, token, userId, deviceMode, idleExpiresAt, absoluteExpiresAt };
+    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel };
+  }
+
+  /** Güncel özet veya tolerans süresi dolmamış eski özet ile eşleşen oturum. */
+  private findSessionByTokenHash(tokenHash: string, now: number): StoredSession | undefined {
+    return this.store.sessions.find(
+      (candidate) =>
+        candidate.tokenHash === tokenHash ||
+        (candidate.previousTokenHash === tokenHash &&
+          candidate.previousTokenValidUntil !== null &&
+          Date.parse(candidate.previousTokenValidUntil) > now),
+    );
   }
 
   async resolveSession(token: string, now: number): Promise<ResolvedSession | null> {
     this.refresh();
-    const tokenHash = hashToken(token);
-    const session = this.store.sessions.find((candidate) => candidate.tokenHash === tokenHash);
+    const session = this.findSessionByTokenHash(hashToken(token), now);
     if (!session || session.revokedAt !== null) return null;
 
-    // Hem hareketsizlik hem mutlak süre kontrol edilir.
-    const idleExpired = session.idleExpiresAt !== null && Date.parse(session.idleExpiresAt) <= now;
-    const absoluteExpired = Date.parse(session.absoluteExpiresAt) <= now;
-    if (idleExpired || absoluteExpired) {
+    // Hareketsizlik sınırı YOKTUR; yalnızca kaydırmalı bitiş zamanı kontrol edilir.
+    if (Date.parse(session.expiresAt) <= now) {
       this.store.sessions = this.store.sessions.filter((candidate) => candidate.id !== session.id);
       this.write();
       return null;
@@ -290,46 +316,98 @@ export class LocalAuthBackend implements AuthBackend {
     return {
       sessionId: session.id,
       profile: toProfile(user),
-      deviceMode: session.deviceMode ?? "shared",
-      idleExpiresAt: session.idleExpiresAt,
-      absoluteExpiresAt: session.absoluteExpiresAt,
+      expiresAt: session.expiresAt,
       lastSeenAt: session.lastSeenAt,
+      renewedAt: session.renewedAt,
+      rotatedAt: session.rotatedAt,
+      deviceLabel: session.deviceLabel,
     };
   }
 
-  async touchSession(sessionId: string, idleExpiresAt: string | null, now: number): Promise<void> {
+  async touchSession(sessionId: string, patch: SessionTouch): Promise<void> {
     this.refresh();
     const session = this.store.sessions.find((candidate) => candidate.id === sessionId);
     if (!session || session.revokedAt !== null) return;
-    session.lastSeenAt = new Date(now).toISOString();
-    session.idleExpiresAt = idleExpiresAt;
+    session.lastSeenAt = patch.lastSeenAt;
+    if (patch.expiresAt) session.expiresAt = patch.expiresAt;
+    if (patch.renewedAt) session.renewedAt = patch.renewedAt;
     this.write();
+  }
+
+  async rotateSession(sessionId: string, now: number, graceMs: number): Promise<string | null> {
+    this.refresh();
+    const session = this.store.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session || session.revokedAt !== null) return null;
+
+    const token = randomBytes(32).toString("base64url");
+    session.previousTokenHash = session.tokenHash;
+    session.previousTokenValidUntil = new Date(now + graceMs).toISOString();
+    session.tokenHash = hashToken(token);
+    session.rotatedAt = new Date(now).toISOString();
+    this.write();
+    return token;
   }
 
   async destroySession(token: string): Promise<void> {
     this.refresh();
     const tokenHash = hashToken(token);
     this.store.sessions = this.store.sessions.filter(
-      (candidate) => candidate.tokenHash !== tokenHash,
+      (candidate) =>
+        candidate.tokenHash !== tokenHash && candidate.previousTokenHash !== tokenHash,
     );
     this.write();
   }
 
-  async destroyAllSessionsForUser(userId: string): Promise<void> {
+  async destroySessionById(userId: string, sessionId: string): Promise<boolean> {
     this.refresh();
-    this.store.sessions = this.store.sessions.filter((candidate) => candidate.userId !== userId);
-    this.write();
+    const before = this.store.sessions.length;
+    this.store.sessions = this.store.sessions.filter(
+      (candidate) => !(candidate.id === sessionId && candidate.userId === userId),
+    );
+    const removed = before !== this.store.sessions.length;
+    if (removed) this.write();
+    return removed;
+  }
+
+  async destroyAllSessionsForUser(
+    userId: string,
+    options: { exceptSessionId?: string } = {},
+  ): Promise<number> {
+    this.refresh();
+    const before = this.store.sessions.length;
+    this.store.sessions = this.store.sessions.filter(
+      (candidate) => candidate.userId !== userId || candidate.id === options.exceptSessionId,
+    );
+    const removed = before - this.store.sessions.length;
+    if (removed > 0) this.write();
+    return removed;
+  }
+
+  async listSessionsForUser(userId: string, now: number): Promise<StoredSessionSummary[]> {
+    this.refresh();
+    return this.store.sessions
+      .filter(
+        (session) =>
+          session.userId === userId &&
+          session.revokedAt === null &&
+          Date.parse(session.expiresAt) > now,
+      )
+      .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))
+      .map((session) => ({
+        id: session.id,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        expiresAt: session.expiresAt,
+        deviceLabel: session.deviceLabel,
+      }));
   }
 
   async purgeExpiredSessions(now: number): Promise<number> {
     this.refresh();
     const before = this.store.sessions.length;
-    this.store.sessions = this.store.sessions.filter((session) => {
-      if (session.revokedAt !== null) return false;
-      if (Date.parse(session.absoluteExpiresAt) <= now) return false;
-      if (session.idleExpiresAt !== null && Date.parse(session.idleExpiresAt) <= now) return false;
-      return true;
-    });
+    this.store.sessions = this.store.sessions.filter(
+      (session) => session.revokedAt === null && Date.parse(session.expiresAt) > now,
+    );
     const removed = before - this.store.sessions.length;
     if (removed > 0) this.write();
     return removed;
@@ -392,6 +470,8 @@ export class LocalAuthBackend implements AuthBackend {
       passwordHash: hashPassword(request.temporaryPassword, salt),
     };
     this.store.users.push(user);
+    // Profil ile portföy aynı yazma adımında hazırlanır (tetikleyici davranışı).
+    this.provisionDefaults(user.id);
     this.write();
     return toProfile(user);
   }
@@ -449,25 +529,39 @@ export class LocalAuthBackend implements AuthBackend {
 
   // --- Portföy (DataScope ile korunur) ---
 
-  async getPortfolio(scope: DataScope): Promise<PortfolioMeta> {
-    this.refresh();
-    const existing = this.store.portfolios.find((row) => row.userId === scope.userId);
-    if (existing) {
-      const { userId: _ignored, ...portfolio } = existing;
-      return portfolio;
-    }
+  /** Profil için varsayılan portföyü hazırlar (idempotent). Supabase tetikleyicisinin ikizi. */
+  private provisionDefaults(userId: string): number {
+    if (this.store.portfolios.some((row) => row.userId === userId)) return 0;
     const timestamp = this.nowISO();
-    const created: StoredPortfolio = {
-      userId: scope.userId,
+    this.store.portfolios.push({
+      userId,
       id: randomUUID(),
       name: "Portföyüm",
       displayName: "",
       createdAt: timestamp,
       updatedAt: timestamp,
-    };
-    this.store.portfolios.push(created);
-    this.write();
-    const { userId: _unused, ...portfolio } = created;
+    });
+    return 1;
+  }
+
+  async provisionMissingDefaults(): Promise<number> {
+    this.refresh();
+    let repaired = 0;
+    for (const user of this.store.users) {
+      if (this.provisionDefaults(user.id) > 0) repaired += 1;
+    }
+    if (repaired > 0) this.write();
+    return repaired;
+  }
+
+  async getPortfolio(scope: DataScope): Promise<PortfolioMeta> {
+    this.refresh();
+    const existing = this.store.portfolios.find((row) => row.userId === scope.userId);
+    if (!existing) {
+      // GET yolu veri OLUŞTURMAZ; Supabase davranışıyla aynı.
+      throw new PortfolioNotProvisionedError(scope.userId);
+    }
+    const { userId: _ignored, ...portfolio } = existing;
     return portfolio;
   }
 

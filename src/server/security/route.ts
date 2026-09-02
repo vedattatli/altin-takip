@@ -2,6 +2,7 @@ import "server-only";
 
 import type { NextResponse } from "next/server";
 
+import { commitSessionCookie, runWithSessionCache } from "@/server/auth";
 import { csrfRejected, misconfigured } from "@/server/auth/errors";
 import { serverEnv } from "@/server/env";
 import { failure } from "@/server/http";
@@ -35,7 +36,13 @@ export function csrfSecret(): string {
 export async function assertRequestIsSafe(request: Request): Promise<void> {
   if (!STATE_CHANGING_METHODS.has(request.method.toUpperCase())) return;
 
-  const origins = expectedOrigins(request.headers, serverEnv.appOrigin);
+  const origins = expectedOrigins(request.headers, serverEnv.appOrigin, serverEnv.isProduction);
+  if (origins.length === 0 && serverEnv.isProduction) {
+    // Üretimde APP_ORIGIN yoksa hiçbir mutation kabul edilmez (fail closed).
+    throw misconfigured(
+      "APP_ORIGIN tanımlı değil. Üretimde beklenen origin açıkça ayarlanmadan durum değiştiren istekler kabul edilmez.",
+    );
+  }
   const originCheck = checkOrigin(request.headers, origins);
   if (!originCheck.ok) {
     throw csrfRejected("İstek beklenen adresten gelmedi ve reddedildi.");
@@ -65,16 +72,26 @@ export function readCookie(cookieHeader: string, name: string): string | undefin
 type RouteHandler<Context> = (request: Request, context: Context) => Promise<NextResponse>;
 
 /**
- * API route sarmalayıcısı: güvenlik kontrolü + tek tip hata dönüşümü.
+ * API route sarmalayıcısı: güvenlik kontrolü + tek tip hata dönüşümü +
+ * istek kapsamlı oturum önbelleği.
+ *
+ * İstek başarıyla tamamlandığında oturumun süresi uzatıldıysa veya kimlik
+ * yenileme zamanı geldiyse çerez sessizce tazelenir (commitSessionCookie).
  * Her route dosyası bu sarmalayıcıyı kullanmak ZORUNDADIR.
  */
 export function apiRoute<Context = unknown>(handler: RouteHandler<Context>): RouteHandler<Context> {
-  return async (request: Request, context: Context) => {
-    try {
-      await assertRequestIsSafe(request);
-      return await handler(request, context);
-    } catch (error) {
-      return failure(error);
-    }
-  };
+  return async (request: Request, context: Context) =>
+    runWithSessionCache(async () => {
+      try {
+        await assertRequestIsSafe(request);
+        const response = await handler(request, context);
+        await commitSessionCookie().catch(() => {
+          // Çerez tazeleme başarısız olursa yanıt yine döner; bir sonraki
+          // istekte yeniden denenir. Oturum sunucuda zaten uzatılmıştır.
+        });
+        return response;
+      } catch (error) {
+        return failure(error);
+      }
+    });
 }

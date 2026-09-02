@@ -94,23 +94,25 @@ POST /api/auth/login  { username, password }
 Kullanıcı yok, parola yanlış ve hesap pasif durumlarının hepsi **aynı** mesajı döndürür:
 `Kullanıcı adı veya parola hatalı.`
 
-### 3.3 Cihaz türü
+### 3.3 Tek oturum modeli ve cihaz etiketi
 
-Giriş isteğinde `deviceMode` alanı gönderilir. Sunucu yalnızca değer tam olarak `"personal"` ise
-kişisel cihaz kabul eder; diğer her durumda `"shared"` (en kısıtlayıcı) uygulanır. Seçim oturum
-kaydında (`app_sessions.device_mode`) saklanır ve sonradan istemciden değiştirilemez.
+Giriş isteğinde cihaz türü **gönderilmez**; her cihazda aynı kalıcı oturum verilir.
+Sunucu yalnızca `User-Agent`'tan kaba bir etiket üretir (`describeDevice()` →
+"Chrome · Windows") ve bunu `app_sessions.device_label` alanına yazar; ham
+User-Agent veya IP saklanmaz. Etiket yönetici panelindeki oturum listesinde ve
+"Tüm cihazlardan çıkış" akışında kullanıcıya yardımcı olur.
 
-Kök yerleşim (`src/app/layout.tsx`) oturumdan cihaz türünü okur ve iki istemci bileşenine geçirir:
-
-- `DeviceGuard` — ortak cihazda 15 dk hareketsizlik sayacı, servis çalışanı kaydının kaldırılması,
-  önbelleklerin temizlenmesi ve PWA kurulum çağrısının bastırılması.
-- `ServiceWorkerRegistrar` — yalnızca kişisel cihazda ve üretim derlemesinde kayıt yapar.
+Uygulama yerleşimi (`src/app/(app)/layout.tsx`) oturumu çözer ve
+`ServiceWorkerRegistrar`'ı yalnızca üretim derlemesinde kaydeder. İstemcide
+hareketsizlik sayacı, otomatik çıkış veya cihaz türüne bağlı davranış **yoktur**.
 
 ### 3.4 Oturum
 
 Oturumu uygulama yönetir (`app_sessions` tablosu / yerel dosya). Bunun nedeni:
 
-- Parola sıfırlama ve pasifleştirme işlemlerinde **tüm cihazlardaki oturumları anında düşürebilmek**.
+- Parola sıfırlama, pasifleştirme ve yönetici iptalinde **tüm cihazlardaki oturumları anında düşürebilmek**;
+  kullanıcının kendi "tüm cihazlardan çıkış" isteğini karşılayabilmek.
+- Kaydırmalı ömür ve sessiz kimlik yenilemeyi (rotation) arka uçtan bağımsız uygulayabilmek.
 - İki arka ucun (Supabase / yerel) tek bir davranışta buluşması, dolayısıyla tek yerden test edilebilmesi.
 
 Her istekte oturum çözülürken profilin `status` alanı yeniden okunur; pasifleştirilen kullanıcının
@@ -122,7 +124,8 @@ mevcut oturumu ilk istekte geçersiz olur.
 - `requireCurrentAdmin()` — oturum + veritabanındaki `role = 'admin'` kontrolü.
 - Rol **istemciden alınmaz**. Panelden oluşturulan her hesap `user` rolündedir.
 - `admin` rolü yalnızca `npm run admin:create` ile verilir.
-- Arayüzdeki menü gizleme yalnızca sadelik içindir; güvenlik sunucuda ve RLS'de sağlanır.
+- Arayüzdeki menü gizleme yalnızca sadelik içindir; güvenlik sunucuda sağlanır, RLS ve
+  tablo grant'ları Data API'ye doğrudan erişime karşı ikinci katmandır.
 
 ## 3.6 Yetkilendirme sınırı (Sprint 0.5)
 
@@ -191,26 +194,50 @@ Tüm API route'ları `apiRoute()` ile sarılır (`src/server/security/route.ts`)
 
 Bir route'un bu kontrolü atlaması test tarafından engellenir.
 
-## 3.8 Oturum yaşam döngüsü
+## 3.8 Oturum yaşam döngüsü (kalıcı, kaydırmalı, yenilenen kimlik)
 
 ```
-login()
-  → sessionPolicyFor(deviceMode)          idle + absolute + çerez kalıcılığı
-  → backend.createSession(...)            app_sessions satırı
-  → çerez (HttpOnly, Secure, SameSite=Lax, Path=/, __Host- öneki)
+login(username, password, clientKey, deviceLabel)
+  → üç sayaçlı hız sınırı (ip / user / pair)
+  → backend.createSession(userId, now, deviceLabel)   expires_at = now + 180 gün
+  → kalıcı çerez (HttpOnly, Secure, SameSite=Lax, Path=/, __Host- öneki, expires=expires_at)
 
-her istek
-  → backend.resolveSession(token, now)    idle VE absolute kontrolü
-  → süresi geçmişse satır silinir, null döner
-  → 60 sn'de bir touchSession()           last_seen_at + idle_expires_at
+her istek (apiRoute → runWithSessionCache)
+  → getSessionContext()  istekte bir kez çözülür (AsyncLocalStorage önbelleği)
+  → backend.resolveSession(token, now)   iptal / bitiş / hesap durumu kontrolü
+       eski kimlik (previous_token_hash) yalnızca 60 sn tolerans içinde kabul edilir
+  → last_seen ≥ 15 dk eskiyse touchSession()     (tek yazma)
+  → renewed_at ≥ 24 sa eskiyse expires_at = now + 180 gün (aynı yazma)
+  → handler çalışır
+  → commitSessionCookie(): rotated_at ≥ 7 gün ise yeni kimlik üretilir (rotateSession),
+    süre uzatıldıysa veya kimlik yenilendiyse çerez tazelenir; çıkış uçları
+    markSessionEnded() ile çerezin yeniden yazılmasını engeller
 ```
 
-İstemcideki `DeviceGuard` sayacı yalnızca kullanıcı deneyimi içindir.
+Sunucu bileşenleri (layout) çerez yazamadığı için yalnızca çözer; çerez tazeleme
+bir sonraki API çağrısında yapılır. Sunucudaki bitiş zamanı güvenlik sınırıdır;
+çerezin gecikmeli tazelenmesi yalnızca kullanıcı deneyimini ilgilendirir.
+
+Oturumu kapatan olaylar: `logout` (yalnızca bu cihaz), `logout-all` (tüm
+cihazlar), kullanıcının parola değişikliği (diğer cihazlar), yönetici parola
+sıfırlama / pasifleştirme / oturum iptali / hesap silme (tüm cihazlar).
+
+## 3.9 Kimlik doğrulama uçları
+
+| Uç | Guard | Etki |
+| --- | --- | --- |
+| `POST /api/auth/login` | public | Oturum + kalıcı çerez |
+| `GET /api/auth/session` | public | Kullanıcı ve `expiresAt` |
+| `POST /api/auth/logout` | public | Yalnızca bu cihaz |
+| `POST /api/auth/logout-all` | authenticated | Kullanıcının bütün oturumları |
+| `POST /api/auth/change-password` | authenticated | Bu cihaz korunur, diğerleri kapanır |
+| `GET/DELETE /api/admin/users/[id]/sessions` | admin | Oturum listesi / tümünü kapat |
+| `DELETE /api/admin/users/[id]/sessions/[sessionId]` | admin | Tek oturumu kapat |
 
 ## 4. Arka uç seçimi
 
 ```
-Supabase URL + anon key + service_role key hepsi var mı?
+Supabase URL + anon key + SUPABASE_SECRET_KEY (veya eski SUPABASE_SERVICE_ROLE_KEY) hepsi var mı?
   evet → SupabaseAuthBackend
   hayır → üretim ortamı mı?
             evet → hata: yapılandırma eksik (sahte arka uçla çalışmaz)
@@ -303,3 +330,23 @@ bloğunda tanımlıdır ve sistem ayarından bağımsız olarak uygulanır (`col
   Kaynağın adı, "gerçek piyasa verisi değil" uyarısı, piyasa, veri durumu ve son fiyat zamanı
   her zaman görünür; uzun yasal açıklama katlanmış (`<details>`) durur.
 - `prefers-reduced-motion` desteklenir.
+
+## 10. Veritabanı yetki sınırı (0006)
+
+```
+Tarayıcı ──(yalnızca /api/*)──▶ Next.js BFF ──(secret key, RLS atlanır)──▶ PostgreSQL
+                                   │
+                                   └─ actor authorization = birincil sınır
+
+Tarayıcı ──(anon / authenticated JWT, Data API)──▶ PostgREST ──▶ PostgreSQL
+                                   ├─ GRANT katmanı: INSERT/UPDATE/DELETE yok, kritik RPC yok
+                                   └─ RLS katmanı : yalnızca kendi satırlarını SELECT
+```
+
+- Finansal mutation yalnızca `create/update/delete_transaction_checked` RPC'leri
+  ile, yalnızca `service_role` tarafından yapılır.
+- Varsayılan portföy profil oluşturulurken tetikleyiciyle hazırlanır; `GET`
+  yolları veri oluşturmaz; onarım `provision_missing_defaults()` /
+  `npm run admin:repair` ile idempotenttir.
+- Doğrulama: `npm run test:db` (73 pgTAP, temiz DB'ye 0001→0007) ve
+  `npm run test:data-api` (gerçek JWT ile PostgREST). Ayrıntı: SECURITY.md bölüm 22.

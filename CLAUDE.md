@@ -36,8 +36,9 @@ npm run test:db
 
 - **Secret commit etme.** `.env.local`, gerçek anahtarlar, parolalar, tokenlar asla depoya girmez.
   Yalnızca `.env.example` commit edilir ve içinde gerçek değer bulunmaz.
-- **`SUPABASE_SERVICE_ROLE_KEY` istemciye gönderilmez.** Bu anahtara yalnızca `src/server/` altındaki
-  `import "server-only"` işaretli modüller erişebilir. `NEXT_PUBLIC_` öneki verilmesi yasaktır.
+- **`SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE_KEY` istemciye gönderilmez.** Bu anahtara yalnızca
+  `src/server/` altındaki `import "server-only"` işaretli modüller erişebilir. `NEXT_PUBLIC_` öneki
+  verilmesi yasaktır; API yanıtına veya istemci paketine girmez (`npm run verify:bundle`).
 - **Kendi parola hash sistemini yazma.** Üretimde parola custody'si Supabase Auth'a aittir.
   Uygulama tablolarında `password`, `password_hash` gibi bir sütun oluşturma.
   (Tek istisna: `src/server/auth/local-backend.ts` — yalnızca geliştirme test ikizidir ve üretimde
@@ -64,9 +65,9 @@ npm run test:db
 - **Parola veya oturum jetonunu JavaScript'ten okunabilir depoya yazma.** `localStorage`,
   `sessionStorage` ve `document.cookie` uygulama kodunda kullanılmaz. Oturum yalnızca
   `Secure` + `HttpOnly` + `SameSite=Lax` çerezle taşınır.
-- **Ortak cihaz kısıtlarını zayıflatma:** kalıcı oturum yok, "beni hatırla" yok, servis çalışanı
-  kaydı yok, cihaz izni istenmez, 15 dakika hareketsizlikte otomatik çıkış vardır.
-  Hareketsizlik süresi üretimde sabittir; yalnızca geliştirme/test ortamında kısaltılabilir.
+- **Kalıcı oturum modelini bozma:** cihaz türü seçimi, "beni hatırla" kutusu, istemci tarafı
+  hareketsizlik sayacı veya otomatik çıkış EKLEME. Oturum yalnızca açık çıkış veya güvenlik
+  olayıyla (parola sıfırlama, pasifleştirme, yönetici iptali, silme) kapanır. Cihaz izni istenmez.
 - **Servis çalışanına hassas yanıt yazma.** `/api/*` ve kimliği doğrulanmış sayfa yanıtları
   önbelleğe alınmaz.
 - Kullanıcı portföyü bulut veritabanında saklanır; cihazlar arası senkronizasyon sunucu
@@ -93,7 +94,7 @@ npm run test:db
 
 | Guard | Ne zaman |
 | --- | --- |
-| `requireAuthenticatedUser` | YALNIZCA `/api/auth/session`, `/logout`, `/change-password` |
+| `requireAuthenticatedUser` | YALNIZCA `/api/auth/session`, `/logout`, `/logout-all`, `/change-password` |
 | `requireUsableUser` | Kullanıcının kendi verisiyle ilgili her uç |
 | `requireCurrentAdmin` | Yönetim uçları |
 
@@ -111,20 +112,29 @@ Arayüz yönlendirmesine tek başına güvenme.
 - CSRF jetonunu `localStorage`/`sessionStorage`'a yazma. Jeton `<meta>` ile
   taşınır, eşi `HttpOnly` çerezdedir.
 
-## Oturum süreleri
+## Oturum modeli (kalıcı, kaydırmalı, yenilenen kimlik)
 
-- Süre kontrolü **sunucudadır**. İstemcideki sayaç yalnızca kullanıcı deneyimi
-  içindir; onu güvenlik önlemi gibi sunma.
-- Ortak cihaz: 15 dk hareketsizlik + 8 saat mutlak. Kişisel cihaz: mutlak süre
-  yine zorunludur.
-- `last_seen_at` her istekte yazılmaz (en fazla 60 sn'de bir).
+- Süre kontrolü **sunucudadır**; istemcide sayaç YOKTUR.
+- 180 gün kaydırmalı ömür (`SESSION_ROLLING_LIFETIME_MS`); bitiş en fazla 24 saatte bir,
+  `last_seen_at` en fazla 15 dakikada bir yazılır. Her istekte DB yazma.
+- Oturum kimliği 7 günde bir `commitSessionCookie()` ile sessizce yenilenir; eski kimlik
+  60 sn tolerans süresiyle kabul edilir. Hiç bitmeyen / hiç değişmeyen jeton üretme.
+- Çerez kalıcıdır (`expires` = sunucudaki bitiş); `__Host-` öneki, HttpOnly, Secure, SameSite=Lax.
+- Normal çıkış yalnızca mevcut oturumu siler; `logout-all` ve yönetici iptali hepsini.
+  Çıkış uçlarında `markSessionEnded()` çağır ki istek sonunda çerez yeniden yazılmasın.
+- `device_mode` ve `idle_expires_at` deprecated'dır; yetkilendirme kararında KULLANMA.
+- Oturum kaydına ham IP, User-Agent veya parmak izi yazma; yalnızca `describeDevice()` etiketi.
 
-## Hız sınırlayıcı
+## Hız sınırlayıcı ve istemci IP'si
 
 - Üretimde **paylaşımlı (Postgres)** sınırlayıcı zorunludur. Yapılandırma
   eksikse bellek sınırlayıcısına **sessizce düşme**; açık yapılandırma hatası ver.
-- Anahtarı ham saklama; `RATE_LIMIT_PEPPER` ile HMAC'le.
+- Giriş üç sayaçtan geçer: IP, kullanıcı adı, IP+kullanıcı adı (`loginRateLimitBuckets`).
+  Başarılı girişte yalnızca kombinasyon sayacını sıfırla.
+- Anahtarı ham saklama; `RATE_LIMIT_PEPPER` ile HMAC'le. Ham IP hiçbir loga/tabloya yazılmaz.
+- `X-Forwarded-For`'u doğrudan okuma; `resolveClientIp()` + `TRUSTED_PROXY_PROVIDER` kullan.
 - Sınırlayıcı sorgusu hata verirse isteği geçirme (fail closed).
+- Üretimde `APP_ORIGIN` zorunludur; Host başlığından origin türetme.
 
 ## Veritabanı değişiklikleri
 
@@ -134,6 +144,14 @@ Arayüz yönlendirmesine tek başına güvenme.
 - Finansal yazma yollarında aşırı satış kontrolü **atomik** olmalıdır
   (portföy satırı kilidi + aynı transaction içinde doğrulama).
 - Denetim kayıtlarını değiştirilebilir hâle getirme; tetikleyici korumasını kaldırma.
+- **Yeni SQL fonksiyonu eklerken yetkilerini açıkça ayarla:** tam imzayla `revoke all ... from
+  public, anon, authenticated`; yalnızca BFF'nin çağıracağı üst seviye RPC'ye `grant execute ... to
+  service_role`. Dahili yardımcı ve tetikleyici fonksiyonlarına hiçbir role grant verme.
+- **anon/authenticated rollerine INSERT/UPDATE/DELETE grant'ı verme**; Data API yalnızca RLS
+  kapsamlı SELECT içindir. Finansal mutation yalnızca BFF + `*_transaction_checked` RPC yoluyla.
+- `GET` yolları veri OLUŞTURMAZ; varsayılan kayıtlar provisioning tetikleyicisi/onarımı ile hazırlanır.
+- Politika ve grant değişikliğinden sonra `supabase/tests/rls.test.sql` planını güncelle ve
+  `npm run test:db` çalıştır (yerel Supabase: `npx supabase start`).
 
 ## Teslim paketi
 

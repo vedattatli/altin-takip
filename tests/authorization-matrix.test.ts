@@ -49,8 +49,9 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/login/route.ts": "public",
   "auth/logout/route.ts": "public",
   "auth/session/route.ts": "public",
-  // Geçici parolalı kullanıcı bu ucu kullanabilmelidir.
+  // Geçici parolalı kullanıcı bu uçları kullanabilmelidir.
   "auth/change-password/route.ts": "authenticated",
+  "auth/logout-all/route.ts": "authenticated",
   "portfolio/route.ts": "usable",
   "transactions/route.ts": "usable",
   "transactions/[id]/route.ts": "usable",
@@ -58,6 +59,8 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/users/[id]/route.ts": "admin",
   "admin/users/[id]/password/route.ts": "admin",
   "admin/users/[id]/portfolio/route.ts": "admin",
+  "admin/users/[id]/sessions/route.ts": "admin",
+  "admin/users/[id]/sessions/[sessionId]/route.ts": "admin",
   "admin/audit/route.ts": "admin",
 };
 

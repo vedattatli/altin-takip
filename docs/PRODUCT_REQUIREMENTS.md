@@ -28,25 +28,28 @@ görebilmelidir.
   fark yoktur.
 - Çevrimdışıyken bilgilendirme sayfası gösterilir; canlı fiyat varmış gibi davranılmaz.
 
-### 3.1 Cihaz türü
+### 3.1 Oturum ve cihazlar
 
-Giriş ekranında "Kişisel cihaz" ve "Şirket / ortak cihaz" seçenekleri bulunur.
-**Güvenli varsayılan ortak cihazdır.**
+Kullanıcılar sık sık yeniden giriş yapmak zorunda kalmaz. Giriş ekranında cihaz
+türü **sorulmaz**; bütün cihazlarda aynı, sade ve kalıcı oturum modeli kullanılır.
 
-Şirket / ortak cihaz modunda:
-
-- kalıcı oturum kullanılmaz (çerez tarayıcı kapanınca silinir),
-- "beni hatırla" seçeneği gösterilmez,
-- portföy veya oturum jetonu `localStorage` / IndexedDB gibi depolara yazılmaz,
-- hassas API yanıtları servis çalışanı önbelleğine alınmaz,
-- servis çalışanı kaydedilmez; varsa kaldırılır ve önbellekler temizlenir,
-- PWA kurulum çağrısı gösterilmez,
-- bildirim/push veya başka bir cihaz izni istenmez,
-- 15 dakika hareketsizlikte otomatik çıkış yapılır.
-
-Her iki modda da oturum sunucu tarafında yönetilir ve jeton yalnızca
-`Secure` + `HttpOnly` + `SameSite=Lax` çerezde taşınır. Kullanıcı portföyü bulut veritabanında
-saklanır; cihazlar arası senkronizasyon sunucu üzerinden yapılır.
+- Kullanıcı her cihazda **bir kez** giriş yapar; cihaz hesabı güvenli biçimde hatırlar.
+- Sayfa yenileme, tarayıcıyı/PWA'yı kapatıp açma veya cihazı yeniden başlatma
+  oturumu sonlandırmaz. 15 dakikalık (ya da başka bir) hareketsizlik çıkışı **yoktur**.
+- Telefon, tablet ve bilgisayar oturumları aynı anda açık kalabilir; hepsi aynı
+  bulut portföyünü gösterir.
+- Oturum 180 gün kaydırmalı ömürlüdür ve aktif kullanımda sessizce uzar; oturum
+  kimliği düzenli aralıklarla kullanıcı fark etmeden yenilenir.
+- Normal "Çıkış" yalnızca mevcut cihazı kapatır; Ayarlar'daki "Tüm cihazlardan
+  çıkış yap" bütün cihazları kapatır.
+- Güvenlik olayları oturumu zorunlu olarak kapatır: kullanıcının parola
+  değişikliği (diğer cihazlar), yönetici parola sıfırlama / pasifleştirme / oturum
+  iptali / hesap silme (bütün cihazlar).
+- Oturum jetonu yalnızca `Secure` + `HttpOnly` + `SameSite=Lax` çerezde taşınır;
+  parola, erişim jetonu veya dahili e-posta `localStorage` / `sessionStorage` /
+  IndexedDB'ye yazılmaz. Bildirim/push veya başka bir cihaz izni istenmez.
+- Yönetici, kullanıcının aktif oturumlarını cihaz etiketi ve tarihlerle görür ve
+  kapatabilir; ham IP veya cihaz parmak izi saklanmaz.
 
 ## 4. Kullanıcı modeli
 
@@ -57,8 +60,8 @@ saklanır; cihazlar arası senkronizasyon sunucu üzerinden yapılır.
 - Giriş ekranında **yalnızca kullanıcı adı ve parola** alanı bulunur.
 - E-posta, telefon, OTP, sihirli bağlantı ve sosyal giriş **kullanılmaz**.
 - Giriş hatasında "kullanıcı bulunamadı" / "parola yanlış" ayrımı yapılmaz; tek genel mesaj gösterilir.
-- Başarılı oturum sunucu tarafında yönetilen güvenli çerezle sürdürülür; kalıcılığı seçilen cihaz
-  türüne bağlıdır (bkz. 3.1). Çıkış yapma özelliği bulunur.
+- Başarılı oturum sunucu tarafında yönetilen güvenli, kalıcı çerezle sürdürülür; kullanıcı
+  yalnızca açıkça çıkış yaptığında veya bir güvenlik olayında oturumunu kaybeder (bkz. 3.1).
 - Giriş ekranında parola göster/gizle düğmesi bulunur.
 
 ### 4.2 Kullanıcı adı kuralları

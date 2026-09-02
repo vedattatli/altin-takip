@@ -9,6 +9,7 @@ import {
   gotoReady,
   login,
   loginAsUser,
+  revokeSessionsOnServer,
   scopedUsername,
   TEST_PASSWORD,
 } from "./helpers";
@@ -71,10 +72,19 @@ test.describe("geçici parola sunucu koruması", () => {
     expect(session.data?.user.mustChangePassword).toBe(true);
   });
 
-  test("parola değiştirdikten sonra tekrar giriş gerekir", async ({ page }) => {
+  test("parola değiştirince bu cihazın oturumu sürer, diğer cihazlar kapanır", async ({
+    page,
+    browser,
+  }) => {
     const username = scopedUsername("yenidengiris");
     const newPassword = "YepyeniParola7Kasa";
     await createPendingUser(username);
+
+    // İkinci cihaz: aynı hesapla başka bir tarayıcı bağlamı.
+    const otherContext = await browser.newContext();
+    const otherPage = await otherContext.newPage();
+    await login(otherPage, username);
+    await otherPage.waitForURL("**/parola-degistir");
 
     await login(page, username);
     await page.waitForURL("**/parola-degistir");
@@ -84,29 +94,33 @@ test.describe("geçici parola sunucu koruması", () => {
     await page.getByLabel("Yeni parola (tekrar)").fill(newPassword);
     await page.getByRole("button", { name: "Parolayı değiştir" }).click();
 
-    await page.waitForURL("**/giris", { timeout: 20_000 });
+    // Bu cihazda yeniden giriş GEREKMEZ.
+    await page.waitForURL("**/panel", { timeout: 20_000 });
+    const session = await browserApi<{ user: { username: string } }>(
+      page,
+      "GET",
+      "/api/auth/session",
+    );
+    expect(session.data?.user.username).toBe(username);
 
-    // Oturum gerçekten düşmüştür.
-    const session = await browserApi<{ user: unknown }>(page, "GET", "/api/auth/session");
-    expect(session.data?.user).toBeNull();
-
-    await login(page, username, newPassword);
-    await page.waitForURL("**/panel");
+    // Diğer cihazın oturumu güvenlik için kapatılmıştır.
+    const other = await browserApi<{ user: unknown }>(otherPage, "GET", "/api/auth/session");
+    expect(other.data?.user).toBeNull();
+    await otherContext.close();
   });
 });
 
-test.describe("sunucu tarafı oturum süresi", () => {
-  test("süresi geçen ortak cihaz oturumu sunucuda reddedilir", async ({ page }) => {
+test.describe("sunucu tarafı oturum geçerliliği", () => {
+  test("kaydırmalı ömrü dolan oturum sunucuda reddedilir", async ({ page }) => {
     const username = scopedUsername("suresigecen");
     await createReadyUser(username);
 
-    await loginAsUser(page, username, undefined, "shared");
+    await loginAsUser(page, username);
 
-    // Sunucudaki oturum kaydı süresi geçmiş hâle getirilir (15 dk beklemeden).
+    // 180 günlük ömrün dolduğu durum sunucu kaydında simüle edilir.
     const expired = await expireSessionsOnServer(username);
     expect(expired).toBeGreaterThan(0);
 
-    // İstemci sayacı hiç çalışmasa bile sunucu reddeder.
     const response = await browserApi(page, "GET", "/api/portfolio");
     expect(response.status).toBe(401);
 
@@ -114,13 +128,14 @@ test.describe("sunucu tarafı oturum süresi", () => {
     await page.waitForURL("**/giris");
   });
 
-  test("süresi geçen kişisel cihaz oturumu da reddedilir", async ({ page }) => {
-    const username = scopedUsername("kisiselgecen");
+  test("iptal edilmiş (revoke) oturum çerezi ile erişim reddedilir", async ({ page }) => {
+    const username = scopedUsername("iptaledilen");
     await createReadyUser(username);
 
-    await loginAsUser(page, username, undefined, "personal");
-    await expireSessionsOnServer(username);
+    await loginAsUser(page, username);
+    expect(await revokeSessionsOnServer(username)).toBeGreaterThan(0);
 
+    // Çerez tarayıcıda duruyor ama sunucu kaydı iptal edilmiştir.
     const response = await browserApi(page, "GET", "/api/transactions");
     expect(response.status).toBe(401);
   });

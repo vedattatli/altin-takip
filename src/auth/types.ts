@@ -1,59 +1,48 @@
 /**
- * Oturumun açıldığı cihaz türü.
+ * KALICI OTURUM MODELİ
  *
- * "personal": kullanıcının kendi cihazı. Oturum çerezi kalıcıdır.
- * "shared":   şirket / ortak kullanılan cihaz. Oturum çerezi tarayıcı kapanınca
- *             silinir, 15 dakika hareketsizlikte otomatik çıkış yapılır, servis
- *             çalışanı kaydedilmez ve PWA kurulum çağrısı gösterilmez.
+ * Bütün cihazlarda aynı, sade ve kalıcı oturum kullanılır:
+ *  - Tarayıcıda yalnızca rastgele, opak bir oturum kimliği (HttpOnly çerez) bulunur.
+ *  - Oturum "kaydırmalı" (rolling) ömürlüdür: kullanıcı aktif oldukça bitiş
+ *    zamanı sessizce ileri taşınır; süresiz aktif kullanım mümkündür.
+ *  - Oturum kimliği belirli aralıklarla sessizce yenilenir (rotation); hiç
+ *    bitmeyen ve hiç değişmeyen jeton yoktur.
+ *  - Hareketsizlik zaman aşımı, cihaz türü seçimi veya otomatik çıkış YOKTUR.
+ *  - Oturum yalnızca kullanıcının açık çıkışıyla ya da güvenlik olaylarıyla
+ *    (parola sıfırlama, pasifleştirme, yönetici iptali, hesap silme) kapanır.
  */
-export type DeviceMode = "personal" | "shared";
 
-export const DEVICE_MODE_LABELS: Record<DeviceMode, string> = {
-  personal: "Kişisel cihaz",
-  shared: "Şirket / ortak cihaz",
-};
-
-/** Paylaşılan cihazda hareketsizlik sonrası otomatik çıkış süresi. */
-export const SHARED_DEVICE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-
-/** Paylaşılan cihazda oturumun en uzun ömrü (hareket olsa bile). */
-export const SHARED_DEVICE_ABSOLUTE_LIFETIME_MS = 8 * 60 * 60 * 1000;
-
-/** Kişisel cihazda oturumun en uzun ömrü. Mutlak süre burada da zorunludur. */
-export const PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
+/** Kaydırmalı oturum ömrü: son yenilemeden itibaren 180 gün. */
+export const SESSION_ROLLING_LIFETIME_MS = 180 * 24 * 60 * 60 * 1000;
 
 /**
- * last_seen_at / idle_expires_at yazımı bu aralıktan sık yapılmaz.
- * Her istekte veritabanına yazmak gereksiz yüktür.
+ * Bitiş zamanı bu aralıktan sık ileri alınmaz. Her istekte veritabanına yazmak
+ * gereksizdir; 24 saatte bir yenileme 180 günlük ömür için fazlasıyla yeterlidir.
  */
-export const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+export const SESSION_RENEWAL_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-export interface SessionPolicy {
-  /** Hareketsizlik süresi. null ise hareketsizlik zaman aşımı yoktur. */
-  idleTimeoutMs: number | null;
-  /** Oturumun mutlak ömrü. Her cihaz türünde zorunludur. */
-  absoluteLifetimeMs: number;
-  /** Çerez kalıcı mı? Ortak cihazda tarayıcı kapanınca silinir. */
-  persistentCookie: boolean;
-}
+/** last_seen_at bu aralıktan sık yazılmaz (yönetici oturum listesi için kaba bilgi). */
+export const SESSION_TOUCH_INTERVAL_MS = 15 * 60 * 1000;
+
+/** Oturum kimliği bu aralıkla sessizce yenilenir; kullanıcı fark etmez. */
+export const SESSION_ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Oturum süresi politikası — GÜVENLİK SINIRI SUNUCUDADIR.
- * İstemcideki sayaç yalnızca kullanıcı deneyimi içindir.
+ * Yenilemeden hemen sonra eski kimlik kısa bir süre daha kabul edilir; böylece
+ * aynı anda uçuşta olan istekler (paralel API çağrıları) düşmez.
  */
-export function sessionPolicyFor(deviceMode: DeviceMode): SessionPolicy {
-  if (deviceMode === "shared") {
-    return {
-      idleTimeoutMs: SHARED_DEVICE_IDLE_TIMEOUT_MS,
-      absoluteLifetimeMs: SHARED_DEVICE_ABSOLUTE_LIFETIME_MS,
-      persistentCookie: false,
-    };
-  }
-  return {
-    idleTimeoutMs: null,
-    absoluteLifetimeMs: PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS,
-    persistentCookie: true,
-  };
+export const SESSION_ROTATION_GRACE_MS = 60 * 1000;
+
+/** Yönetici / kullanıcı ekranlarında gösterilen güvenli oturum özeti. */
+export interface SessionSummary {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  /** Kaba, kullanıcı dostu tanım (örn. "Chrome · Windows"). Ham User-Agent SAKLANMAZ. */
+  deviceLabel: string;
+  /** İsteği yapan oturumun kendisi mi? */
+  current: boolean;
 }
 
 /**
@@ -63,23 +52,6 @@ export function sessionPolicyFor(deviceMode: DeviceMode): SessionPolicy {
  * tahmin edilmesi zor bir değerdir. Üretim dağıtımlarında ASLA ayarlanmaz.
  */
 export const TEST_OVERRIDE_TOKEN = "yalnizca-test-icin";
-
-/**
- * Hareketsizlik süresini çözer.
- *
- * Süre üretimde HER ZAMAN 15 dakikadır. Yalnızca test kaçış kapısı açıkça
- * etkinleştirildiğinde kısaltılabilir; aksi hâlde geçersiz veya eksik değer
- * yok sayılır.
- */
-export function resolveIdleTimeoutMs(env: {
-  allowTestOverrides?: string;
-  overrideMs?: string;
-}): number {
-  if (env.allowTestOverrides !== TEST_OVERRIDE_TOKEN) return SHARED_DEVICE_IDLE_TIMEOUT_MS;
-  const override = Number(env.overrideMs ?? "");
-  if (!Number.isFinite(override) || override <= 0) return SHARED_DEVICE_IDLE_TIMEOUT_MS;
-  return override;
-}
 
 /** Roller. Rol yalnızca sunucu tarafında atanır; kullanıcı kendi rolünü değiştiremez. */
 export type UserRole = "admin" | "user";
@@ -128,6 +100,8 @@ export type AdminAction =
   | "user.password_reset"
   | "user.view"
   | "user.portfolio_view"
+  | "user.sessions_view"
+  | "user.sessions_revoke"
   | "user.delete_attempt"
   | "user.delete";
 

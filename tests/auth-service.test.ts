@@ -27,13 +27,15 @@ async function createReadyUser(username: string, password = USER_PASSWORD) {
 
 beforeEach(async () => {
   backend = new LocalAuthBackend({ inMemory: true });
+  const pair = { maxAttempts: 3, windowMs: 60_000, baseLockMs: 30_000, maxLockMs: 120_000 };
   service = new AuthService(backend, {
-    rateLimiter: new MemoryLoginRateLimiter("test-pepper", {
-      maxAttempts: 3,
-      windowMs: 60_000,
-      baseLockMs: 30_000,
-      maxLockMs: 120_000,
-    }),
+    rateLimiter: new MemoryLoginRateLimiter("test-pepper"),
+    // Testte kombinasyon sayacı 3 denemede kilitlenir; global sayaçlar geniş kalır.
+    loginRateLimits: {
+      pair,
+      ip: { ...pair, maxAttempts: 20 },
+      username: { ...pair, maxAttempts: 10 },
+    },
   });
 
   // İlk yönetici yalnızca sunucu tarafında (bootstrap CLI'ın yaptığı gibi) oluşturulur.
@@ -209,9 +211,12 @@ describe("geçici parola sunucu koruması", () => {
     const actor = await service.requireAuthenticatedUser(pendingToken);
     await service.changeOwnPassword(actor, USER_PASSWORD, "YeniParola7Kasa");
 
-    // Tüm oturumlar düştüğü için yeniden giriş gerekir.
-    expect(await service.resolveSession(pendingToken)).toBeNull();
+    // Bu cihazdaki oturum korunur; yeniden giriş GEREKMEZ ve korumalı uçlar açılır.
+    await expect(service.requireUsableUser(pendingToken)).resolves.toMatchObject({
+      profile: { mustChangePassword: false },
+    });
 
+    // Yeni parola başka cihazda da çalışır.
     const next = await service.login("gecici", "YeniParola7Kasa", "10.2.2.2");
     expect(next.user.mustChangePassword).toBe(false);
     await expect(service.requireUsableUser(next.token)).resolves.toBeTruthy();

@@ -14,6 +14,14 @@ Ek komutlar:
 npm run test:db
 ```
 
+(Supabase CLI + Docker; temiz veritabanına 0001→0007 uygular, 73 pgTAP testi koşar.)
+
+```bash
+npm run test:data-api
+```
+
+(Yerel Supabase'e karşı gerçek anon / authenticated JWT ile Data API sondası.)
+
 ```bash
 npm run package:source
 ```
@@ -144,12 +152,12 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
 | 10.1 | Hiçbir EXE/MSI/BAT/eklenti/native yardımcı yok | `tests/deployment-surface.test.ts` → "yerel kurulum gerektiren bileşen yoktur" |
-| 10.2 | PWA kurulumu isteğe bağlı; hiçbir özellik ona bağlı değil | `tests/deployment-surface.test.ts` → "PWA kurulumu isteğe bağlıdır"<br>`e2e/device.spec.ts` → "kurulu PWA olmadan tüm ekranlar çalışır" |
-| 10.3 | Giriş ekranında cihaz türü seçimi var, "beni hatırla" yok | `tests/deployment-surface.test.ts` → "giriş ekranı cihaz seçimi"<br>`e2e/device.spec.ts` → "giriş ekranı kişisel ve ortak cihaz seçeneği sunar" |
-| 10.4 | Ortak cihazda oturum kalıcı değildir | `tests/device-mode.test.ts` → "ortak cihazda KALICI DEĞİLDİR"<br>`e2e/device.spec.ts` → "ortak cihazda oturum çerezi kalıcı değildir" |
-| 10.5 | Ortak cihazda 15 dk hareketsizlikte otomatik çıkış | `tests/device-mode.test.ts` → "ortak cihaz için 15 dakikadır"<br>`e2e/device.spec.ts` → "ortak cihazda hareketsizlik sonrası otomatik çıkış yapılır" |
-| 10.6 | Ortak cihazda SW kaydı ve önbellek bırakılmaz | `e2e/device.spec.ts` → "ortak cihazda servis çalışanı kaydedilmez ve önbellek bırakılmaz" |
-| 10.7 | Token/portföy JS'ten okunabilir depoya yazılmaz | `tests/deployment-surface.test.ts` → "kimlik bilgisi ve portföy verisi tarayıcı deposuna yazılmaz"<br>`e2e/device.spec.ts` → "oturum jetonu JavaScript'ten okunamaz" |
+| 10.2 | PWA kurulumu isteğe bağlı; hiçbir özellik ona bağlı değil | `tests/deployment-surface.test.ts` → "PWA kurulumu isteğe bağlıdır"<br>`e2e/session.spec.ts` → "kurulu PWA olmadan tüm ekranlar çalışır" |
+| 10.3 | Giriş ekranı cihaz türü SORMAZ, "beni hatırla" yok | `tests/deployment-surface.test.ts` → "giriş ekranı: tek ve kalıcı oturum modeli"<br>`e2e/session.spec.ts` → "cihaz türü sormaz ve 'beni hatırla' kutusu yoktur" |
+| 10.4 | Oturum çerezi kalıcı, HttpOnly, SameSite=Lax | `tests/session-cookie.test.ts`<br>`e2e/session.spec.ts` → "çerez kalıcı, HttpOnly ve SameSite=Lax'tır" |
+| 10.5 | İstemcide hareketsizlik sayacı / otomatik çıkış yok | `tests/deployment-surface.test.ts` → "istemcide hareketsizlik sayacı veya otomatik çıkış yoktur" |
+| 10.6 | Servis çalışanı yalnızca üretimde; cihaz türüne bakmaz | `tests/deployment-surface.test.ts` → "servis çalışanı yalnızca üretim derlemesinde kaydedilir" |
+| 10.7 | Token/portföy JS'ten okunabilir depoya yazılmaz | `tests/deployment-surface.test.ts` → "kimlik bilgisi ve portföy verisi tarayıcı deposuna yazılmaz"<br>`e2e/session.spec.ts` → "oturum kimliği JavaScript'ten okunamaz ve tarayıcı deposunda yoktur" |
 | 10.8 | Hassas API yanıtları SW önbelleğine alınmaz | `tests/deployment-surface.test.ts` → "servis çalışanı hassas yanıtları önbelleğe almaz" |
 | 10.9 | Cihaz izni (bildirim/push/konum) istenmez | `tests/deployment-surface.test.ts` → "cihaz izinleri istenmez" |
 | 10.10 | Portföy bulutta saklanır, sunucu üzerinden senkronize olur | `tests/deployment-surface.test.ts` → "oturum açmış kullanıcının verisi sunucu deposunda tutulur" |
@@ -158,8 +166,8 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
-| 11.1 | `service_role` anahtarı istemci kodunda yok | `tests/security-surface.test.ts` → "service_role anahtarı istemciye sızmaz" |
-| 11.2 | `service_role` anahtarı derlenmiş istemci paketinde yok | `npm run verify:bundle` → `scripts/check-client-bundle.mjs` |
+| 11.1 | Sunucu anahtarı istemci kodunda yok | `tests/security-surface.test.ts` → "service_role anahtarı istemciye sızmaz" |
+| 11.2 | `SUPABASE_SECRET_KEY` / `service_role` / `sb_secret_` derlenmiş istemci paketinde yok | `npm run verify:bundle` → `scripts/check-client-bundle.mjs`; `tests/database-boundary.test.ts` → "istemci paketi taraması" |
 | 11.3 | Uygulama tablolarında parola sütunu yok | `tests/security-surface.test.ts` → "SQL şemasında parola sütunu yoktur" |
 | 11.4 | RLS tüm kullanıcı tablolarında açık | `tests/security-surface.test.ts` → "RLS politikaları tanımlıdır" bloğu |
 
@@ -192,20 +200,27 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | 14.2 | Portföy ve işlem API'leri `PASSWORD_CHANGE_REQUIRED` döner | `e2e/security.spec.ts` → "geçici parolalı kullanıcı portföy API'sine erişemez" |
 | 14.3 | Yönetim API'leri de reddeder | `e2e/security.spec.ts` → "geçici parolalı kullanıcı yönetim API'sine de erişemez" |
 | 14.4 | Oturum, çıkış ve parola değiştirme uçları açıktır | `e2e/security.spec.ts` → "oturum ve parola değiştirme uçları geçici parolalı kullanıcıya açıktır" |
-| 14.5 | Parola değişince tüm oturumlar düşer, tekrar giriş gerekir | `e2e/security.spec.ts` → "parola değiştirdikten sonra tekrar giriş gerekir" |
+| 14.5 | Parola değişince bu cihaz sürer, diğer cihazlar kapanır | `tests/auth-service.test.ts` → "parola değiştirildikten sonra korumalı uçlar açılır"<br>`e2e/security.spec.ts` → "parola değiştirince bu cihazın oturumu sürer, diğer cihazlar kapanır" |
 
-## 15. Sunucu tarafı oturum süresi
+## 15. Kalıcı oturum modeli
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
-| 15.1 | Ortak cihazda 15 dakika hareketsizlik sınırı | `tests/session-expiry.test.ts` → "ortak cihaz: hareketsizlik zaman aşımı" |
-| 15.2 | Ortak cihazda 8 saat mutlak süre | aynı dosya → "sürekli hareket olsa bile 8 saatte oturum sona erer" |
-| 15.3 | Kişisel cihazda mutlak süre yine zorunlu | aynı dosya → "kişisel cihaz" bloğu |
-| 15.4 | Askıya alınmış sekme senaryosu | aynı dosya → "askıya alınmış sekme: uzun aradan sonra oturum düşer" |
-| 15.5 | Tarayıcı oturum geri yükleme senaryosu | aynı dosya → "tarayıcı yeniden açılsa bile sunucu süresi geçmiş oturumu kabul etmez" |
-| 15.6 | `last_seen_at` en fazla 60 sn'de bir yazılır | aynı dosya → "last_seen_at yazma sıklığı" |
-| 15.7 | Süresi geçen oturum SUNUCUDA reddedilir (uçtan uca) | `e2e/security.spec.ts` → "sunucu tarafı oturum süresi" bloğu |
-| 15.8 | Üretimde çerez `__Host-` önekli, Secure, Path=/, Domain'siz | `tests/device-mode.test.ts` → "oturum çerezi" bloğu; `src/server/security/config.ts` |
+| 15.1 | 15 dk, 1 saat, 24 saat (ve 179 gün) hareketsizlik kullanıcıyı çıkarmaz | `tests/persistent-session.test.ts` → "hareketsizlik oturumu kapatmaz"<br>`e2e/session.spec.ts` → "15 dk, 1 saat ve 24 saat hareketsizlik kullanıcıyı çıkarmaz" |
+| 15.2 | Tarayıcı kapatılıp açıldığında kalıcı çerezle oturum devam eder | `e2e/session.spec.ts` → "tarayıcı kapatılıp yeniden açıldığında oturum devam eder" |
+| 15.3 | Kaydırmalı yenileme bitişi güvenli biçimde uzatır | `tests/persistent-session.test.ts` → "kaydırmalı yenileme"<br>`e2e/session.spec.ts` → "uzun aradan sonra bitiş zamanı sessizce ileri alınır" |
+| 15.4 | Yenileme her API çağrısında DB yazmaz | `tests/persistent-session.test.ts` → "her API çağrısında veritabanına YAZILMAZ"<br>`e2e/session.spec.ts` → "her API çağrısı veritabanına yazmaz" |
+| 15.5 | Kimlik 7 günde bir yenilenir; eski kimlik 60 sn sonra geçersiz | `tests/persistent-session.test.ts` → "oturum kimliği yenileme (rotation)" |
+| 15.6 | Normal çıkış yalnızca mevcut cihazı kapatır | `tests/persistent-session.test.ts` → "normal çıkış yalnızca bu cihazın oturumunu kapatır"<br>`e2e/session.spec.ts` → "normal çıkış yalnızca bu cihazı kapatır" |
+| 15.7 | "Tüm cihazlardan çıkış" bütün oturumları kapatır | `tests/persistent-session.test.ts` → "tüm cihazlardan çıkış bütün oturumları kapatır"<br>`e2e/session.spec.ts` → "'Tüm cihazlardan çıkış' bütün oturumları kapatır" |
+| 15.8 | Parola sıfırlama bütün cihazları kapatır | `tests/persistent-session.test.ts` → "yönetici parola sıfırlaması bütün cihazları kapatır"<br>`e2e/session.spec.ts` → "yönetici parola sıfırlaması" |
+| 15.9 | Pasifleştirme bütün cihazları kapatır | `tests/persistent-session.test.ts` → "pasifleştirme bütün cihazları anında kapatır"<br>`e2e/session.spec.ts` → "kullanıcı pasifleştirme" |
+| 15.10 | Silinmiş / iptal edilmiş oturum çerezi ile erişim reddedilir | `tests/persistent-session.test.ts` → "silinmiş / iptal edilmiş oturum kimliği reddedilir"<br>`e2e/security.spec.ts` → "iptal edilmiş (revoke) oturum çerezi ile erişim reddedilir" |
+| 15.11 | Auth token / oturum kimliği localStorage / sessionStorage / IndexedDB'de yok | `e2e/session.spec.ts` → "oturum kimliği JavaScript'ten okunamaz ve tarayıcı deposunda yoktur" |
+| 15.12 | Mobil PWA ve masaüstü aynı portföyü görür | `e2e/session.spec.ts` → "masaüstünde eklenen işlem mobil görünümde de görünür" |
+| 15.13 | Yönetici oturumları görür (ham IP yok) ve kapatır | `tests/persistent-session.test.ts` → "yönetici belirli bir oturumu veya bütün oturumları iptal edebilir"<br>`e2e/session.spec.ts` → "yönetici panelinden oturumları görüp kapatma" |
+| 15.14 | Üretimde çerez `__Host-` önekli, Secure, Path=/, Domain'siz | `tests/session-cookie.test.ts`; `src/server/security/config.ts` |
+| 15.15 | Eski device-mode testleri kaldırıldı; yeni davranışla çelişen test yok | `tests/deployment-surface.test.ts` → "giriş ekranı: tek ve kalıcı oturum modeli" |
 
 ## 16. CSRF ve güvenlik başlıkları
 
@@ -255,19 +270,35 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | 19.4 | Son denetim kaydı yazılamazsa gizlenmez | aynı dosya → "son denetim kaydı yazılamazsa bu durum gizlenmez" |
 | 19.5 | Parola / finansal içerik yazılmaz | aynı dosya → "denetim kaydına parola veya finansal içerik yazılmaz" |
 
-## 20. RLS davranış testleri (pgTAP)
+## 20. Veritabanı yetki sınırı ve RLS testleri (pgTAP + gerçek JWT)
 
-`supabase/tests/rls.test.sql` — 24 test. Çalıştırma: `npm run test:db`
-(Supabase CLI + Docker gerektirir).
+`supabase/tests/rls.test.sql` — **73 test**. Çalıştırma: `npm run test:db`
+(Supabase CLI + Docker; `supabase db reset` ile 0001→0007 temiz uygulanır).
 
-Kapsam: kullanıcı izolasyonu (profil/portföy/işlem okuma-yazma-silme), başka
-kullanıcının portföy kimliğiyle işlem ekleme, rol/durum/kullanıcı adı/
-`must_change_password` değiştirme girişimleri, yönetici salt okunur erişimi,
-`app_sessions` erişimi, denetim kaydı erişimi ve anon rolü.
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 20.1 | Kritik RPC'ler anon/authenticated için kapalı, service_role için açık | pgTAP "FONKSİYON YETKİ MATRİSİ" (`has_function_privilege`) |
+| 20.2 | Dahili yardımcılar ve tetikleyici fonksiyonları hiçbir role açık değil | pgTAP "Dahili yardımcılar ... HİÇBİR role açık değildir" |
+| 20.3 | Yeni fonksiyonlar varsayılan olarak anon/authenticated'a açılmaz | pgTAP "ALTER DEFAULT PRIVILEGES" (gerçek fonksiyon oluşturulur) |
+| 20.4 | anon hiçbir tabloyu okuyamaz/yazamaz; authenticated yalnızca SELECT | pgTAP "TABLO YETKİ MATRİSİ" (`has_table_privilege`) |
+| 20.5 | authenticated kendi portföyüne bile doğrudan yazamaz — GRANT katmanı | pgTAP "permission denied for table transactions" mesajlı `throws_ok` |
+| 20.6 | authenticated kritik RPC'leri çağıramaz | pgTAP "permission denied for function ..." |
+| 20.7 | Sahip bağlamında composite FK ve birim tetikleyicisi çalışır | pgTAP `23503` / `23514` |
+| 20.8 | Yazma politikaları kaldırıldı, SELECT politikaları korundu | pgTAP `pg_policies` envanteri |
+| 20.9 | Provisioning tetikleyicisi ve onarım idempotent; `lock_user_portfolio` portföy oluşturmaz | pgTAP "PROVISIONING" bloğu |
+| 20.10 | Kalıcı oturum şeması; temizlik yalnızca iptal/süresi dolanı siler | pgTAP "KALICI OTURUM ŞEMASI" |
+| 20.11 | Gerçek anon anahtarı ve authenticated JWT ile PostgREST üzerinden yazma reddedilir, okuma RLS kapsamlı | `npm run test:data-api` → `scripts/data-api-probe.mjs` (21 beklenti) |
+| 20.12 | Migration metni beklenen kuralları taşır (pgTAP çalışmayan ortam için) | `tests/database-boundary.test.ts` |
+| 20.13 | GET /api/portfolio veri oluşturmaz; onarım idempotent | `tests/provisioning.test.ts` |
+| 20.14 | side/productId/NaN/negatif girdiler 400 ile reddedilir | `tests/transaction-input.test.ts` |
+| 20.15 | Üç sayaçlı hız sınırı; başarılı giriş yalnızca kombinasyonu sıfırlar | `tests/rate-limit-buckets.test.ts` |
+| 20.16 | Üretimde APP_ORIGIN zorunlu; Host'tan türetilmez | `tests/production-origin.test.ts` |
+| 20.17 | Güvenilmeyen vekilde X-Forwarded-For yok sayılır | `tests/client-ip.test.ts` |
+| 20.18 | Kaynak ZIP'i `/` ayraçlı, CRC ve giriş sayısı doğrulanır | `tests/database-boundary.test.ts` → "kaynak paketi (ZIP)" |
 
 > Çıkış kodları: `0` geçti, `1` başarısız, **`2` çalıştırılamadı** (CLI veya
 > Docker yok). Komut ortam uygun değilse testleri çalıştırılmış gibi
-> raporlamaz.
+> raporlamaz. Son koşum: yerel Supabase yığınında 73/73 geçti; uzak proje yok.
 
 ## 21. Temiz kaynak paketi
 

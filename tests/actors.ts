@@ -1,4 +1,4 @@
-import type { DeviceMode, UserProfile } from "@/auth/types";
+import type { UserProfile } from "@/auth/types";
 import {
   createAdminActor,
   createUserActor,
@@ -15,15 +15,15 @@ import {
  * de aynı fabrikaları kullanır. Böylece testler gerçek yetkilendirme sınırını
  * dolanmaz, onu kullanır.
  */
-export function userActor(profile: UserProfile, deviceMode: DeviceMode = "personal"): UserActor {
-  return createUserActor(profile, deviceMode);
+export function userActor(profile: UserProfile, sessionId = "test-session"): UserActor {
+  return createUserActor(profile, sessionId);
 }
 
-export function adminActor(profile: UserProfile, deviceMode: DeviceMode = "personal"): AdminActor {
-  return createAdminActor(profile, deviceMode);
+export function adminActor(profile: UserProfile, sessionId = "test-admin-session"): AdminActor {
+  return createAdminActor(profile, sessionId);
 }
 
 /** Kullanıcının kendi verisine erişim kapsamı (arka uç çağrıları için). */
 export function scopeOf(profile: UserProfile): DataScope {
-  return ownScope(createUserActor(profile, "personal"));
+  return ownScope(createUserActor(profile, "test-session"));
 }

@@ -52,6 +52,18 @@ export function tooManyRequests(message: string, retryAfterMs: number): AppError
   return new AppError(429, message, "rate_limited", retryAfterMs);
 }
 
+/**
+ * Kullanıcının portföyü provisioning ile oluşturulmamış. GET yolları veri
+ * OLUŞTURMAZ; bu durum yönetici onarımı (provision_missing_defaults) ister.
+ */
+export function portfolioNotProvisioned(): AppError {
+  return new AppError(
+    500,
+    "Portföy kaydınız hazırlanmamış. Lütfen sistem yöneticinizle iletişime geçin.",
+    "portfolio_not_provisioned",
+  );
+}
+
 /** Origin / CSRF doğrulaması başarısız. */
 export function csrfRejected(message = "İstek doğrulanamadı. Sayfayı yenileyip tekrar deneyin."): AppError {
   return new AppError(403, message, "csrf_rejected");

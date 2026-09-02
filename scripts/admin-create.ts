@@ -42,7 +42,7 @@ function hasSupabaseConfig(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
   );
 }
 
@@ -112,9 +112,11 @@ function reportMissingSupabase(): void {
   for (const name of [
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_SECRET_KEY (veya SUPABASE_SERVICE_ROLE_KEY)",
   ]) {
-    const present = Boolean(process.env[name]);
+    const present = name.startsWith("SUPABASE_SECRET_KEY")
+      ? Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+      : Boolean(process.env[name]);
     console.error(`  ${present ? "[var]" : "[EKSİK]"} ${name}`);
   }
   console.error("");

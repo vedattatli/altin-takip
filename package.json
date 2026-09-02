@@ -13,6 +13,8 @@
     "test:e2e": "playwright test",
     "test:db": "node scripts/run-db-tests.mjs",
     "admin:create": "tsx scripts/admin-create.ts",
+    "admin:repair": "tsx scripts/admin-repair.ts",
+    "test:data-api": "node scripts/data-api-probe.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "package:source": "node scripts/package-source.mjs",
     "db:catalog": "tsx scripts/generate-catalog-sql.ts",

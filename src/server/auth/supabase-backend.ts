@@ -5,22 +5,20 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { internalEmailForUsername } from "@/auth/internal-identity";
 import { normalizeUsername } from "@/auth/username";
-import type {
-  AdminAuditLog,
-  DeviceMode,
-  SessionPolicy,
-  UserProfile,
-  UserStatus,
-} from "@/auth/types";
+import type { AdminAuditLog, UserProfile, UserStatus } from "@/auth/types";
+import { SESSION_ROLLING_LIFETIME_MS } from "@/auth/types";
 import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
 import { serverEnv } from "@/server/env";
 import type { DataScope } from "./actor";
 import {
   OversellError,
+  PortfolioNotProvisionedError,
   type AuthBackend,
   type CreateUserRequest,
   type ResolvedSession,
   type SessionRecord,
+  type SessionTouch,
+  type StoredSessionSummary,
 } from "./backend";
 
 /**
@@ -32,8 +30,9 @@ import {
  *   "server-only" işareti sayesinde istemci paketine giremez.
  * - Kullanıcı adı, sunucuda deterministik olarak dahili bir e-posta kimliğine
  *   çevrilir; bu adres hiçbir yanıtta istemciye dönmez.
- * - Oturumlar app_sessions tablosunda tutulur; parola sıfırlama veya
- *   pasifleştirme tüm cihazlardaki oturumları düşürür.
+ * - Oturumlar app_sessions tablosunda kalıcı ve kaydırmalı ömürle tutulur;
+ *   parola sıfırlama, pasifleştirme veya yönetici iptali tüm cihazlardaki
+ *   oturumları düşürür.
  */
 
 interface ProfileRow {
@@ -96,6 +95,8 @@ function toTransaction(row: TransactionRow): Transaction {
 
 /** Postgres tarafındaki aşırı satış hatasının tanınması için işaret. */
 const OVERSELL_MARKER = "ALTIN_OVERSELL";
+/** Portföy provisioning eksikliğinin tanınması için işaret. */
+const NOT_PROVISIONED_MARKER = "ALTIN_PORTFOLIO_NOT_PROVISIONED";
 
 function toPortfolio(row: Record<string, unknown>): PortfolioMeta {
   return {
@@ -106,6 +107,21 @@ function toPortfolio(row: Record<string, unknown>): PortfolioMeta {
     updatedAt: row.updated_at as string,
   };
 }
+
+interface SessionRow {
+  id: string;
+  user_id: string;
+  expires_at: string;
+  last_seen_at: string;
+  renewed_at: string;
+  rotated_at: string;
+  revoked_at: string | null;
+  device_label: string;
+  previous_token_valid_until: string | null;
+}
+
+const SESSION_COLUMNS =
+  "id, user_id, expires_at, last_seen_at, renewed_at, rotated_at, revoked_at, device_label, previous_token_valid_until";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -123,7 +139,7 @@ export class SupabaseAuthBackend implements AuthBackend {
   private readonly admin: SupabaseClient;
 
   constructor() {
-    this.admin = createClient(serverEnv.supabaseUrl, serverEnv.supabaseServiceRoleKey, {
+    this.admin = createClient(serverEnv.supabaseUrl, serverEnv.supabaseSecretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
   }
@@ -178,78 +194,107 @@ export class SupabaseAuthBackend implements AuthBackend {
     if (error) fail("Parola güncellenemedi", error);
   }
 
-  // --- Oturum ---
+  // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
 
-  async createSession(
-    userId: string,
-    deviceMode: DeviceMode,
-    policy: SessionPolicy,
-    now: number,
-  ): Promise<SessionRecord> {
+  async createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord> {
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
-    const idleExpiresAt =
-      policy.idleTimeoutMs === null ? null : new Date(now + policy.idleTimeoutMs).toISOString();
-    const absoluteExpiresAt = new Date(now + policy.absoluteLifetimeMs).toISOString();
     const timestamp = new Date(now).toISOString();
+    const expiresAt = new Date(now + SESSION_ROLLING_LIFETIME_MS).toISOString();
 
     const { error } = await this.admin.from("app_sessions").insert({
       id,
       user_id: userId,
       token_hash: hashToken(token),
-      device_mode: deviceMode,
+      device_label: deviceLabel,
       created_at: timestamp,
       last_seen_at: timestamp,
-      idle_expires_at: idleExpiresAt,
-      absolute_expires_at: absoluteExpiresAt,
-      // Eski sürümle uyum: expires_at mutlak süreyi taşır.
-      expires_at: absoluteExpiresAt,
+      renewed_at: timestamp,
+      rotated_at: timestamp,
+      expires_at: expiresAt,
+      // Eski sürümle uyum: absolute_expires_at aynı değeri taşır.
+      absolute_expires_at: expiresAt,
     });
     if (error) fail("Oturum oluşturulamadı", error);
-    return { id, token, userId, deviceMode, idleExpiresAt, absoluteExpiresAt };
+    return { id, token, userId, expiresAt, createdAt: timestamp, deviceLabel };
+  }
+
+  private async findSessionRow(tokenHash: string, now: number): Promise<SessionRow | null> {
+    const current = await this.admin
+      .from("app_sessions")
+      .select(SESSION_COLUMNS)
+      .eq("token_hash", tokenHash)
+      .maybeSingle();
+    if (current.data) return current.data as unknown as SessionRow;
+
+    // Yenilemeden hemen sonra eski kimlik, tolerans süresi boyunca kabul edilir.
+    const previous = await this.admin
+      .from("app_sessions")
+      .select(SESSION_COLUMNS)
+      .eq("previous_token_hash", tokenHash)
+      .maybeSingle();
+    const row = previous.data as unknown as SessionRow | null;
+    if (!row || !row.previous_token_valid_until) return null;
+    if (Date.parse(row.previous_token_valid_until) <= now) return null;
+    return row;
   }
 
   async resolveSession(token: string, now: number): Promise<ResolvedSession | null> {
-    const { data, error } = await this.admin
-      .from("app_sessions")
-      .select("id, user_id, device_mode, idle_expires_at, absolute_expires_at, last_seen_at, revoked_at")
-      .eq("token_hash", hashToken(token))
-      .maybeSingle();
+    const row = await this.findSessionRow(hashToken(token), now);
+    if (!row || row.revoked_at !== null) return null;
 
-    if (error || !data) return null;
-    if (data.revoked_at !== null) return null;
-
-    const idleExpiresAt = (data.idle_expires_at as string | null) ?? null;
-    const absoluteExpiresAt = data.absolute_expires_at as string;
-
-    // Hem hareketsizlik hem mutlak süre sunucuda kontrol edilir.
-    const idleExpired = idleExpiresAt !== null && Date.parse(idleExpiresAt) <= now;
-    const absoluteExpired = Date.parse(absoluteExpiresAt) <= now;
-    if (idleExpired || absoluteExpired) {
-      await this.admin.from("app_sessions").delete().eq("id", data.id as string);
+    // Hareketsizlik sınırı YOKTUR; yalnızca kaydırmalı bitiş zamanı kontrol edilir.
+    if (Date.parse(row.expires_at) <= now) {
+      await this.admin.from("app_sessions").delete().eq("id", row.id);
       return null;
     }
 
-    const profile = await this.getProfile(data.user_id as string);
+    const profile = await this.getProfile(row.user_id);
     if (!profile || profile.status !== "active") return null;
 
     return {
-      sessionId: data.id as string,
+      sessionId: row.id,
       profile,
-      // Bilinmeyen değer gelirse en kısıtlayıcı mod varsayılır.
-      deviceMode: data.device_mode === "personal" ? "personal" : "shared",
-      idleExpiresAt,
-      absoluteExpiresAt,
-      lastSeenAt: data.last_seen_at as string,
+      expiresAt: row.expires_at,
+      lastSeenAt: row.last_seen_at,
+      renewedAt: row.renewed_at,
+      rotatedAt: row.rotated_at,
+      deviceLabel: row.device_label,
     };
   }
 
-  async touchSession(sessionId: string, idleExpiresAt: string | null, now: number): Promise<void> {
-    await this.admin
+  async touchSession(sessionId: string, patch: SessionTouch): Promise<void> {
+    const update: Record<string, string> = { last_seen_at: patch.lastSeenAt };
+    if (patch.expiresAt) {
+      update.expires_at = patch.expiresAt;
+      update.absolute_expires_at = patch.expiresAt;
+    }
+    if (patch.renewedAt) update.renewed_at = patch.renewedAt;
+    await this.admin.from("app_sessions").update(update).eq("id", sessionId).is("revoked_at", null);
+  }
+
+  async rotateSession(sessionId: string, now: number, graceMs: number): Promise<string | null> {
+    const { data: row } = await this.admin
       .from("app_sessions")
-      .update({ last_seen_at: new Date(now).toISOString(), idle_expires_at: idleExpiresAt })
+      .select("id, token_hash, revoked_at")
       .eq("id", sessionId)
-      .is("revoked_at", null);
+      .maybeSingle();
+    if (!row || row.revoked_at !== null) return null;
+
+    const token = randomBytes(32).toString("base64url");
+    // Eski özet eşleşmesi: eşzamanlı iki yenileme birbirini ezmez.
+    const { data: updated } = await this.admin
+      .from("app_sessions")
+      .update({
+        token_hash: hashToken(token),
+        previous_token_hash: row.token_hash as string,
+        previous_token_valid_until: new Date(now + graceMs).toISOString(),
+        rotated_at: new Date(now).toISOString(),
+      })
+      .eq("id", sessionId)
+      .eq("token_hash", row.token_hash as string)
+      .select("id");
+    return (updated ?? []).length > 0 ? token : null;
   }
 
   async purgeExpiredSessions(now: number): Promise<number> {
@@ -257,18 +302,55 @@ export class SupabaseAuthBackend implements AuthBackend {
     const { data, error } = await this.admin
       .from("app_sessions")
       .delete()
-      .or(`absolute_expires_at.lte.${timestamp},idle_expires_at.lte.${timestamp}`)
+      .or(`expires_at.lte.${timestamp},revoked_at.not.is.null`)
       .select("id");
     if (error) return 0;
     return (data ?? []).length;
   }
 
   async destroySession(token: string): Promise<void> {
-    await this.admin.from("app_sessions").delete().eq("token_hash", hashToken(token));
+    const tokenHash = hashToken(token);
+    await this.admin
+      .from("app_sessions")
+      .delete()
+      .or(`token_hash.eq.${tokenHash},previous_token_hash.eq.${tokenHash}`);
   }
 
-  async destroyAllSessionsForUser(userId: string): Promise<void> {
-    await this.admin.from("app_sessions").delete().eq("user_id", userId);
+  async destroySessionById(userId: string, sessionId: string): Promise<boolean> {
+    const { data } = await this.admin
+      .from("app_sessions")
+      .delete()
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .select("id");
+    return (data ?? []).length > 0;
+  }
+
+  async destroyAllSessionsForUser(
+    userId: string,
+    options: { exceptSessionId?: string } = {},
+  ): Promise<number> {
+    let query = this.admin.from("app_sessions").delete().eq("user_id", userId);
+    if (options.exceptSessionId) query = query.neq("id", options.exceptSessionId);
+    const { data } = await query.select("id");
+    return (data ?? []).length;
+  }
+
+  async listSessionsForUser(userId: string, now: number): Promise<StoredSessionSummary[]> {
+    const { data } = await this.admin
+      .from("app_sessions")
+      .select("id, created_at, last_seen_at, expires_at, device_label")
+      .eq("user_id", userId)
+      .is("revoked_at", null)
+      .gt("expires_at", new Date(now).toISOString())
+      .order("last_seen_at", { ascending: false });
+    return (data ?? []).map((row) => ({
+      id: row.id as string,
+      createdAt: row.created_at as string,
+      lastSeenAt: row.last_seen_at as string,
+      expiresAt: row.expires_at as string,
+      deviceLabel: (row.device_label as string | null) ?? "Bilinmeyen cihaz",
+    }));
   }
 
   // --- Profiller ---
@@ -441,13 +523,15 @@ export class SupabaseAuthBackend implements AuthBackend {
 
     if (data) return toPortfolio(data);
 
-    const { data: created, error } = await this.admin
-      .from("portfolios")
-      .insert({ user_id: scope.userId, name: "Portföyüm" })
-      .select("*")
-      .single();
-    if (error) fail("Portföy oluşturulamadı", error);
-    return toPortfolio(created);
+    // GET yolu veri OLUŞTURMAZ. Portföy, profil oluşturulurken tetikleyiciyle
+    // hazırlanır; eksikse yönetici onarımı gerekir.
+    throw new PortfolioNotProvisionedError(scope.userId);
+  }
+
+  async provisionMissingDefaults(): Promise<number> {
+    const { data, error } = await this.admin.rpc("provision_missing_defaults");
+    if (error) fail("Provisioning onarımı çalıştırılamadı", error);
+    return Array.isArray(data) ? data.length : 0;
   }
 
   async updatePortfolio(
@@ -497,6 +581,9 @@ export class SupabaseAuthBackend implements AuthBackend {
     if (error) {
       if (error.message.includes(OVERSELL_MARKER)) {
         throw new OversellError(String(params.p_product_id ?? ""), 0);
+      }
+      if (error.message.includes(NOT_PROVISIONED_MARKER)) {
+        throw new PortfolioNotProvisionedError(String(params.p_user_id ?? ""));
       }
       fail(context, error);
     }

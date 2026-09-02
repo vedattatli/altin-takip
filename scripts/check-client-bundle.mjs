@@ -14,13 +14,17 @@ const CLIENT_DIRS = [".next/static", "public"];
 
 /** Aranan izler. Değer varsa gerçek anahtarın kendisi de aranır. */
 const FORBIDDEN = [
+  { label: "SUPABASE_SECRET_KEY adı", needle: "SUPABASE_SECRET_KEY" },
   { label: "SUPABASE_SERVICE_ROLE_KEY adı", needle: "SUPABASE_SERVICE_ROLE_KEY" },
   { label: '"service_role" ibaresi', needle: "service_role" },
+  { label: "sb_secret_ öneki", needle: "sb_secret_" },
 ];
 
-const actualKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
-if (actualKey.length > 20) {
-  FORBIDDEN.push({ label: "service_role anahtarının kendisi", needle: actualKey });
+for (const name of ["SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) {
+  const actualKey = (process.env[name] ?? "").trim();
+  if (actualKey.length > 20) {
+    FORBIDDEN.push({ label: `${name} değerinin kendisi`, needle: actualKey });
+  }
 }
 
 function walk(dir, files = []) {
@@ -62,4 +66,6 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log(`İstemci paketi temiz: ${scanned} dosya tarandı, service_role izi bulunamadı.`);
+console.log(
+  `İstemci paketi temiz: ${scanned} dosya tarandı, secret/service_role izi bulunamadı.`,
+);

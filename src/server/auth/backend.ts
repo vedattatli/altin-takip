@@ -1,11 +1,4 @@
-import type {
-  AdminAuditLog,
-  DeviceMode,
-  SessionPolicy,
-  UserProfile,
-  UserRole,
-  UserStatus,
-} from "@/auth/types";
+import type { AdminAuditLog, UserProfile, UserRole, UserStatus } from "@/auth/types";
 import type { PortfolioMeta, Transaction, TransactionInput } from "@/domain/types";
 import type { DataScope } from "./actor";
 
@@ -33,25 +26,52 @@ export interface CreateUserRequest {
   role: UserRole;
 }
 
+/** Yeni oluşturulan oturum. `token` yalnızca çereze yazılır; sunucuda özeti saklanır. */
 export interface SessionRecord {
   id: string;
   token: string;
   userId: string;
-  deviceMode: DeviceMode;
-  /** Hareketsizlik son kullanma zamanı (ISO). null ise hareketsizlik sınırı yok. */
-  idleExpiresAt: string | null;
-  /** Mutlak son kullanma zamanı (ISO). Her cihaz türünde doludur. */
-  absoluteExpiresAt: string;
+  expiresAt: string;
+  createdAt: string;
+  deviceLabel: string;
 }
 
-/** Çözülmüş oturum: profil, cihaz türü ve süre bilgileri. */
+/** Çözülmüş oturum: profil ve süre bilgileri. */
 export interface ResolvedSession {
   sessionId: string;
   profile: UserProfile;
-  deviceMode: DeviceMode;
-  idleExpiresAt: string | null;
-  absoluteExpiresAt: string;
+  /** Kaydırmalı bitiş zamanı (ISO). */
+  expiresAt: string;
   lastSeenAt: string;
+  /** Bitiş zamanının en son ileri alındığı an. */
+  renewedAt: string;
+  /** Oturum kimliğinin en son yenilendiği an. */
+  rotatedAt: string;
+  deviceLabel: string;
+}
+
+/** touchSession ile yazılan alanlar. Verilmeyen alan değişmez. */
+export interface SessionTouch {
+  lastSeenAt: string;
+  expiresAt?: string;
+  renewedAt?: string;
+}
+
+/** Yönetici ve kullanıcı ekranları için güvenli oturum özeti (ham IP / UA YOK). */
+export interface StoredSessionSummary {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  deviceLabel: string;
+}
+
+/** Portföy provisioning eksik. GET yolu veri oluşturmaz; onarım gerekir. */
+export class PortfolioNotProvisionedError extends Error {
+  constructor(readonly userId: string) {
+    super("Portföy kaydı hazırlanmamış.");
+    this.name = "PortfolioNotProvisionedError";
+  }
 }
 
 /** Aşırı satış (oversell) girişimi. Servis katmanı bunu 400'e çevirir. */
@@ -81,24 +101,33 @@ export interface AuthBackend {
   verifyPasswordForUser(userId: string, password: string): Promise<boolean>;
   setPassword(userId: string, newPassword: string): Promise<void>;
 
-  // --- Oturum ---
-  createSession(
-    userId: string,
-    deviceMode: DeviceMode,
-    policy: SessionPolicy,
-    now: number,
-  ): Promise<SessionRecord>;
+  // --- Oturum (kalıcı, kaydırmalı, yenilenen kimlik) ---
+  createSession(userId: string, now: number, deviceLabel: string): Promise<SessionRecord>;
   /**
-   * Jetonu çözer. Hem hareketsizlik hem mutlak süre kontrol edilir;
-   * süresi geçen oturum reddedilir ve iptal edilir.
+   * Jetonu çözer. Süresi geçen, iptal edilen veya sahibi pasif olan oturum
+   * reddedilir. Yakın zamanda yenilenmiş kimliğin ESKİ hâli, kısa bir
+   * tolerans süresi boyunca kabul edilir (uçuştaki istekler düşmesin diye).
    */
   resolveSession(token: string, now: number): Promise<ResolvedSession | null>;
-  /** Hareketsizlik penceresini ileri alır. Çağıran taraf sıklığı sınırlar. */
-  touchSession(sessionId: string, idleExpiresAt: string | null, now: number): Promise<void>;
+  /** last_seen / bitiş zamanını yazar. Çağıran taraf sıklığı sınırlar. */
+  touchSession(sessionId: string, patch: SessionTouch): Promise<void>;
+  /**
+   * Oturum kimliğini yeniler: yeni jeton üretir, eski jetonu `graceMs`
+   * boyunca geçerli tutar. Oturum yoksa/iptalse null döner.
+   */
+  rotateSession(sessionId: string, now: number, graceMs: number): Promise<string | null>;
+  /** Yalnızca bu cihazın oturumunu kapatır. */
   destroySession(token: string): Promise<void>;
-  /** Parola sıfırlama / pasifleştirme sonrası tüm cihazlardaki oturumları düşürür. */
-  destroyAllSessionsForUser(userId: string): Promise<void>;
-  /** Süresi geçmiş oturumları temizler. Döndürülen sayı silinen kayıt adedidir. */
+  /** Belirli bir oturumu kimliğiyle kapatır (kullanıcı eşleşmiyorsa false). */
+  destroySessionById(userId: string, sessionId: string): Promise<boolean>;
+  /**
+   * Kullanıcının tüm oturumlarını düşürür. `exceptSessionId` verilirse o oturum
+   * korunur (kullanıcının kendi parola değişikliği). Kapatılan sayıyı döner.
+   */
+  destroyAllSessionsForUser(userId: string, options?: { exceptSessionId?: string }): Promise<number>;
+  /** Kullanıcının aktif oturumlarını listeler (güvenli metadata ile). */
+  listSessionsForUser(userId: string, now: number): Promise<StoredSessionSummary[]>;
+  /** Süresi geçmiş / iptal edilmiş oturumları temizler. Silinen kayıt adedini döner. */
   purgeExpiredSessions(now: number): Promise<number>;
 
   // --- Profiller ---
@@ -116,7 +145,18 @@ export interface AuthBackend {
   appendAudit(entry: Omit<AdminAuditLog, "id" | "createdAt">): Promise<AdminAuditLog>;
   listAudit(limit?: number): Promise<AdminAuditLog[]>;
 
+  // --- Provisioning ---
+  /**
+   * Profili olup portföyü/tercihi olmayan kullanıcıları tamamlar (idempotent).
+   * Yalnızca yönetim yolundan çağrılır. Onarılan kullanıcı sayısını döner.
+   */
+  provisionMissingDefaults(): Promise<number>;
+
   // --- Portföy verisi (DataScope ile korunur) ---
+  /**
+   * Portföyü OKUR; yoksa PortfolioNotProvisionedError fırlatır.
+   * Bu metot hiçbir koşulda veri OLUŞTURMAZ.
+   */
   getPortfolio(scope: DataScope): Promise<PortfolioMeta>;
   updatePortfolio(
     scope: DataScope,

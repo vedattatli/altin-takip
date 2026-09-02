@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { DeviceMode, UserProfile } from "@/auth/types";
+import type { UserProfile } from "@/auth/types";
 
 /**
  * Yetkilendirme sınırı tipleri.
@@ -30,14 +30,15 @@ declare const ACTOR_BRAND: unique symbol;
 export interface UserActor {
   readonly [ACTOR_BRAND]: "user";
   readonly profile: UserProfile;
-  readonly deviceMode: DeviceMode;
+  /** İsteği yapan oturumun kimliği (çıkış / "diğer cihazlar" işlemleri için). */
+  readonly sessionId: string;
 }
 
 /** Doğrulanmış yönetici. Yalnızca requireCurrentAdmin üretebilir. */
 export interface AdminActor {
   readonly [ACTOR_BRAND]: "admin";
   readonly profile: UserProfile;
-  readonly deviceMode: DeviceMode;
+  readonly sessionId: string;
 }
 
 /**
@@ -52,16 +53,16 @@ export interface DataScope {
 }
 
 /** İç kullanım: doğrulanmış oturumdan aktör üretir. */
-export function createUserActor(profile: UserProfile, deviceMode: DeviceMode): UserActor {
-  return { profile, deviceMode } as UserActor;
+export function createUserActor(profile: UserProfile, sessionId: string): UserActor {
+  return { profile, sessionId } as UserActor;
 }
 
 /** İç kullanım: rolü doğrulanmış yöneticiden admin aktörü üretir. */
-export function createAdminActor(profile: UserProfile, deviceMode: DeviceMode): AdminActor {
+export function createAdminActor(profile: UserProfile, sessionId: string): AdminActor {
   if (profile.role !== "admin") {
     throw new Error("createAdminActor yalnızca admin rolündeki profille çağrılabilir.");
   }
-  return { profile, deviceMode } as AdminActor;
+  return { profile, sessionId } as AdminActor;
 }
 
 /** Kullanıcının kendi verisine erişim kapsamı. */

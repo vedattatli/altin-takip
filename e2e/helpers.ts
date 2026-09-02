@@ -54,34 +54,16 @@ export async function gotoReady(page: Page, path: string) {
   await page.waitForSelector('html[data-hydrated="true"]', { timeout: 30_000 });
 }
 
-export type DeviceChoice = "personal" | "shared";
-
-/**
- * Giriş yapar. Cihaz türü varsayılan olarak "personal" seçilir; ortak cihaz
- * kısıtları (otomatik çıkış vb.) yalnızca e2e/device.spec.ts içinde denenir.
- */
-export async function login(
-  page: Page,
-  username: string,
-  password = TEST_PASSWORD,
-  device: DeviceChoice = "personal",
-) {
+/** Giriş yapar. Cihaz türü sorulmaz; her cihazda aynı kalıcı oturum verilir. */
+export async function login(page: Page, username: string, password = TEST_PASSWORD) {
   await gotoReady(page, "/giris");
   await page.getByLabel("Kullanıcı adı").fill(username);
   await page.getByLabel("Parola", { exact: true }).fill(password);
-  await page
-    .getByRole("radio", { name: device === "personal" ? "Kişisel cihaz" : "Şirket / ortak cihaz" })
-    .click();
   await page.getByRole("button", { name: "Giriş yap" }).click();
 }
 
-export async function loginAsUser(
-  page: Page,
-  username: string,
-  password = TEST_PASSWORD,
-  device: DeviceChoice = "personal",
-) {
-  await login(page, username, password, device);
+export async function loginAsUser(page: Page, username: string, password = TEST_PASSWORD) {
+  await login(page, username, password);
   await page.waitForURL("**/panel");
 }
 
@@ -170,13 +152,19 @@ export async function browserApi<T = unknown>(
   ) as Promise<BrowserApiResult<T>>;
 }
 
-/**
- * Kullanıcının tüm oturumlarını SUNUCU TARAFINDA süresi geçmiş hâle getirir.
- *
- * Yerel geliştirme deposundaki idle/absolute süreler geçmişe alınır; böylece
- * 15 dakika beklemeden sunucunun süresi dolmuş oturumu reddettiği doğrulanabilir.
- */
-export async function expireSessionsOnServer(username: string): Promise<number> {
+interface StoredSessionShape {
+  userId: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastSeenAt: string;
+  renewedAt: string;
+  rotatedAt: string;
+}
+
+async function mutateSessions(
+  username: string,
+  mutate: (session: StoredSessionShape) => void,
+): Promise<number> {
   const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
 
@@ -185,21 +173,61 @@ export async function expireSessionsOnServer(username: string): Promise<number> 
 
   const store = JSON.parse(readFileSync(file, "utf8")) as {
     users: { id: string; username: string }[];
-    sessions: { userId: string; idleExpiresAt: string | null; absoluteExpiresAt: string }[];
+    sessions: StoredSessionShape[];
   };
 
   const user = store.users.find((candidate) => candidate.username === username);
   if (!user) return 0;
 
-  const past = new Date(Date.now() - 60_000).toISOString();
   let touched = 0;
   for (const session of store.sessions) {
     if (session.userId !== user.id) continue;
-    session.idleExpiresAt = past;
-    session.absoluteExpiresAt = past;
+    mutate(session);
     touched += 1;
   }
 
   writeFileSync(file, JSON.stringify(store, null, 2), "utf8");
   return touched;
+}
+
+/**
+ * Kullanıcının tüm oturumlarını SUNUCU TARAFINDA süresi geçmiş hâle getirir
+ * (180 günlük kaydırmalı ömrün dolduğu durumu simüle eder).
+ */
+export async function expireSessionsOnServer(username: string): Promise<number> {
+  const past = new Date(Date.now() - 60_000).toISOString();
+  return mutateSessions(username, (session) => {
+    session.expiresAt = past;
+  });
+}
+
+/** Kullanıcının tüm oturumlarını sunucuda iptal edilmiş (revoke) olarak işaretler. */
+export async function revokeSessionsOnServer(username: string): Promise<number> {
+  const now = new Date().toISOString();
+  return mutateSessions(username, (session) => {
+    session.revokedAt = now;
+  });
+}
+
+/**
+ * Kullanıcının oturumlarını "uzun süredir kullanılmıyor" hâline getirir: son
+ * görülme ve yenileme zamanları geçmişe alınır, bitiş zamanı DEĞİŞMEZ.
+ * Böylece 15 dk / 1 saat / 24 saat hareketsizliğin oturumu düşürmediği ve
+ * kaydırmalı yenilemenin çalıştığı gerçek sunucuda doğrulanabilir.
+ */
+export async function ageSessionsOnServer(username: string, idleMs: number): Promise<number> {
+  const past = new Date(Date.now() - idleMs).toISOString();
+  return mutateSessions(username, (session) => {
+    session.lastSeenAt = past;
+    session.renewedAt = past;
+  });
+}
+
+/** Kullanıcının oturum bitiş zamanlarını okur (kaydırmalı yenileme kontrolü için). */
+export async function readSessionExpiries(username: string): Promise<string[]> {
+  const expiries: string[] = [];
+  await mutateSessions(username, (session) => {
+    expiries.push(session.expiresAt);
+  });
+  return expiries;
 }

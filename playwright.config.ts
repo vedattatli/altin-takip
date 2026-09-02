@@ -24,14 +24,14 @@ const testEnv = {
   AUTH_LOCAL_STORE_FILE: "auth-e2e.json",
   // Supabase olmadan üretim derlemesini test edebilmek için.
   AUTH_ALLOW_LOCAL_BACKEND: TEST_OVERRIDE_TOKEN,
-  // Ortak cihaz otomatik çıkışını testte beklenebilir hâle getirir.
-  // Bu iki değişken olmadan süre her zaman 15 dakikadır.
-  NEXT_PUBLIC_ALLOW_TEST_OVERRIDES: TEST_OVERRIDE_TOKEN,
-  NEXT_PUBLIC_SHARED_IDLE_MS: "5000",
   // Yalnızca yerel test sunucusu için sabit değerler. GERÇEK SECRET DEĞİLDİR;
   // üretimde bu değişkenler güvenli rastgele değerlerle ayarlanır.
   AUTH_CSRF_SECRET: "e2e-test-ortami-sabit-degeri-gercek-secret-degil",
   RATE_LIMIT_PEPPER: "e2e-test-ortami-sabit-degeri-gercek-secret-degil",
+  // Üretim derlemesinde APP_ORIGIN zorunludur; test sunucusunun adresi.
+  APP_ORIGIN: "http://127.0.0.1:3100",
+  // Test sunucusu doğrudan dinler; X-Forwarded-For yerel kabul edilir.
+  TRUSTED_PROXY_PROVIDER: "local",
 };
 
 export default defineConfig({

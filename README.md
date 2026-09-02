@@ -54,12 +54,14 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    | Değişken | Açıklama |
    | --- | --- |
    | `NEXT_PUBLIC_SUPABASE_URL` | Proje URL'si |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anahtar (RLS ile korunur) |
-   | `SUPABASE_SERVICE_ROLE_KEY` | **Yalnızca sunucu.** `NEXT_PUBLIC_` öneki asla verilmez |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anahtar. Tarayıcı bununla doğrudan yazamaz (Data API yazma yüzeyi kapalı) |
+   | `SUPABASE_SECRET_KEY` | **Yalnızca sunucu.** Yeni `sb_secret_...` biçimi. `NEXT_PUBLIC_` öneki asla verilmez; RLS'yi atlar |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Geriye uyumluluk (eski `service_role` JWT). `SUPABASE_SECRET_KEY` doluysa yok sayılır |
    | `AUTH_INTERNAL_EMAIL_DOMAIN` | Kullanıcı adından türetilen dahili kimliğin alan adı |
    | `AUTH_CSRF_SECRET` | CSRF jetonlarını imzalar. **Üretimde zorunlu** |
    | `RATE_LIMIT_PEPPER` | Hız sınırlayıcı anahtarını gizler. **Üretimde zorunlu** |
-   | `APP_ORIGIN` | Beklenen origin (CSRF kontrolü). Üretimde önerilir |
+   | `APP_ORIGIN` | Beklenen origin. **Üretimde zorunlu**; Host başlığından türetilmez (fail closed) |
+   | `TRUSTED_PROXY_PROVIDER` | `vercel` \| `local` \| `none`. `X-Forwarded-For` yalnızca güvenilir vekilde okunur; üretimde boşsa `none` |
 
 3. `supabase/migrations/` altındaki SQL dosyalarını **sırayla** çalıştırın:
 
@@ -67,16 +69,29 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    0001_init.sql                  -> tablolar, kısıtlar, indeksler
    0002_rls.sql                   -> satır düzeyi güvenlik politikaları
    0003_seed_reference_data.sql   -> altın ürün kataloğu ve fiyat kaynağı
-   0004_device_mode.sql           -> oturum cihaz türü
-   0005_security_hardening.sql    -> oturum süreleri, bütünlük kısıtları,
-                                     atomik işlem yazımı, dağıtık hız sınırlayıcı,
-                                     denetim kaydı tetikleyicileri
+   0004_device_mode.sql           -> (eski) oturum cihaz türü; 0007 ile kullanım dışı
+   0005_security_hardening.sql    -> bütünlük kısıtları, atomik işlem yazımı,
+                                     dağıtık hız sınırlayıcı, denetim kaydı tetikleyicileri
+   0006_database_boundary.sql     -> veritabanı yetki sınırı: fonksiyon/tablo grant'ları,
+                                     Data API doğrudan yazma yüzeyinin kapatılması,
+                                     varsayılan portföy provisioning tetikleyicisi
+   0007_persistent_sessions.sql   -> kalıcı, kaydırmalı ve kimliği yenilenen oturum modeli
    ```
 
-   RLS politikalarını doğrulamak için (Supabase CLI + Docker gerekir):
+   Bakım görevleri (pg_cron) için ayrıca bir kez `supabase/setup/maintenance-cron.sql`
+   dosyasını çalıştırın; dosya idempotenttir ve pg_cron yoksa hata vermeden uyarır.
+
+   Yetki sınırını ve RLS'yi gerçek veritabanında doğrulamak için (Supabase CLI + Docker):
 
    ```bash
    npm run test:db
+   ```
+
+   Bu komut `supabase db reset` ile 0001'den itibaren tüm migration'ları temiz bir
+   veritabanına uygular ve 73 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
+
+   ```bash
+   npm run test:data-api
    ```
 
 4. İlk yöneticiyi oluşturun:
@@ -101,10 +116,12 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | RLS davranış testleri (pgTAP; Supabase CLI + Docker gerektirir) |
+| `npm run test:db` | Veritabanı yetki sınırı + RLS testleri: temiz DB'ye 0001→0007 uygular, 73 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
 | `npm run admin:create` | İlk yönetici hesabını oluşturur |
+| `npm run admin:repair` | Eksik varsayılan portföy/tercih kayıtlarını idempotent biçimde tamamlar (yönetici onarımı) |
 | `npm run icons` | PWA simgelerini koddan üretir |
 | `npm run db:catalog` | Ürün kataloğunu SQL migration'ına yazar |
 
@@ -141,29 +158,42 @@ Bu sürümde yalnızca `MockPriceProvider` kullanılır ve arayüzde **Test Veri
 
 ---
 
-## Şirket ve ortak cihazlar
+## Oturum modeli: her cihazda bir kez giriş
 
-Giriş ekranında cihaz türü seçilir. Güvenli varsayılan **"Şirket / ortak cihaz"**tır.
+Kullanıcılar sık sık yeniden giriş yapmaz. Giriş ekranında cihaz türü **sorulmaz**;
+telefon, tablet ve bilgisayarda aynı, sade ve kalıcı oturum modeli kullanılır.
 
-| | Kişisel cihaz | Şirket / ortak cihaz |
-| --- | --- | --- |
-| Oturum çerezi | Kalıcı | Tarayıcı kapanınca silinir |
-| Hareketsizlik | Sınır yok | **15 dakikada otomatik çıkış** |
-| Servis çalışanı / önbellek | Kayıtlı (yalnızca statik varlıklar) | Kaydedilmez, mevcut önbellekler temizlenir |
-| PWA kurulum çağrısı | Tarayıcı gösterebilir | Bastırılır |
-| Cihazda saklanan veri | Yok | Yok |
+| Konu | Davranış |
+| --- | --- |
+| Oturum çerezi | Kalıcı; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, üretimde `__Host-` önekli |
+| Ömür | 180 gün **kaydırmalı**: aktivitede bitiş sessizce ileri alınır (en fazla 24 saatte bir DB yazımı) |
+| Kimlik yenileme | Oturum kimliği 7 günde bir sessizce yenilenir; eski kimlik 60 sn tolerans süresiyle geçerlidir |
+| Hareketsizlik | **Otomatik çıkış yok.** 15 dk, 1 saat, 24 saat hareketsizlik oturumu kapatmaz |
+| Tarayıcı/PWA/cihaz yeniden başlatma | Oturum devam eder |
+| Aynı anda birden çok cihaz | Serbest; her cihaz ilk girişten sonra hesabı hatırlar |
+| Normal "Çıkış" | Yalnızca bu cihazın oturumunu kapatır |
+| "Tüm cihazlardan çıkış yap" | Ayarlar sayfasından; kullanıcının bütün oturumlarını iptal eder |
 
-Her iki modda da:
+Oturumun zorunlu olarak kapandığı güvenlik olayları: kullanıcı kendi parolasını
+değiştirirse **diğer** cihazlar kapanır; yönetici parolayı sıfırlarsa, hesabı
+pasifleştirirse, oturumları iptal ederse veya hesap silinirse **bütün** cihazlar
+kapanır. İptal edilmiş veya silinmiş bir oturum kimliği hiçbir istekte kabul edilmez.
 
-- Oturum jetonu yalnızca `HttpOnly`, `Secure`, `SameSite=Lax` çerezde taşınır; JavaScript ile
-  okunamaz.
-- Parola veya erişim jetonu `localStorage` / `sessionStorage` / IndexedDB gibi JavaScript'ten
-  okunabilir depolara **yazılmaz**.
-- Portföy bulut veritabanında saklanır; cihazlar arası senkronizasyon sunucu üzerinden yapılır.
-- Bildirim, push, konum veya kamera izni istenmez.
-- Kurulu PWA ile normal tarayıcı kullanımı arasında görsel ve işlevsel fark yoktur.
+Her cihazda:
 
-Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 12 ve 16.
+- Oturum kimliği yalnızca `HttpOnly` çerezde taşınır; JavaScript ile okunamaz.
+- Erişim/yenileme jetonu, parola veya dahili e-posta `localStorage` /
+  `sessionStorage` / IndexedDB gibi JavaScript'ten okunabilir depolara **yazılmaz**.
+- Portföy bulut veritabanında saklanır; mobil PWA ve masaüstü aynı portföyü gösterir.
+- Servis çalışanı `/api/*` yanıtlarını ve kimliği doğrulanmış sayfaları önbelleğe almaz;
+  internet yokken oturum varmış gibi yeni finansal işlem kabul edilmez.
+- Bildirim, push, konum veya kamera izni istenmez; PWA kurulumu isteğe bağlıdır.
+
+Yönetici, kullanıcının aktif oturumlarını cihaz etiketi (örn. "Chrome · Windows"),
+giriş ve son görülme zamanıyla görür; tek oturumu veya tümünü kapatabilir.
+Ham IP veya cihaz parmak izi **saklanmaz**.
+
+Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 4, 12 ve 16.
 
 ## Güvenlik özeti
 
@@ -173,8 +203,18 @@ Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 12 ve 16.
   Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 14.
 - **Geçici parolalı kullanıcı** portföy, işlem ve yönetim uçlarını kullanamaz
   (`PASSWORD_CHANGE_REQUIRED`).
-- **Oturum süreleri sunucuda uygulanır:** ortak cihazda 15 dk hareketsizlik ve
-  8 saat mutlak süre; kişisel cihazda mutlak süre zorunludur.
+- **Oturum sunucuda yönetilir:** 180 gün kaydırmalı ömür, 7 günde bir sessiz kimlik
+  yenileme, iptal listesi. Hareketsizlik zaman aşımı yoktur; oturumu yalnızca açık
+  çıkış veya güvenlik olayları kapatır.
+- **Veritabanı yetki sınırı (0006):** anon/authenticated rolleri kişisel ve finansal
+  tablolara **doğrudan yazamaz** (INSERT/UPDATE/DELETE grant'ı yok); kritik
+  SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal mutation
+  yalnızca BFF + kontrollü RPC yolundan geçer. GRANT ve RLS iki ayrı katmandır ve
+  73 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
+- **Üretim sertleştirme:** `APP_ORIGIN` zorunlu (Host'tan türetilmez),
+  `TRUSTED_PROXY_PROVIDER` ile `X-Forwarded-For` yalnızca güvenilir vekilde okunur,
+  ham IP hiçbir yere yazılmaz, giriş hız sınırı IP / kullanıcı adı / kombinasyon
+  olmak üzere üç ayrı sayaçla uygulanır.
 - **CSRF:** durum değiştiren her istek `Origin` + `Sec-Fetch-Site` ve imzalı
   senkronizasyon jetonu ile korunur; jeton hiçbir tarayıcı deposuna yazılmaz.
 - **Hız sınırlayıcı** üretimde Postgres'te paylaşılır; yapılandırma eksikse
