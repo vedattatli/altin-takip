@@ -1,5 +1,7 @@
 import { requireProduct } from "@/domain/catalog";
 import { isSnapshotStale, type PriceQuote, type PriceSnapshot } from "@/prices/types";
+import { validateUsableQuote } from "@/prices/validate";
+import { AMOUNT_TOO_LARGE_MESSAGE, LedgerAmountError, MAX_AMOUNT } from "./amounts";
 import { dec, roundMoney, toDecimalString, ZERO, type Dec } from "./decimal";
 import { instantMs } from "./time";
 import type {
@@ -9,8 +11,10 @@ import type {
   HoldingView,
   LedgerEntry,
   PnlLabelKind,
+  PortfolioState,
   ProductPosition,
   ValuationCoverage,
+  ValuationStatus,
 } from "./types";
 
 /**
@@ -129,6 +133,10 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
     if (entry.kind === "BUY" || entry.kind === "OPENING_BALANCE") {
       running.quantity = running.quantity.plus(quantity);
       running.cost = running.cost.plus(dec(entry.totalPaid ?? "0"));
+      // Birikimli miktar/maliyet de veritabanı sütun kapasitesini (12 tam basamak) aşamaz.
+      if (running.quantity.greaterThanOrEqualTo(MAX_AMOUNT) || running.cost.greaterThanOrEqualTo(MAX_AMOUNT)) {
+        throw new LedgerAmountError(AMOUNT_TOO_LARGE_MESSAGE);
+      }
       if (entry.costBasisOrigin === "ACTUAL") running.holding.actual = true;
       if (entry.costBasisOrigin === "ESTIMATED") running.holding.estimated = true;
       if (entry.costBasisOrigin === "MARKET_BASELINE") running.holding.baseline = true;
@@ -149,6 +157,9 @@ export function replayProduct(entries: readonly LedgerEntry[], productId: string
       ? running.cost
       : roundMoney(running.cost.times(quantity).div(running.quantity));
     running.realized = running.realized.plus(dec(entry.netProceeds ?? "0").minus(removed));
+    if (running.realized.abs().greaterThanOrEqualTo(MAX_AMOUNT)) {
+      throw new LedgerAmountError(AMOUNT_TOO_LARGE_MESSAGE);
+    }
     // Satılan miktarın maliyeti havuzun o andaki kökenlerine dayanır; tarihsel olarak korunur.
     running.realizedOrigins.actual ||= running.holding.actual;
     running.realizedOrigins.estimated ||= running.holding.estimated;
@@ -234,19 +245,15 @@ export const PNL_LABELS: Record<PnlLabelKind, string> = {
 };
 
 export const PARTIAL_VALUATION_LABEL = "Kısmi değerleme";
+export const PRICE_UNAVAILABLE_LABEL = "Fiyat verisi kullanılamıyor";
 
+/** Kullanılabilir quote: MERKEZİ doğrulama (src/prices/validate.ts). Aksi hâlde null. */
 function usableQuote(snapshot: PriceSnapshot | null, productId: string, now: number): PriceQuote | null {
-  if (!snapshot || snapshot.status === "unavailable") return null;
-  if (isSnapshotStale(snapshot, now)) return null;
-  const quote = snapshot.quotes[productId];
-  if (!quote || quote.status !== "ok") return null;
-  if (!dec(quote.liquidationPrice).greaterThan(0) || !dec(quote.replacementPrice).greaterThan(0)) {
-    return null;
-  }
-  if (dec(quote.replacementPrice).lessThan(dec(quote.liquidationPrice))) return null;
-  return quote;
+  const result = validateUsableQuote(snapshot, snapshot?.quotes[productId], productId, now);
+  return result.ok ? result.quote : null;
 }
 
+/** Sağlayıcı META durumu (kaynağa ulaşıldı mı, meta bayat mı). Değerleme kararı için valuationStatus kullanılır. */
 export function summaryPriceStatus(
   snapshot: PriceSnapshot | null,
   now: number,
@@ -259,6 +266,11 @@ export function summaryPriceStatus(
 export const EMPTY_SUMMARY: AccountingSummary = {
   holdings: [],
   positionCount: 0,
+  activePositionCount: 0,
+  ledgerEntryCount: 0,
+  hasLedgerActivity: false,
+  portfolioState: "NEVER_USED",
+  valuationStatus: "empty",
   totalRemainingCostBasis: "0",
   totalPureGoldGrams: "0",
   totalLiquidationValue: "0",
@@ -280,6 +292,11 @@ export const EMPTY_SUMMARY: AccountingSummary = {
   priceStatus: "unavailable",
 };
 
+export interface ValuationOptions {
+  /** Defterdeki toplam kayıt sayısı (ACTIVE + VOID + REPLACED). Verilmezse pozisyon satırlarından türetilir. */
+  ledgerEntryCount?: number;
+}
+
 /**
  * Pozisyonları güncel fiyatla değerler.
  *
@@ -290,13 +307,15 @@ export const EMPTY_SUMMARY: AccountingSummary = {
  *
  * Fiyat yoksa / geçersizse / bayatsa değerleme HESAPLANMIŞ GİBİ gösterilmez.
  * Başka ürünün fiyatından veya gram dönüşümünden tahmin YAPILMAZ. Bazı ürünlerin
- * fiyatı yoksa toplamlar KISMİDİR (valuationCoverage = "partial"); gerçekleşmiş K/Z
- * fiyattan bağımsızdır ve her zaman tamdır.
+ * fiyatı yoksa toplamlar KISMİDİR (valuationStatus = "partial"); hiçbirinin fiyatı
+ * yoksa "none" (arayüz "Fiyat verisi kullanılamıyor" gösterir, 0 TL göstermez).
+ * Gerçekleşmiş K/Z fiyattan bağımsızdır ve her zaman tamdır.
  */
 export function valuePositions(
   positions: Iterable<ProductPosition>,
   snapshot: PriceSnapshot | null,
   now: number = Date.now(),
+  options: ValuationOptions = {},
 ): AccountingSummary {
   const holdings: HoldingView[] = [];
   let totalCost = ZERO;
@@ -310,8 +329,12 @@ export function valuePositions(
   let unpricedCount = 0;
   let holdingFlag = false;
   let realizedFlag = false;
+  let positionRows = 0;
+  let activeEntries = 0;
 
   for (const position of positions) {
+    positionRows += 1;
+    activeEntries += position.activeTransactionCount;
     const product = requireProduct(position.productId);
     const quantity = dec(position.quantity);
     const cost = dec(position.remainingCostBasis);
@@ -381,11 +404,21 @@ export function valuePositions(
   const openCount = pricedCount + unpricedCount;
   const coverage: ValuationCoverage =
     openCount === 0 || pricedCount === 0 ? "none" : unpricedCount === 0 ? "full" : "partial";
+  const valuationStatus: ValuationStatus =
+    openCount === 0 ? "empty" : pricedCount === 0 ? "none" : unpricedCount === 0 ? "full" : "partial";
+  const ledgerEntryCount = Math.max(options.ledgerEntryCount ?? 0, activeEntries);
+  const hasLedgerActivity = ledgerEntryCount > 0 || positionRows > 0;
+  const portfolioState: PortfolioState = openCount > 0 ? "OPEN" : hasLedgerActivity ? "CLOSED" : "NEVER_USED";
   const anyEstimatedOrBaseline = holdingFlag || realizedFlag;
 
   return {
     holdings,
     positionCount: openCount,
+    activePositionCount: openCount,
+    ledgerEntryCount,
+    hasLedgerActivity,
+    portfolioState,
+    valuationStatus,
     totalRemainingCostBasis: toDecimalString(totalCost),
     totalPureGoldGrams: toDecimalString(totalPureGrams),
     totalLiquidationValue: toDecimalString(totalLiquidation),
@@ -410,7 +443,7 @@ export function valuePositions(
   };
 }
 
-/** Defterden özet: oynat + değerle. */
+/** Defterden özet: oynat + değerle. Defter kayıt sayısı (VOID/REPLACED dâhil) portföy durumuna girer. */
 export function buildAccountingSummary(
   entries: readonly LedgerEntry[],
   snapshot: PriceSnapshot | null,
@@ -418,9 +451,17 @@ export function buildAccountingSummary(
 ): AccountingSummary {
   const positions = replayLedger(entries);
   if (positions.size === 0) {
-    return { ...EMPTY_SUMMARY, snapshot, priceStatus: summaryPriceStatus(snapshot, now) };
+    const hasLedgerActivity = entries.length > 0;
+    return {
+      ...EMPTY_SUMMARY,
+      ledgerEntryCount: entries.length,
+      hasLedgerActivity,
+      portfolioState: hasLedgerActivity ? "CLOSED" : "NEVER_USED",
+      snapshot,
+      priceStatus: summaryPriceStatus(snapshot, now),
+    };
   }
-  return valuePositions(positions.values(), snapshot, now);
+  return valuePositions(positions.values(), snapshot, now, { ledgerEntryCount: entries.length });
 }
 
 /** Belirli bir ürün için satılabilir miktar (aktif kayıtlar; isteğe bağlı bir kayıt hariç). */

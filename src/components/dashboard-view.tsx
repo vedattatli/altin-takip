@@ -9,6 +9,7 @@ import {
   dec,
   PARTIAL_VALUATION_LABEL,
   PNL_LABELS,
+  PRICE_UNAVAILABLE_LABEL,
   type HoldingView,
 } from "@/domain/accounting";
 import {
@@ -22,7 +23,7 @@ import { usePortfolio } from "@/state/portfolio-store";
 import { PriceSourceLine } from "./price-source-line";
 import { Card, DeltaValue, EmptyState, SectionTitle, cx } from "./ui";
 
-const PRICE_UNAVAILABLE = "Fiyat verisi kullanılamıyor";
+const PRICE_UNAVAILABLE = PRICE_UNAVAILABLE_LABEL;
 
 function StatCard({
   label,
@@ -130,8 +131,18 @@ function HoldingRow({ holding }: { holding: HoldingView }) {
 }
 
 export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: () => void }) {
-  const { summary, snapshot, status, error, isOnline, repository, refreshPrices, portfolio } =
-    usePortfolio();
+  const {
+    summary,
+    snapshot,
+    status,
+    error,
+    isOnline,
+    repository,
+    refreshPrices,
+    portfolio,
+    lastSyncedAt,
+    syncStatus,
+  } = usePortfolio();
 
   const base = addHref ?? "/islemler";
   const actionButtons = onAdd ? (
@@ -177,20 +188,32 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
     );
   }
 
-  const isEmpty = summary.positionCount === 0;
-  const priceOk = summary.priceStatus === "ok";
-  // Bazı ürünlerin fiyatı yoksa toplamlar yalnızca fiyatı bulunan varlıkları kapsar (KISMİ).
-  const partial = !isEmpty && priceOk && summary.valuationCoverage === "partial";
+  /*
+   * Üç ayrı durum:
+   *   NEVER_USED : hiç işlem yok → 0 TL ve "Henüz altın eklenmedi"
+   *   CLOSED     : geçmiş işlem var, açık pozisyon yok → gerçekleşmiş K/Z korunur, "Açık pozisyonunuz bulunmuyor"
+   *   OPEN       : açık pozisyon var → değerleme KAPSAMA göre (full / partial / none)
+   * Değerleme kararı sağlayıcı meta durumuna değil, eldeki pozisyonlar için gerçekten
+   * kullanılabilir quote kapsamına (valuationStatus) göre verilir.
+   */
+  const portfolioState = summary.portfolioState;
+  const isNeverUsed = portfolioState === "NEVER_USED";
+  const isClosed = portfolioState === "CLOSED";
+  const isOpen = portfolioState === "OPEN";
+  const isEmpty = !isOpen;
+  const noPrices = isOpen && summary.valuationStatus === "none";
+  const partial = isOpen && summary.valuationStatus === "partial";
+  const priceOk = !noPrices;
   const partialSuffix = partial ? " (kısmi)" : "";
   const coverageText = partial
     ? `${PARTIAL_VALUATION_LABEL}: yalnızca fiyatı bulunan ${summary.pricedPositionCount}/${summary.positionCount} varlığın toplamı`
     : null;
-  // Portföy boşsa bütün değerler 0 TL gösterilir; fiyat yoksa ve pozisyon varsa "kullanılamıyor".
-  const valuation = (value: string) => (isEmpty || priceOk ? formatMoney(value) : PRICE_UNAVAILABLE);
+  // Açık pozisyon yoksa değer 0 TL'dir; açık pozisyon var ama hiç kullanılabilir fiyat yoksa "kullanılamıyor" (0 TL DEĞİL).
+  const valuation = (value: string) => (noPrices ? PRICE_UNAVAILABLE : formatMoney(value));
   const pnlText = PNL_LABELS[summary.pnlLabel];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-portfolio-state={portfolioState} data-valuation-status={summary.valuationStatus}>
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
           {portfolio?.name ?? "Portföyüm"}
@@ -200,6 +223,16 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           göre hesaplanır. Maliyet yöntemi: ürün bazlı hareketli ağırlıklı ortalama.
         </p>
       </div>
+
+      {isClosed ? (
+        <div
+          className="rounded-[var(--radius)] border border-line bg-surface-2 px-3.5 py-3 text-sm text-muted"
+          data-testid="portfolio-closed"
+        >
+          <span className="font-semibold text-ink">Açık pozisyonunuz bulunmuyor.</span> Geçmiş işlemleriniz ve
+          gerçekleşmiş K/Z kayıtlarınız korunuyor.
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
@@ -256,7 +289,11 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
             )}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Gerçekleşmiş + gerçekleşmemiş · {pnlText}
+            {noPrices
+              ? `Gerçekleşmemiş K/Z hesaplanamadı; gerçekleşmiş K/Z ${formatSignedMoney(summary.totalRealizedPnl)}`
+              : isClosed
+                ? "Açık pozisyon yok; toplam K/Z gerçekleşmiş K/Z'ye eşittir"
+                : `Gerçekleşmiş + gerçekleşmemiş · ${pnlText}`}
             {partial ? " · kesin toplam değildir (fiyatı olmayan varlıklar hariç)" : ""}
           </p>
         </Card>
@@ -274,10 +311,14 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         </div>
       ) : null}
 
-      {!isEmpty && !priceOk ? (
-        <div className="rounded-[var(--radius)] border border-negative-soft bg-negative-soft px-3.5 py-3 text-sm text-negative">
-          {PRICE_UNAVAILABLE}: fiyat yok, geçersiz veya bayat. Güncel değer ve gerçekleşmemiş K/Z
-          hesaplanmış gibi gösterilmez; başka ürünün fiyatından tahmin yapılmaz.
+      {noPrices ? (
+        <div
+          className="rounded-[var(--radius)] border border-negative-soft bg-negative-soft px-3.5 py-3 text-sm text-negative"
+          data-testid="valuation-none"
+        >
+          {PRICE_UNAVAILABLE}: elinizdeki ürünler için fiyat yok, geçersiz veya bayat. Güncel değer ve
+          gerçekleşmemiş K/Z hesaplanmış gibi gösterilmez; başka ürünün fiyatından tahmin yapılmaz.
+          Elde kalan maliyet ve gerçekleşmiş K/Z fiyattan bağımsızdır.
         </div>
       ) : summary.hasMissingPrices ? (
         <div
@@ -295,18 +336,25 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         <SectionTitle
           title="Varlıklarım"
           description={
-            isEmpty
-              ? undefined
-              : `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
+            isOpen
+              ? `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
+              : isClosed
+                ? "Açık pozisyon yok"
+                : undefined
           }
-          action={isEmpty ? undefined : actionButtons}
+          action={isNeverUsed ? undefined : actionButtons}
         />
         <Card>
-          {isEmpty ? (
+          {isNeverUsed ? (
             <EmptyState
               title="Henüz altın eklenmedi"
               description="Portföyünüz boş. Mevcut altınınızı ekleyin veya ilk alışınızı kaydedin; elde kalan maliyet, bozdurma değeri ve kâr/zarar otomatik hesaplansın."
               action={actionButtons}
+            />
+          ) : isClosed ? (
+            <EmptyState
+              title="Açık pozisyonunuz bulunmuyor"
+              description="Geçmiş işlemleriniz ve gerçekleşmiş K/Z kayıtlarınız korunuyor. Yeni bir alış veya mevcut altın ekleyerek takibe devam edebilirsiniz."
             />
           ) : (
             <ul data-testid="holdings-list">
@@ -326,6 +374,8 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         dataStatusLabel={repository.label}
         isOnline={isOnline}
         onRefresh={() => void refreshPrices()}
+        lastSyncedAt={lastSyncedAt}
+        syncStatus={syncStatus}
       />
       <p className="text-xs leading-relaxed text-subtle">
         Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girdiğiniz verilere ve

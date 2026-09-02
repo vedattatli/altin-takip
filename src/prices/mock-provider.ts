@@ -63,6 +63,8 @@ export interface MockPriceProviderOptions {
   basePricePerPureGram?: number;
   /** true ise sağlayıcı hata veriyormuş gibi davranır (fallback yapılmadığını doğrulamak için). */
   simulateOutage?: boolean;
+  /** Bu ürünler için fiyat ÜRETİLMEZ (kısmi / hiç fiyat yok senaryoları). Uydurma fiyat yoktur. */
+  unavailableProducts?: readonly string[];
 }
 
 export class MockPriceProvider implements PriceProvider {
@@ -71,11 +73,13 @@ export class MockPriceProvider implements PriceProvider {
   private readonly now: () => number;
   private readonly basePrice: number;
   private readonly simulateOutage: boolean;
+  private readonly unavailable: Set<string>;
 
   constructor(options: MockPriceProviderOptions = {}) {
     this.now = options.now ?? (() => Date.now());
     this.basePrice = options.basePricePerPureGram ?? BASE_PURE_GOLD_TRY_PER_GRAM;
     this.simulateOutage = options.simulateOutage ?? false;
+    this.unavailable = new Set(options.unavailableProducts ?? []);
   }
 
   /** Belirli bir an için has altın gram orta fiyatı (test verisi). */
@@ -107,7 +111,7 @@ export class MockPriceProvider implements PriceProvider {
 
     for (const productId of productIds) {
       const product = getProduct(productId);
-      if (!product) {
+      if (!product || this.unavailable.has(productId)) {
         missing += 1;
         continue;
       }

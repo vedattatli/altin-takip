@@ -24,6 +24,10 @@
 | Pozisyon projeksiyonunun elle değiştirilmesi | `portfolio_positions`'a service_role bile yazamaz; yalnızca RPC yeniden oluşturur |
 | Sahte başlangıç fiyatı (MARKET_BASELINE) | İstemci fiyatı yok sayılır; sunucu sağlayıcısından alınır, anlık görüntü doğrulanır (makas/zaman/para birimi/ürün) ve değiştirilemez |
 | RPC dışı doğrudan tablo yazımı (yanlış sunucu kodu) | `service_role` `transactions` / `price_snapshots` / `portfolio_positions` tablolarına yazamaz; yalnızca SECURITY DEFINER RPC (0011) |
+| Sürüm sinyalinin elle değiştirilmesi | `portfolios.ledger_revision` tetikleyiciyle korunur; yalnızca defter RPC'leri artırır (0012) |
+| Sayısal taşma (çok küçük miktar × büyük tutar) | Tutarlar, türetilmiş birim değerler ve birikimli pozisyon 12 tam basamakla sınırlı; TS ve SQL'de P0004 → 400 |
+| Kontrolsüz cast (22P02 → 500) | Sayısal/UUID alanlar sıkı desenle ayrıştırılır; BFF geçersiz kimlik biçimini 404'e çevirir |
+| Staging secret sızıntısı | `.env.staging.local` ve `.staging/` gitignore + paket dışı; betikler değer yazdırmaz; NEXT_PUBLIC_ taraması |
 | Finansal kaydın sessizce silinmesi/değiştirilmesi | Defter append-only; hard delete ve finansal alan güncellemesi tetikleyiciyle reddedilir |
 | Uzun ömürlü admin oturumu | Admin için tercihten bağımsız 8 saat / 15 dk; kalıcı işaretli admin oturumu reddedilir |
 
@@ -247,7 +251,7 @@ Kayıtlar değiştirilemez ve silinemez: `UPDATE`/`DELETE` politikası tanımlan
 
 | Sınır | Etki | Plan |
 | --- | --- | --- |
-| Uzak (production) Supabase projesi henüz yok | Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında** (CLI + Docker, `supabase db reset` + 124 pgTAP + gerçek JWT sondası) doğrulandı; uzak projede henüz çalıştırılmadı | Uzak proje açıldığında aynı komutlar |
+| Uzak (production) Supabase projesi yok; staging kurulumu kullanıcı girişine bağlı | Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında** (CLI + Docker, `supabase db reset` + 184 pgTAP + gerçek JWT sondası) doğrulandı | Staging araçları hazır (docs/STAGING.md): `staging:doctor` / `migrate` / `smoke` / `test:staging` |
 | `SupabaseAuthBackend` uçtan uca yalnızca yerel yığına karşı sondalandı | Oturum rotation/renewal SQL yolu birim ve pgTAP düzeyinde doğrulandı; tarayıcı E2E testleri yerel arka uçla koşar | Uzak projede entegrasyon testi |
 | CSP script-src satır içi koda izin verir | Next.js bootstrap script'i için gereklidir | Nonce tabanlı CSP (middleware ile) |
 | `purge_expired_sessions()` / `login_rate_limit_cleanup()` otomatik çalışmıyor | Süresi geçen satırlar birikir (erişim yine reddedilir) | `supabase/setup/maintenance-cron.sql` idempotent pg_cron kurulumu sağlar; **çalıştığı iddia edilmez**, panelden kurulmalı ve `cron.job_run_details` ile doğrulanmalıdır |
@@ -561,10 +565,10 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
 ### 22.5 Doğrulama durumu (dürüst)
 
 - `npm run test:db`: yerel Supabase yığınında (CLI 2.116, Docker) `supabase db
-  reset` ile 0001→0010 temiz uygulandı; **124 pgTAP testinin tamamı geçti**.
-  0006 iki kez uygulanarak idempotentlik doğrulandı.
+  reset` ile 0001→0012 temiz uygulandı; **184 pgTAP testinin tamamı geçti**.
+  0006, 0011 ve 0012 iki kez uygulanarak idempotentlik doğrulandı.
 - `npm run test:data-api`: gerçek anon anahtarı ve yerel JWT secret'ıyla
-  imzalanmış authenticated JWT ile PostgREST üzerinden 21 beklenti karşılandı
+  imzalanmış authenticated JWT ile PostgREST üzerinden 46 beklenti karşılandı
   (okuma RLS kapsamlı, yazma/RPC 401/403 `42501`, BFF yolu çalışır).
 - Uzak production Supabase projesi **oluşturulmadı**; bu sonuçlar yerel yığına aittir.
 
@@ -615,6 +619,20 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
   içerik `409 idempotency_conflict`. Anahtar kullanıcı kapsamlıdır.
 - **Girdi sertleştirme:** miktar/tutar dizeleri sıkı desenle ayrıştırılır; NaN, Infinity,
   bilimsel gösterim, aşırı büyük değer ve fazla ondalık reddedilir; birim istemciden alınmaz.
-- **Doğrulama durumu:** yerel Supabase yığınında 156 pgTAP testi, gerçek JWT sondası
-  (38 beklenti), `npm run accounting:smoke` (gerçek RPC yolu) ve `npm run accounting:verify`
-  geçti. Uzak proje yok.
+- **Doğrulama durumu:** yerel Supabase yığınında 184 pgTAP testi, gerçek JWT sondası
+  (46 beklenti; hesap silme cascade'i gerçek auth ucuyla kanıtlanır), `npm run accounting:smoke`
+  (gerçek RPC yolu) ve `npm run accounting:verify` geçti. Uzak proje için bkz. docs/STAGING.md.
+
+## 25. Senkronizasyon ucu ve staging (Sprint 2)
+
+- `GET /api/portfolio/version`: yalnızca oturumdaki kullanıcının sürümü; hedef `userId`
+  alınmaz; salt okunur (CSRF gerektirmez); `Cache-Control: private, no-store`, `Vary: Cookie`;
+  ETag eşleşince gövdesiz 304. Supabase access token tarayıcıya çıkmaz; Realtime kullanılmaz.
+- Hesap silme cascade'i gerçek `auth.admin.deleteUser` ucuyla kanıtlanır: silme sonrası
+  `profiles`, `portfolios`, `transactions`, `price_snapshots`, `portfolio_positions`,
+  `app_sessions`, `user_preferences` satırları 0 (pgTAP §14 + Data API sondası). Doğrudan
+  hard delete hâlâ reddedilir; sonda temizliği başarısız silmeyi sessizce yok saymaz.
+- Staging: gerçek secretlar `.env.staging.local`'da (gitignore, paket dışı); araçlar değer
+  yazdırmaz; `STAGING_ENVIRONMENT=staging`, sabit https `APP_ORIGIN`, demo modu kapalı,
+  production ref koruması ve NEXT_PUBLIC_ secret taraması **fail closed** uygulanır. Test
+  hesaplarının parolaları yalnızca `.staging/accounts.local.json` (0600) dosyasındadır.

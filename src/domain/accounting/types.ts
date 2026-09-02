@@ -196,6 +196,8 @@ export interface PriceSnapshotInput {
   isRealMarketData: boolean;
   providerTimestamp: string;
   fetchedAt: string;
+  /** Sağlayıcının tazelik süresi (ms). Verilirse SQL doğrulaması da aynı sınırı uygular. */
+  staleAfterMs?: number;
 }
 
 /** Bir işlem için hesaplanmış tutarlar (deftere yazılan değerler). */
@@ -290,10 +292,35 @@ export type PnlLabelKind = "COST_BASIS" | "SINCE_TRACKING_START";
 /** full: bütün açık pozisyonlar fiyatlı; partial: bir kısmı; none: hiçbiri (veya açık pozisyon yok). */
 export type ValuationCoverage = "full" | "partial" | "none";
 
+/**
+ * Değerleme durumu — yalnızca sağlayıcı meta durumuna değil, ELDEKİ pozisyonlar için
+ * gerçekten kullanılabilir quote kapsamına göre hesaplanır.
+ *   empty   : açık pozisyon yok (değerleme gerekmez)
+ *   full    : bütün açık pozisyonlar fiyatlı
+ *   partial : bir kısmı fiyatlı (kısmi toplam)
+ *   none    : açık pozisyon var, hiçbiri fiyatlı değil ("Fiyat verisi kullanılamıyor")
+ */
+export type ValuationStatus = "empty" | "full" | "partial" | "none";
+
+/**
+ * Portföy durumu.
+ *   NEVER_USED : hiç finansal işlem yok
+ *   CLOSED     : geçmiş işlem / gerçekleşmiş K/Z var, açık pozisyon yok
+ *   OPEN       : en az bir açık pozisyon var
+ */
+export type PortfolioState = "NEVER_USED" | "CLOSED" | "OPEN";
+
 export interface AccountingSummary {
   holdings: HoldingView[];
   /** Kalan miktarı sıfırdan büyük ürün sayısı. */
   positionCount: number;
+  /** positionCount ile aynı; açık semantik için. */
+  activePositionCount: number;
+  /** Defterdeki kayıt sayısı (ACTIVE + VOID + REPLACED). Bilinmiyorsa pozisyon satırlarından türetilir. */
+  ledgerEntryCount: number;
+  hasLedgerActivity: boolean;
+  portfolioState: PortfolioState;
+  valuationStatus: ValuationStatus;
   totalRemainingCostBasis: string;
   totalPureGoldGrams: string;
   /** YALNIZCA fiyatı bilinen açık pozisyonların toplamı (kısmi değerlemede eksik). */

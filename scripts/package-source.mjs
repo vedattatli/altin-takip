@@ -39,6 +39,7 @@ export const EXCLUDED_DIRS = new Set([
   ".next",
   ".data",
   ".tmp",
+  ".staging",
   "dist",
   "test-results",
   "playwright-report",
@@ -58,6 +59,8 @@ export function isExcludedFile(name) {
   if (name === ".DS_Store" || name === "Thumbs.db") return true;
   if (name.endsWith(".tsbuildinfo")) return true;
   if (name.endsWith(".log")) return true;
+  // Gerçek ortam dosyaları (staging dâhil) asla pakete girmez; yalnızca *.example kalır.
+  if (name.startsWith(".env") && !name.endsWith(".example")) return true;
   // .env.example DIŞINDAKİ tüm .env dosyaları dışlanır.
   if (name.startsWith(".env") && name !== ".env.example") return true;
   return false;
@@ -108,6 +111,8 @@ export const FORBIDDEN_PATH_PATTERNS = [
   /(^|\/)coverage(\/|$)/,
   /\.tsbuildinfo$/,
   /(^|\/)\.env(\.(local|production|development))?$/,
+  /(^|\/)\.env\.[^/]*local$/,
+  /(^|\/)\.staging(\/|$)/,
 ];
 
 /** Değeri DOLU olan ortam değişkeni satırı arar. Boş anahtar (KEY=) normaldir. */

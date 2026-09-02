@@ -14,7 +14,7 @@ import {
 import { LedgerAmountError } from "@/domain/accounting/amounts";
 import { GOLD_PRODUCTS } from "@/domain/catalog";
 import type { PortfolioMeta } from "@/domain/types";
-import { getPriceProvider, isSnapshotStale, type PriceSnapshot } from "@/prices";
+import { getPriceProvider, validateUsableQuote, type PriceSnapshot } from "@/prices";
 import { ownScope, type UserActor } from "@/server/auth/actor";
 import {
   IdempotencyConflictError,
@@ -24,6 +24,7 @@ import {
   PortfolioNotProvisionedError,
   type AuthBackend,
   type LedgerAppendResult,
+  type LedgerRevision,
   type LedgerReplaceResult,
   type LedgerVoidResult,
 } from "@/server/auth/backend";
@@ -53,6 +54,7 @@ import {
 
 const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
 const VOID_REASON_MAX = 140;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface PortfolioOverview {
   portfolio: PortfolioMeta;
@@ -109,11 +111,22 @@ export class UserPortfolioService {
    */
   async getSummary(actor: UserActor): Promise<AccountingSummary> {
     try {
-      const [positions, snapshot] = await Promise.all([
+      const [positions, snapshot, ledger] = await Promise.all([
         this.backend.listPositions(ownScope(actor)),
         this.currentSnapshot(),
+        this.backend.listLedger(ownScope(actor)),
       ]);
-      return valuePositions(positions, snapshot, this.now());
+      // Defter kayıt sayısı portföy durumunu (NEVER_USED / CLOSED / OPEN) belirler.
+      return valuePositions(positions, snapshot, this.now(), { ledgerEntryCount: ledger.length });
+    } catch (error) {
+      this.toAppError(error);
+    }
+  }
+
+  /** Defter sürümü: cihazlar arası senkronizasyon sinyali. Salt okuma. */
+  async getLedgerRevision(actor: UserActor): Promise<LedgerRevision> {
+    try {
+      return await this.backend.getLedgerRevision(ownScope(actor));
     } catch (error) {
       this.toAppError(error);
     }
@@ -144,9 +157,10 @@ export class UserPortfolioService {
    */
   async baselineSnapshotFor(productId: string): Promise<PriceSnapshotInput | null> {
     const snapshot = await this.currentSnapshot();
-    if (snapshot.status === "unavailable" || isSnapshotStale(snapshot, this.now())) return null;
-    const quote = snapshot.quotes[productId];
-    if (!quote || quote.status !== "ok") return null;
+    // MERKEZİ quote doğrulaması (ürün/sağlayıcı/piyasa/zaman); değerleme ile aynı kurallar.
+    const usable = validateUsableQuote(snapshot, snapshot.quotes[productId], productId, this.now());
+    if (!usable.ok) return null;
+    const quote = usable.quote;
     const input: PriceSnapshotInput = {
       productId,
       liquidationPrice: quote.liquidationPrice,
@@ -158,8 +172,14 @@ export class UserPortfolioService {
       isRealMarketData: snapshot.provider.isRealMarketData,
       providerTimestamp: quote.providerTimestamp,
       fetchedAt: quote.fetchedAt,
+      staleAfterMs: snapshot.provider.staleAfterMs,
     };
     return validatePriceSnapshotInput(input, productId, this.now()) === null ? input : null;
+  }
+
+  /** Kimlik biçimi geçersizse kayıt "yok" sayılır (404); veritabanına kontrolsüz cast gitmez. */
+  private assertEntryId(entryId: string): void {
+    if (!UUID_PATTERN.test(entryId)) throw notFound("İşlem bulunamadı.");
   }
 
   /**
@@ -216,6 +236,7 @@ export class UserPortfolioService {
       typeof rawReason === "string" && rawReason.trim() !== ""
         ? rawReason.trim().slice(0, VOID_REASON_MAX)
         : "Kullanıcı iptal etti";
+    this.assertEntryId(entryId);
     try {
       return await this.backend.voidLedgerEntry(ownScope(actor), entryId, reason);
     } catch (error) {
@@ -225,6 +246,7 @@ export class UserPortfolioService {
 
   /** "Düzenle": eski kayıt REPLACED olur, yerine yeni kayıt eklenir; tek işlem. */
   async replaceTransaction(actor: UserActor, entryId: string, raw: unknown): Promise<LedgerReplaceResult> {
+    this.assertEntryId(entryId);
     const request = await this.parseCommand(raw);
     try {
       return await this.backend.replaceLedgerEntry(ownScope(actor), entryId, request);

@@ -1,5 +1,22 @@
-import { dec, roundMoney, toDecimalString, ZERO, type Dec } from "./decimal";
+import { dec, MAX_INTEGER_DIGITS, roundMoney, toDecimalString, ZERO, type Dec } from "./decimal";
 import type { LedgerAmounts, LedgerAppendRequest } from "./types";
+
+/**
+ * SAYISAL ÜST SINIR — veritabanı numeric(20,8) sütunlarıyla uyumlu.
+ * Tutarlar (brüt, toplam, net) ve türetilmiş birim değerler (total/quantity, net/quantity)
+ * en fazla 12 tam basamak olabilir; aksi hâlde işlem reddedilir. Böylece TypeScript'in
+ * kabul ettiği hiçbir girdi PostgreSQL taşması üretmez. Aynı sınır `ledger_compute_amounts`
+ * içinde P0004 ile uygulanır.
+ */
+export const MAX_AMOUNT = dec(10).pow(MAX_INTEGER_DIGITS);
+export const AMOUNT_TOO_LARGE_MESSAGE =
+  "Tutar veya birim değer beklenenden çok büyük (en fazla 12 tam basamak). Miktar ve tutarı kontrol edin.";
+
+function assertWithinLimit(...values: Dec[]): void {
+  for (const value of values) {
+    if (value.abs().greaterThanOrEqualTo(MAX_AMOUNT)) throw new LedgerAmountError(AMOUNT_TOO_LARGE_MESSAGE);
+  }
+}
 
 /**
  * Tutar hesabı — defter kaydına yazılan değerler.
@@ -77,6 +94,7 @@ export function resolveLedgerAmounts(
     if (net.isNegative()) {
       throw new LedgerAmountError("Satış masrafları satış tutarını aşamaz.");
     }
+    assertWithinLimit(gross, net, fees, roundMoney(net.div(quantity)), roundMoney(gross.div(quantity)));
     return {
       quotedAcquisitionUnitPrice: null,
       effectiveAcquisitionUnitCost: null,
@@ -122,6 +140,7 @@ export function resolveLedgerAmounts(
     }
   }
 
+  assertWithinLimit(gross, totalPaid, feesOut, workmanshipOut, roundMoney(totalPaid.div(quantity)));
   return {
     quotedAcquisitionUnitPrice: quoted,
     effectiveAcquisitionUnitCost: effectiveUnit(totalPaid, quantity),

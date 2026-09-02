@@ -82,6 +82,8 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    0010_accounting_rpc.sql        -> atomik defter RPC'leri (ekle / iptal / düzelt / doğrula)
    0011_accounting_integrity.sql  -> service_role doğrudan yazma izinlerinin kaldırılması,
                                      köken ayrımı, girilen/efektif fiyat, occurred_at, snapshot kısıtları
+   0012_staging_sync.sql          -> defter sürümü (cihazlar arası senkronizasyon), sayısal sınırlar,
+                                     sıkı ayrıştırma, snapshot zaman kuralları, replace replay biçimi
    ```
 
    Bakım görevleri (pg_cron) için ayrıca bir kez `supabase/setup/maintenance-cron.sql`
@@ -94,7 +96,7 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    ```
 
    Bu komut `supabase db reset` ile 0001'den itibaren tüm migration'ları temiz bir
-   veritabanına uygular ve 156 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
+   veritabanına uygular ve 184 pgTAP testini koşar. Gerçek JWT ile Data API sondası:
 
    ```bash
    npm run test:data-api
@@ -122,7 +124,7 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0011 uygular, 156 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0012 uygular, 184 pgTAP testi koşar (Supabase CLI + Docker) |
 | `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
@@ -130,6 +132,7 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run admin:repair` | Eksik varsayılan portföy/tercih kayıtlarını idempotent biçimde tamamlar (yönetici onarımı) |
 | `npm run accounting:verify` | Defteri yeniden oynatır; türetilmiş pozisyonlar ve Postgres içi doğrulamayla karşılaştırır; tutarsızlıkta başarısız olur |
 | `npm run accounting:smoke` | Yalnızca yerel Supabase: gerçek RPC yolundan kabul örneklerini (1, 4, 8, 9, VOID/REPLACE, MARKET_BASELINE) koşar |
+| `npm run staging:doctor` / `staging:migrate` / `staging:smoke` / `staging:seed` / `staging:admin` / `staging:cleanup` / `test:staging` | Staging araçları — bkz. [docs/STAGING.md](docs/STAGING.md). Değerler yazdırılmaz; eksik yapılandırmada fail closed |
 | `npm run icons` | PWA simgelerini koddan üretir |
 | `npm run db:catalog` | Ürün kataloğunu SQL migration'ına yazar |
 
@@ -197,7 +200,9 @@ hesaplar `decimal.js` ve PostgreSQL `numeric` ile yapılır. Her mutation atomik
 (veritabanı `service_role`'e bile doğrudan tablo yazımı vermez), eşzamanlı satış eldeki miktarı
 aşamaz, aynı `clientRequestId` ile tekrar gönderim ikinci kayıt oluşturmaz. Girilen birim fiyat
 ile masraflar dâhil efektif maliyet ayrı saklanır; işlemlere isteğe bağlı saat girilerek aynı
-gün içindeki gerçek sıra korunur (Europe/Istanbul). Ayrıntı ve örnek hesaplar:
+gün içindeki gerçek sıra korunur (Europe/Istanbul). Aynı hesap telefon ve bilgisayarda
+açıkken bir cihazdaki değişiklik diğerinde sayfa yenilenmeden ≤ 15 sn içinde görünür
+(defter sürümü + hafif sürüm sorgusu). Ayrıntı ve örnek hesaplar:
 [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md).
 
 > Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girilen verilere ve
@@ -221,7 +226,7 @@ gün içindeki gerçek sıra korunur (Europe/Istanbul). Ayrıntı ve örnek hesa
   tablolara **doğrudan yazamaz** (INSERT/UPDATE/DELETE grant'ı yok); kritik
   SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal mutation
   yalnızca BFF + kontrollü RPC yolundan geçer. GRANT ve RLS iki ayrı katmandır ve
-  156 pgTAP testi + gerçek JWT sondası ile yerel Supabase'de doğrulanmıştır.
+  184 pgTAP testi + gerçek JWT sondası (46 beklenti) ile yerel Supabase'de doğrulanmıştır.
 - **Üretim sertleştirme:** `APP_ORIGIN` zorunlu (Host'tan türetilmez),
   `TRUSTED_PROXY_PROVIDER` ile `X-Forwarded-For` yalnızca güvenilir vekilde okunur,
   ham IP hiçbir yere yazılmaz, giriş hız sınırı IP / kullanıcı adı / kombinasyon
@@ -265,5 +270,6 @@ senkronize olmaz.
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Tablolar, ilişkiler, indeksler |
 | [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md) | Kabul kriterleri ve karşılık gelen testler |
 | [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md) | Hareketli ağırlıklı ortalama, açılış bakiyesi, K/Z, decimal ve iptal/düzeltme politikası |
+| [docs/STAGING.md](docs/STAGING.md) | Staging kurulumu, araçlar, telefon–PC senkronizasyonu |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sonraki sprintler |
 | [CLAUDE.md](CLAUDE.md) | Bu depoda çalışan yapay zekâ ajanları için kurallar |

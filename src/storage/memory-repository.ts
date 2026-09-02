@@ -15,6 +15,8 @@ import {
   localVoid,
   localVoidAll,
   sortLedgerDesc,
+  stripLocalEntry,
+  type LocalLedgerEntry,
   type LocalLedgerState,
 } from "./local-ledger";
 import { defaultPortfolio, nowISO, type PortfolioRepository, type RepositoryKind } from "./types";
@@ -54,10 +56,10 @@ export class MemoryPortfolioRepository implements PortfolioRepository {
   }
 
   async listLedger(): Promise<LedgerEntry[]> {
-    return sortLedgerDesc(this.state.entries);
+    return sortLedgerDesc(this.state.entries).map((entry) => stripLocalEntry(entry as LocalLedgerEntry));
   }
 
-  private commit(entries: LedgerEntry[]): void {
+  private commit(entries: LocalLedgerEntry[]): void {
     this.state = {
       entries,
       nextSequence: entries.reduce((max, entry) => Math.max(max, entry.ledgerSequence), 0) + 1,

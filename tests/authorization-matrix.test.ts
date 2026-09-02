@@ -55,6 +55,7 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/logout-all/route.ts": "authenticated",
   "portfolio/route.ts": "usable",
   "portfolio/summary/route.ts": "usable",
+  "portfolio/version/route.ts": "usable",
   "transactions/route.ts": "usable",
   "transactions/[id]/route.ts": "usable",
   "admin/users/route.ts": "admin",

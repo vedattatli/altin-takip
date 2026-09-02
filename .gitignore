@@ -33,6 +33,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!.env.staging.example
 
 # vercel
 .vercel
@@ -62,3 +63,6 @@ next-env.d.ts
 # Supabase CLI yerel çalışma dosyaları
 /supabase/.temp/
 /supabase/.branches/
+
+# Staging test hesapları (parola içerir; asla commit edilmez)
+/.staging/

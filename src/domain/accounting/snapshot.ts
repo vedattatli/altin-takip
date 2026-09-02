@@ -5,12 +5,19 @@ import type { PriceSnapshotInput } from "./types";
 /**
  * FİYAT ANLIK GÖRÜNTÜSÜ DOĞRULAMASI (MARKET_BASELINE)
  *
- * Sunucu sağlayıcısından gelen fiyat bile deftere yazılmadan önce denetlenir; aynı
- * kurallar Postgres `ledger_append` içinde uygulanır. Kural dışı anlık görüntüyle
- * takip başlangıcı OLUŞTURULMAZ; başka ürün/piyasadan sessiz ikame yapılmaz.
+ * Sunucu sağlayıcısından gelen fiyat bile deftere yazılmadan önce denetlenir; AYNI
+ * kurallar Postgres `ledger_append` içinde uygulanır (aynı girdi → aynı sonuç):
+ *  - ürün eşleşmesi, status = ok, sağlayıcı/piyasa boş değil, para birimi TL
+ *  - liquidation > 0, replacement > 0, replacement >= liquidation
+ *  - providerTimestamp ve fetchedAt geçerli; toleransı (5 dk) aşacak biçimde gelecekte değil
+ *  - providerTimestamp VE fetchedAt en fazla min(15 dk, staleAfterMs) eski
+ *    ("veri şimdi çekilmiş görünse bile sağlayıcı zamanı eskiyse" reddedilir)
+ *  - fetchedAt, providerTimestamp'tan (toleransın ötesinde) önce olamaz
+ * Kural dışı anlık görüntüyle takip başlangıcı OLUŞTURULMAZ; başka ürün/piyasadan sessiz
+ * ikame yapılmaz. Quote düzeyi (sağlayıcı meta ile) doğrulama için bkz. src/prices/validate.ts.
  */
 
-/** Anlık görüntünün takip başlangıcı için kabul edildiği en uzun yaş. */
+/** Anlık görüntünün takip başlangıcı için kabul edildiği en uzun yaş (mutlak üst sınır). */
 export const BASELINE_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
 
 export const SNAPSHOT_CURRENCY = "TRY";
@@ -24,6 +31,14 @@ function parseInstant(value: unknown): number | null {
 function positiveDecimal(value: unknown): boolean {
   if (typeof value !== "string" || !/^\d+(\.\d+)?$/.test(value)) return false;
   return dec(value).greaterThan(0);
+}
+
+/** Etkin tazelik sınırı: mutlak üst sınır ile sağlayıcı süresinin küçüğü. */
+export function baselineMaxAgeMs(staleAfterMs: number | undefined): number {
+  if (typeof staleAfterMs === "number" && Number.isFinite(staleAfterMs) && staleAfterMs > 0) {
+    return Math.min(BASELINE_SNAPSHOT_MAX_AGE_MS, staleAfterMs);
+  }
+  return BASELINE_SNAPSHOT_MAX_AGE_MS;
 }
 
 /** Geçerliyse null, aksi hâlde kullanıcıya gösterilebilir Türkçe hata. */
@@ -51,8 +66,15 @@ export function validatePriceSnapshotInput(
   if (providerTs > now + SNAPSHOT_FUTURE_TOLERANCE_MS || fetchedAt > now + SNAPSHOT_FUTURE_TOLERANCE_MS) {
     return "Fiyat zamanı gelecekte; anlık görüntü reddedildi.";
   }
-  if (now - fetchedAt > BASELINE_SNAPSHOT_MAX_AGE_MS) {
+  const maxAge = baselineMaxAgeMs(snapshot.staleAfterMs);
+  if (now - fetchedAt > maxAge) {
     return "Fiyat verisi bayat; takip başlangıcı oluşturulamaz.";
+  }
+  if (now - providerTs > maxAge) {
+    return "Sağlayıcı fiyat zamanı eski; veri yeni çekilmiş görünse bile takip başlangıcı oluşturulamaz.";
+  }
+  if (fetchedAt < providerTs - SNAPSHOT_FUTURE_TOLERANCE_MS) {
+    return "Fiyat, sağlayıcı zamanından önce çekilmiş görünüyor; veri tutarsız.";
   }
   return null;
 }

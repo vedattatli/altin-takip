@@ -401,7 +401,7 @@ export function AdminUserDetail({
           <Card className="p-3.5">
             <p className="text-xs text-subtle">Bozdurma değeri</p>
             <p className="tabular mt-1 text-base font-semibold text-ink">
-              {summary.priceStatus === "ok" || summary.positionCount === 0
+              {summary.valuationStatus !== "none"
                 ? formatMoney(summary.totalLiquidationValue)
                 : "Fiyat verisi kullanılamıyor"}
             </p>
@@ -409,7 +409,7 @@ export function AdminUserDetail({
           <Card className="p-3.5">
             <p className="text-xs text-subtle">Yeniden alım</p>
             <p className="tabular mt-1 text-base font-semibold text-ink">
-              {summary.priceStatus === "ok" || summary.positionCount === 0
+              {summary.valuationStatus !== "none"
                 ? formatMoney(summary.totalReplacementValue)
                 : "Fiyat verisi kullanılamıyor"}
             </p>

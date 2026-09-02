@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -15,6 +15,7 @@ import {
   normalizeLedgerEntry,
   occurredAtInstantISO,
   replayLedger,
+  requestFingerprint,
   replayProduct,
   resolveLedgerAmounts,
   sortLedgerDesc,
@@ -44,6 +45,7 @@ import {
   type SessionRecord,
   type SessionTouch,
   type StoredSessionSummary,
+  type LedgerRevision,
 } from "./backend";
 
 /**
@@ -110,6 +112,9 @@ interface StoredSnapshot extends PriceSnapshotRecord {
 
 interface StoredPortfolio extends PortfolioMeta {
   userId: string;
+  /** Defter sürümü: yalnızca gerçek değişiklikte artar (Supabase portfolios.ledger_revision ikizi). */
+  ledgerRevision?: number;
+  ledgerUpdatedAt?: string;
 }
 
 interface StoreShape {
@@ -746,12 +751,27 @@ export class LocalAuthBackend implements AuthBackend {
       .map(({ userId: _ignored, requestHash: _hash, ...entry }) => entry);
   }
 
+  /** Tek kanonik idempotency semantiği (domain/accounting/idempotency.ts) — demo depolarıyla aynı. */
   private static requestHashOf(request: LedgerAppendRequest): string {
-    const { clientRequestId: _id, baselineSnapshot: _snap, ...rest } = request;
-    const canonical = JSON.stringify(
-      Object.fromEntries(Object.entries(rest).sort(([a], [b]) => (a < b ? -1 : 1))),
-    );
-    return createHash("sha256").update(canonical).digest("hex");
+    return requestFingerprint(request);
+  }
+
+  /** Gerçek değişiklikte defter sürümünü artırır (replay veya başarısız işlemde ÇAĞRILMAZ). */
+  private bumpRevision(userId: string): void {
+    const portfolio = this.store.portfolios.find((row) => row.userId === userId);
+    if (!portfolio) return;
+    portfolio.ledgerRevision = (portfolio.ledgerRevision ?? 0) + 1;
+    portfolio.ledgerUpdatedAt = this.nowISO();
+  }
+
+  async getLedgerRevision(scope: DataScope): Promise<LedgerRevision> {
+    this.refresh();
+    const portfolio = this.store.portfolios.find((row) => row.userId === scope.userId);
+    if (!portfolio) throw new PortfolioNotProvisionedError(scope.userId);
+    return {
+      revision: portfolio.ledgerRevision ?? 0,
+      updatedAt: portfolio.ledgerUpdatedAt ?? portfolio.updatedAt,
+    };
   }
 
   private positionOf(entries: readonly LedgerEntry[], productId: string): ProductPosition {
@@ -872,6 +892,7 @@ export class LocalAuthBackend implements AuthBackend {
 
       if (snapshot) this.store.snapshots.push(snapshot);
       this.store.ledger.push(entry);
+      this.bumpRevision(scope.userId);
       this.write();
       return { entry: plain, position, replayed: false };
     });
@@ -905,6 +926,7 @@ export class LocalAuthBackend implements AuthBackend {
       const position = this.positionOf(projected, row.productId);
 
       Object.assign(row, candidate);
+      this.bumpRevision(scope.userId);
       this.write();
       return { entry: stripStored(row), position };
     });
@@ -930,8 +952,12 @@ export class LocalAuthBackend implements AuthBackend {
           if (existing.replacesTransactionId !== entryId) {
             throw new IdempotencyConflictError(request.clientRequestId);
           }
+          // Replay yanıtı ilk yanıtla AYNI biçimdedir: [eski ürün pozisyonu, (farklıysa) yeni ürün pozisyonu].
           const replayed = this.replayResult(scope.userId, request)!;
-          return { voided: stripStored(row), entry: replayed.entry, positions: [replayed.position] };
+          const ledger = this.userLedger(scope.userId);
+          const positions = [this.positionOf(ledger, row.productId)];
+          if (existing.productId !== row.productId) positions.push(this.positionOf(ledger, existing.productId));
+          return { voided: stripStored(row), entry: replayed.entry, positions };
         }
       }
 
@@ -962,6 +988,7 @@ export class LocalAuthBackend implements AuthBackend {
       Object.assign(row, replaced);
       if (snapshot) this.store.snapshots.push(snapshot);
       this.store.ledger.push(created);
+      this.bumpRevision(scope.userId);
       this.write();
       return { voided: stripStored(row), entry: stripStored(created), positions };
     });
@@ -980,7 +1007,10 @@ export class LocalAuthBackend implements AuthBackend {
         row.updatedAt = timestamp;
         count += 1;
       }
-      if (count > 0) this.write();
+      if (count > 0) {
+        this.bumpRevision(scope.userId);
+        this.write();
+      }
       return count;
     });
   }

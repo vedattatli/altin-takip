@@ -32,6 +32,8 @@ const testEnv = {
   APP_ORIGIN: "http://127.0.0.1:3100",
   // Test sunucusu doğrudan dinler; X-Forwarded-For yerel kabul edilir.
   TRUSTED_PROXY_PROVIDER: "local",
+  // Test sağlayıcısı bu ürünler için fiyat ÜRETMEZ: "hiç fiyat yok" ve "kısmi" durumları uçtan uca test edilir.
+  PRICE_MOCK_UNAVAILABLE_PRODUCTS: "resat-altin,hamit-altin",
 };
 
 export default defineConfig({

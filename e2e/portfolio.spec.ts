@@ -229,7 +229,9 @@ test.describe("portföy akışı", () => {
 
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/0,00/);
-    await expect(page.getByText("Henüz altın eklenmedi")).toBeVisible();
+    // Geçmiş işlem var, açık pozisyon yok: CLOSED durumu ("Henüz altın eklenmedi" DENMEZ).
+    await expect(page.getByTestId("portfolio-closed")).toBeVisible();
+    await expect(page.getByText("Henüz altın eklenmedi")).toHaveCount(0);
   });
 
   test("düzeltme eski kaydı 'Düzeltildi' olarak bırakır, yeni kayıt ekler", async ({ page }) => {

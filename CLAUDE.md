@@ -179,6 +179,19 @@ Arayüz yönlendirmesine tek başına güvenme.
   `todayISO()` kullan.
 - **Sayı ayrıştırıcıyı gevşetme:** iç boşluk ("1 2") ve belirsiz tek üçlü grup ("5.000")
   reddedilir; formlar düzeltme değerlerini `toInputDecimal` ile (virgüllü) yükler.
+- **Quote kullanılabilirliğine yalnızca `validateUsableQuote` karar verir** (`src/prices/validate.ts`);
+  değerleme, MARKET_BASELINE ve demo defteri aynı fonksiyonu kullanır. Arayüz kararları
+  `summary.valuationStatus` ve `summary.portfolioState` ile verilir; `priceStatus` yalnızca
+  sağlayıcı meta bilgisidir.
+- **Sayısal üst sınır 12 tam basamaktır** (tutar, türetilmiş birim değer, birikimli pozisyon);
+  TS (`MAX_AMOUNT`) ve SQL (`ledger_compute_amounts` / `ledger_replay_product`) birlikte
+  değiştirilmelidir.
+- **Defter sürümünü elle artırma:** `ledger_bump_revision` yalnızca defter RPC'leri içinde;
+  replay ve başarısız işlem sürümü artırmaz. Senkronizasyon `GET /api/portfolio/version`
+  polling'idir; Supabase access token tarayıcıya çıkarılmaz.
+- **Staging secretları:** `.env.staging.local` ve `.staging/` gitignore + paket dışıdır; staging
+  betikleri değer yazdırmaz; eksik yapılandırmada fail closed. Kimlik doğrulamayı kullanıcı
+  interaktif yapar (`npx supabase login`, `npx vercel login`, `gh auth login`).
 - **Her mutation `clientRequestId` kabul etsin;** aynı içerik replay, farklı içerik 409.
 - Kullanıcının gerçek işlem fiyatı esastır; piyasa fiyatı maliyeti değiştirmez.
   `MARKET_BASELINE` fiyatını yalnızca sunucu sağlayıcısından al; istemci fiyatını yok say.

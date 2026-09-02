@@ -16,6 +16,8 @@ import {
   localVoid,
   localVoidAll,
   sortLedgerDesc,
+  stripLocalEntry,
+  type LocalLedgerEntry,
   type LocalLedgerState,
 } from "./local-ledger";
 import { defaultPortfolio, nowISO, type PortfolioRepository, type RepositoryKind } from "./types";
@@ -130,7 +132,7 @@ export class IndexedDbPortfolioRepository implements PortfolioRepository {
     };
   }
 
-  private async writeEntries(entries: readonly LedgerEntry[]): Promise<void> {
+  private async writeEntries(entries: readonly LocalLedgerEntry[]): Promise<void> {
     const db = await this.db();
     const tx = db.transaction(STORE_LEDGER, "readwrite");
     const store = tx.objectStore(STORE_LEDGER);
@@ -144,7 +146,7 @@ export class IndexedDbPortfolioRepository implements PortfolioRepository {
   }
 
   async listLedger(): Promise<LedgerEntry[]> {
-    return sortLedgerDesc((await this.readState()).entries);
+    return sortLedgerDesc((await this.readState()).entries).map((entry) => stripLocalEntry(entry as LocalLedgerEntry));
   }
 
   async appendTransaction(command: LedgerCommand): Promise<LedgerAppendResult> {

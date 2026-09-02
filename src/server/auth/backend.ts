@@ -151,6 +151,12 @@ export interface LedgerVerifyResult {
   }[];
 }
 
+/** Defter sürümü: yalnızca gerçek değişiklikte artan sinyal (işlem sayısı değil). */
+export interface LedgerRevision {
+  revision: number;
+  updatedAt: string;
+}
+
 export interface AuthBackend {
   readonly id: "supabase" | "local";
   readonly label: string;
@@ -256,4 +262,6 @@ export interface AuthBackend {
   voidAllLedgerEntries(scope: DataScope, reason: string): Promise<number>;
   /** Defteri yeniden oynatıp türetilmiş pozisyonlarla karşılaştırır. */
   verifyLedger(scope: DataScope): Promise<LedgerVerifyResult>;
+  /** Kullanıcının defter sürümü (cihazlar arası senkronizasyon sinyali). Salt okuma. */
+  getLedgerRevision(scope: DataScope): Promise<LedgerRevision>;
 }

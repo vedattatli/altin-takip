@@ -307,3 +307,53 @@ gerçekleşmiş K/Z fiyattan bağımsızdır ve tamdır; toplam K/Z kesin toplam
 Gram miktarında en fazla 6 ondalık, adet ürününde yalnızca pozitif tam sayı; tutarlarda en
 fazla 4 ondalık, en fazla 12 tam basamak. Formlar düzeltme için değerleri virgüllü Türkçe
 biçimde (`toInputDecimal`) yeniden yükler; API kanonik `1234.56` dizesi alır.
+
+## 16. Merkezi quote doğrulaması
+
+Bir fiyat yalnızca `validateUsableQuote(snapshot, quote, productId, now)` kabul ederse
+kullanılır: quote mevcut ve istenen ürüne ait; `status = ok`; `liquidation > 0`,
+`replacement > 0`, `replacement >= liquidation`; `currency = TRY`; sağlayıcı ve piyasa boş
+değil ve anlık görüntünün meta bilgisiyle uyumlu; `providerTimestamp`, quote `fetchedAt` ve
+snapshot `fetchedAt` geçerli ISO; hiçbiri 5 dakikadan fazla gelecekte değil; hiçbiri
+sağlayıcının `staleAfterMs` süresinden eski değil ("veri şimdi çekilmiş görünse bile sağlayıcı
+zamanı eskiyse" bayat); `fetchedAt` `providerTimestamp`'tan (tolerans ötesinde) önce değil.
+Başka ürün veya piyasa fiyatı sessizce kullanılmaz. MARKET_BASELINE anlık görüntüsü aynı
+kuralları TypeScript (`validatePriceSnapshotInput`, `staleAfterMs` ile) ve Postgres
+(`ledger_append`, `stale_after_ms`) tarafında uygular.
+
+## 17. Değerleme ve portföy durumları
+
+| `portfolioState` | Koşul | Arayüz |
+| --- | --- | --- |
+| `NEVER_USED` | hiç defter kaydı yok | 0 TL, "Henüz altın eklenmedi" |
+| `CLOSED` | defter kaydı var, açık pozisyon yok | "Açık pozisyonunuz bulunmuyor"; gerçekleşmiş K/Z ve düğmeler görünür; toplam K/Z = gerçekleşmiş |
+| `OPEN` | en az bir açık pozisyon | değerleme `valuationStatus`'a göre |
+
+| `valuationStatus` | Anlamı | Arayüz |
+| --- | --- | --- |
+| `empty` | açık pozisyon yok | değerleme gerekmez |
+| `full` | bütün açık pozisyonlar fiyatlı | tam değerleme |
+| `partial` | bir kısmı fiyatlı | "(kısmi)" etiketi; toplamlar yalnızca fiyatı bulunanları kapsar |
+| `none` | hiçbiri fiyatlı değil | bozdurma, yeniden alım, gerçekleşmemiş ve toplam K/Z "Fiyat verisi kullanılamıyor" (0 TL değil); elde kalan maliyet ve gerçekleşmiş K/Z görünür |
+
+Bu durum sağlayıcı meta durumundan değil, eldeki pozisyonlar için gerçekten kullanılabilir
+quote kapsamından hesaplanır.
+
+## 18. Sayısal sınırlar
+
+Veritabanı sütunları `numeric(20,8)`'dir (en fazla 12 tam basamak). Tutarlar (brüt, toplam,
+net, masraf), türetilmiş birim değerler (`total/quantity`, `net/quantity`) ve **birikimli**
+pozisyon miktarı / kalan maliyet / gerçekleşmiş K/Z bu sınırı aşamaz; aşan işlem TypeScript'te
+`LedgerAmountError` (400), Postgres'te P0004 ile reddedilir. Böylece TypeScript'in kabul ettiği
+hiçbir girdi PostgreSQL taşması üretmez. Sayısal metinler sıkı desenle ayrıştırılır (bilimsel
+gösterim, NaN, boşluk, bozuk UUID → P0004; BFF geçersiz kimlik biçimini 404'e çevirir).
+
+## 19. Idempotency parmak izi ve defter sürümü
+
+- Demo depoları (bellek / IndexedDB), yerel geliştirme arka ucu ve Postgres aynı semantiği
+  uygular: aynı `clientRequestId` + aynı içerik → replay (tek finansal işlem), farklı içerik →
+  conflict. Replace işleminde replay yanıtı ilk yanıtla aynı biçimdedir: `[eski ürün pozisyonu,
+  (ürün değiştiyse) yeni ürün pozisyonu]`.
+- `portfolios.ledger_revision` yalnızca gerçek değişiklikte (ekle / iptal / düzelt / toplu
+  iptal) artar; replay ve başarısız işlem artırmaz; elle değiştirilemez. İstemci bu sürümü
+  `GET /api/portfolio/version` ile izler ve değişince defter + özeti yeniden okur.

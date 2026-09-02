@@ -97,13 +97,27 @@
 - **Doğrulama:** 416 birim testi, 156 pgTAP, gerçek JWT sondası (38), `accounting:verify`,
   `accounting:smoke`, Playwright.
 
+### Sprint 2 — uzak staging, telefon–PC senkronizasyonu, son doğruluk düzeltmeleri
+
+- **Fiyat doğrulaması merkezîleşti** (`validateUsableQuote`); `valuationStatus` ve
+  `portfolioState` ile "hiç fiyat yok" ve "tamamen satılmış" durumları ayrıldı.
+- **Idempotency eşitliği:** demo depoları sunucuyla aynı parmak izi semantiğini uygular; replace
+  replay biçimi eşitlendi.
+- **Sayısal sınırlar:** 12 tam basamak; birikimli pozisyon dâhil; sıkı ayrıştırma (P0004 → 400).
+- **Cascade kanıtı:** gerçek auth silme ucu ile 7 tablo sıfır (sonda + pgTAP).
+- **Senkronizasyon:** `portfolios.ledger_revision` + `GET /api/portfolio/version` + revision
+  polling (≤ 15 sn), `0012_staging_sync.sql`.
+- **Staging araçları:** doctor / migrate / smoke / seed / admin / cleanup / test:staging
+  (docs/STAGING.md). Dış hesaplar kullanıcı girişine bağlıdır.
+- **Doğrulama:** 437 birim testi, 184 pgTAP, gerçek JWT sondası (46), Playwright (255 geçti, 3 atlandı).
+
 ## Sprint 2 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
 kapatmaktır.
 
-1. Uzak Supabase projesi aç, `0001` → `0011` migration'larını sırayla uygula.
+1. Uzak Supabase projesi aç, `0001` → `0012` migration'larını sırayla uygula (`npm run staging:migrate`).
 2. Aynı projeye karşı `npm run test:db` mantığını (pgTAP) ve `npm run test:data-api`
    sondasını çalıştır (sonda için proje URL / anahtar / JWT secret ortam değişkenleri).
 3. `npm run admin:create` ile gerçek yönetici hesabını oluştur; gerekirse `npm run admin:repair`.

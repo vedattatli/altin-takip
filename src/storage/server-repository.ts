@@ -8,7 +8,7 @@ import type {
 } from "@/domain/accounting/types";
 import type { PortfolioMeta } from "@/domain/types";
 import { apiFetch } from "@/lib/api-client";
-import type { PortfolioRepository, RepositoryKind } from "./types";
+import type { PortfolioRepository, PortfolioVersionResult, RepositoryKind } from "./types";
 
 /**
  * Oturum açmış kullanıcının deposu.
@@ -67,5 +67,25 @@ export class ServerPortfolioRepository implements PortfolioRepository {
   async voidAll(): Promise<number> {
     const result = await apiFetch<{ voided: number }>("/api/transactions", { method: "DELETE" });
     return result?.voided ?? 0;
+  }
+
+  /** Hafif sürüm sorgusu: ETag eşleşirse gövdesiz 304 ("değişmedi"). */
+  async getVersion(etag: string | null, signal?: AbortSignal): Promise<PortfolioVersionResult> {
+    const headers = new Headers({ Accept: "application/json" });
+    if (etag) headers.set("If-None-Match", etag);
+    const response = await fetch("/api/portfolio/version", { headers, cache: "no-store", signal });
+    if (response.status === 304) return { notModified: true };
+    const payload = (await response.json().catch(() => null)) as
+      | { data?: { revision?: number | string; updatedAt?: string }; error?: string }
+      | null;
+    if (!response.ok || !payload?.data) {
+      throw new Error(payload?.error ?? `Sürüm okunamadı (${response.status}).`);
+    }
+    return {
+      notModified: false,
+      revision: Number(payload.data.revision ?? 0),
+      updatedAt: String(payload.data.updatedAt ?? ""),
+      etag: response.headers.get("etag"),
+    };
   }
 }

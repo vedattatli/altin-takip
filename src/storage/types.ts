@@ -20,6 +20,11 @@ import type { PortfolioMeta } from "@/domain/types";
  */
 export type RepositoryKind = "indexeddb" | "memory" | "server";
 
+/** Defter sürümü sorgusu sonucu (yalnızca sunucu deposu). */
+export type PortfolioVersionResult =
+  | { notModified: true }
+  | { notModified: false; revision: number; updatedAt: string; etag: string | null };
+
 export interface PortfolioRepository {
   readonly kind: RepositoryKind;
   /** Kullanıcıya gösterilecek depolama etiketi. Örn. "Bu cihaz", "Hesabınız". */
@@ -42,6 +47,11 @@ export interface PortfolioRepository {
   voidTransaction(id: string, reason: string): Promise<LedgerVoidResult>;
   /** Tüm aktif kayıtları iptal eder. Portföy kaydı korunur. */
   voidAll(): Promise<number>;
+  /**
+   * Defter sürümü (cihazlar arası senkronizasyon sinyali). Yalnızca sunucu deposunda
+   * bulunur; demo depoları tek cihazdadır.
+   */
+  getVersion?(etag: string | null, signal?: AbortSignal): Promise<PortfolioVersionResult>;
 }
 
 export function createId(): string {

@@ -48,11 +48,16 @@ export function PriceSourceLine({
   dataStatusLabel,
   isOnline,
   onRefresh,
+  lastSyncedAt = null,
+  syncStatus = "off",
 }: {
   snapshot: PriceSnapshot | null;
   dataStatusLabel: string;
   isOnline: boolean;
   onRefresh?: () => void;
+  /** Cihazlar arası son başarılı senkronizasyon (ms); sunucu deposunda dolar. */
+  lastSyncedAt?: number | null;
+  syncStatus?: "off" | "idle" | "syncing" | "paused" | "error";
 }) {
   const now = useClientClock(30_000);
   const stale = snapshot && now !== null ? isSnapshotStale(snapshot, now) : false;
@@ -82,6 +87,26 @@ export function PriceSourceLine({
             ? `${formatRelativeTime(snapshot.fetchedAt, now)}${stale ? " (bayat)" : ""}`
             : "—"}
         </span>
+
+        {syncStatus !== "off" ? (
+          <>
+            <Dot />
+            <span
+              data-testid="sync-status"
+              data-sync-status={syncStatus}
+              className={cx(syncStatus === "error" && "text-[var(--notice)]")}
+              title={lastSyncedAt ? formatDateTime(new Date(lastSyncedAt).toISOString()) : undefined}
+            >
+              Eşitleme:{" "}
+              {lastSyncedAt && now !== null
+                ? formatRelativeTime(new Date(lastSyncedAt).toISOString(), now)
+                : syncStatus === "paused"
+                  ? "duraklatıldı"
+                  : "—"}
+              {syncStatus === "error" ? " (yeniden denenecek)" : ""}
+            </span>
+          </>
+        ) : null}
 
         {onRefresh ? (
           <button

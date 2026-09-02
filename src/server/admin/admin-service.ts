@@ -122,7 +122,7 @@ export class AdminService {
       this.backend.listPositions(scope),
       getPriceProvider().getQuotes(GOLD_PRODUCTS.map((p) => p.id)),
     ]);
-    const summary = valuePositions(positions, snapshot, this.now());
+    const summary = valuePositions(positions, snapshot, this.now(), { ledgerEntryCount: ledger.length });
 
     // Denetim kaydına yalnızca hassas olmayan sayısal özet yazılır.
     await this.audit(actor, "user.portfolio_view", target, true, {

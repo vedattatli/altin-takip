@@ -14,7 +14,7 @@ Ek komutlar:
 npm run test:db
 ```
 
-(Supabase CLI + Docker; temiz veritabanına 0001→0011 uygular, 156 pgTAP testi koşar.)
+(Supabase CLI + Docker; temiz veritabanına 0001→0012 uygular, 184 pgTAP testi koşar.)
 
 ```bash
 npm run accounting:verify
@@ -285,8 +285,8 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 ## 20. Veritabanı yetki sınırı ve RLS testleri (pgTAP + gerçek JWT)
 
-`supabase/tests/rls.test.sql` — **156 test**. Çalıştırma: `npm run test:db`
-(Supabase CLI + Docker; `supabase db reset` ile 0001→0011 temiz uygulanır).
+`supabase/tests/rls.test.sql` — **184 test**. Çalıştırma: `npm run test:db`
+(Supabase CLI + Docker; `supabase db reset` ile 0001→0012 temiz uygulanır).
 
 | # | Kabul kriteri | Test |
 | --- | --- | --- |
@@ -300,7 +300,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | 20.8 | Yazma politikaları kaldırıldı, SELECT politikaları korundu | pgTAP `pg_policies` envanteri |
 | 20.9 | Provisioning tetikleyicisi ve onarım idempotent; `lock_user_portfolio` portföy oluşturmaz | pgTAP "PROVISIONING" bloğu |
 | 20.10 | Kalıcı oturum şeması; temizlik yalnızca iptal/süresi dolanı siler | pgTAP "KALICI OTURUM ŞEMASI" |
-| 20.11 | Gerçek anon anahtarı ve authenticated JWT ile PostgREST üzerinden yazma reddedilir, okuma RLS kapsamlı | `npm run test:data-api` → `scripts/data-api-probe.mjs` (21 beklenti) |
+| 20.11 | Gerçek anon anahtarı ve authenticated JWT ile PostgREST üzerinden yazma reddedilir, okuma RLS kapsamlı | `npm run test:data-api` → `scripts/data-api-probe.mjs` (46 beklenti) |
 | 20.12 | Migration metni beklenen kuralları taşır (pgTAP çalışmayan ortam için) | `tests/database-boundary.test.ts` |
 | 20.13 | GET /api/portfolio veri oluşturmaz; onarım idempotent | `tests/provisioning.test.ts` |
 | 20.14 | side/productId/NaN/negatif girdiler 400 ile reddedilir | `tests/transaction-input.test.ts` |
@@ -311,7 +311,7 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 
 > Çıkış kodları: `0` geçti, `1` başarısız, **`2` çalıştırılamadı** (CLI veya
 > Docker yok). Komut ortam uygun değilse testleri çalıştırılmış gibi
-> raporlamaz. Son koşum: yerel Supabase yığınında 156/156 geçti; uzak proje yok.
+> raporlamaz. Son koşum: yerel Supabase yığınında 184/184 geçti; uzak proje için docs/STAGING.md.
 
 ## 21. Temiz kaynak paketi
 
@@ -371,3 +371,18 @@ Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop
 | 23.12 | "1 2" ve "5.000" reddedilir; Türkçe biçimler doğru okunur; istemci-sunucu aynı sonuç | `tests/accounting-integrity.test.ts` §6; E2E "sayı girişi" |
 | 23.13 | Eski kayıtlar migration/normalizasyon sonrası doğru okunur | `tests/accounting-integrity.test.ts` §2 "eski kayıtlar"; 0011 backfill + `accounting:verify` |
 | 23.14 | 0011 idempotent; `accounting:verify` tutarsızlık 0 | `npm run test:db`; migration ikinci kez uygulanır; `npm run accounting:verify` |
+
+## 24. Staging, senkronizasyon ve son doğruluk düzeltmeleri (Sprint 2)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 24.1 | Merkezi quote doğrulaması: 2 saat eski providerTimestamp, bayat fetchedAt, başka ürün, uyuşmayan sağlayıcı/piyasa, ters makas, gelecek zaman reddedilir; 5 dk tolerans çalışır | `tests/sprint2.test.ts` §1; pgTAP §14 "Sağlayıcı zamanı 2 saat eskiyse", "stale_after_ms", "5 dakikalık" |
+| 24.2 | valuationStatus: A boş / B full / C partial / D none — D'de kartlar "Fiyat verisi kullanılamıyor", 0 TL değil; maliyet ve gerçekleşmiş K/Z görünür | `tests/sprint2.test.ts` §2; `e2e/valuation.spec.ts` |
+| 24.3 | CLOSED portföy: gerçekleşmiş K/Z ve düğmeler görünür; "Henüz altın eklenmedi" denmez | `tests/sprint2.test.ts` §3; `e2e/valuation.spec.ts` → "CLOSED" |
+| 24.4 | Yerel demo ve sunucu idempotency eşit: aynı kimlik + aynı içerik replay, farklı içerik conflict; replace replay aynı biçim (iki pozisyon) | `tests/sprint2.test.ts` §4/§4b; pgTAP §14 "Replay düzeltme" |
+| 24.5 | Sayısal sınırlar: küçük miktar × büyük tutar, brüt/birikimli taşma P0004/400; sıkı ayrıştırma (1e3, NaN, bozuk UUID) | `tests/sprint2.test.ts` §5 (özellik testi dâhil); pgTAP §14 |
+| 24.6 | Hesap silme cascade'i gerçek auth ucuyla: 7 tablo sıfır; cleanup sessiz geçmez | `scripts/data-api-probe.mjs` "cascade"; pgTAP §14 "auth.users silme" |
+| 24.7 | Sürüm yalnızca gerçek değişiklikte artar; replay/başarısız artırmaz; elle değiştirilemez | `tests/sprint2.test.ts` §7; pgTAP §14; sonda "ledger_revision" |
+| 24.8 | Telefon–PC: masaüstü BUY → mobil ≤15 sn; mobil VOID → masaüstü ≤15 sn; User B görmez; `/api/portfolio/version` ETag/304 | `e2e/sync.spec.ts` |
+| 24.9 | Staging araçları fail closed; secret yazdırmaz; env dosyası pakete girmez | `scripts/staging/*.mjs`; `scripts/package-source.mjs` desenleri; `npm run staging:doctor` |
+| 24.10 | Gerçek staging E2E (§12 senaryoları) | `e2e-staging/staging.spec.ts` (`npm run test:staging`; dış kimlik doğrulama gerektirir) |

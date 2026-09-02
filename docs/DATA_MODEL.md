@@ -1,9 +1,9 @@
 # Veri Modeli
 
 Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011`.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011` → `0012`.
 Yetki sınırı ve RLS testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
-(156 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
+(184 pgTAP testi; `npm run test:db` temiz veritabanına tüm migration'ları uygulayıp koşar).
 Muhasebe kuralları: [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md).
 Bakım görevleri: [`supabase/setup/maintenance-cron.sql`](../supabase/setup/maintenance-cron.sql).
 
@@ -421,3 +421,16 @@ Grant: authenticated ve service_role yalnızca SELECT — yazma yalnızca SECURI
 | Kısıtlar | `transactions_quoted_prices_kind`; `price_snapshots_spread_consistent`, `price_snapshots_currency_try`, `price_snapshots_provider_market_nonempty` (mevcut veri önce denetlenir; çakışma varsa migration açık hatayla durur) |
 | Projeksiyon | `realized_has_actual/estimated/baseline`; bütün pozisyonlar `ledger_rebuild_position` ile yeniden oluşturulur |
 | RPC | `ledger_append` sıkı tarih/saat + anlık görüntü doğrulaması; `ledger_replay_product` iki köken kümesi ve `occurred_at` sırası; `ledger_verify` köken bayraklarını da karşılaştırır; JSON yardımcıları yeni alanları döner |
+
+## 20. Staging / senkronizasyon (`0012_staging_sync.sql`)
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| `portfolios.ledger_revision bigint`, `ledger_updated_at timestamptz` | Defter değişiklik sinyali (işlem sayısı değil). `ledger_bump_revision(uuid)` (dahili) yalnızca `ledger_append` (replay hariç), `ledger_void`, `ledger_replace`, `ledger_void_all` (affected > 0) içinde çağrılır |
+| `portfolios_guard_revision` tetikleyicisi | Sürüm alanları yalnızca RPC içindeki oturum bayrağıyla değişir; elle yazım ve geriye alma 42501 |
+| `ledger_revision(uuid)` | service_role; `{revision, updatedAt}` |
+| `ledger_parse_numeric` / `ledger_parse_uuid` (dahili) | Sıkı desen; bilimsel gösterim, NaN, boşluk, bozuk UUID → P0004 (22P02 yerine) |
+| `ledger_compute_amounts` | Tutarlar ve türetilmiş birim değerler (total/quantity, net/quantity) 12 tam basamağı geçemez → P0004 |
+| `ledger_replay_product` | Birikimli miktar/maliyet/gerçekleşmiş K/Z de 12 basamağı geçemez → P0004 (projeksiyon taşmaz) |
+| `ledger_append` | `baseline_snapshot.stale_after_ms` ile 15 dk'nın küçüğü; provider_timestamp da tazelik sınırına tabi; fetched_at provider'dan (toleransın ötesinde) önce olamaz |
+| `ledger_replace` | Replay yanıtı ilk yanıtla aynı biçimde `[eski ürün, (farklıysa) yeni ürün]` pozisyonları |

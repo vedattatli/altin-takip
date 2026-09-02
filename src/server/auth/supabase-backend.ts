@@ -32,6 +32,7 @@ import {
   type SessionRecord,
   type SessionTouch,
   type StoredSessionSummary,
+  type LedgerRevision,
 } from "./backend";
 
 /**
@@ -633,6 +634,8 @@ export class SupabaseAuthBackend implements AuthBackend {
             is_real_market_data: request.baselineSnapshot.isRealMarketData,
             provider_timestamp: request.baselineSnapshot.providerTimestamp,
             fetched_at: request.baselineSnapshot.fetchedAt,
+            product_id: request.baselineSnapshot.productId,
+            stale_after_ms: request.baselineSnapshot.staleAfterMs ?? null,
           }
         : null,
     };
@@ -718,5 +721,14 @@ export class SupabaseAuthBackend implements AuthBackend {
       "Defter doğrulanamadı",
     );
     return { checked: Number(result?.checked ?? 0), mismatches: result?.mismatches ?? [] };
+  }
+
+  async getLedgerRevision(scope: DataScope): Promise<LedgerRevision> {
+    const result = await this.ledgerRpc<{ revision: number | string; updatedAt: string }>(
+      "ledger_revision",
+      { p_user_id: scope.userId },
+      "Defter sürümü okunamadı",
+    );
+    return { revision: Number(result?.revision ?? 0), updatedAt: String(result?.updatedAt ?? "") };
   }
 }

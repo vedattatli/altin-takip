@@ -266,6 +266,7 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | POST | `/api/auth/change-password` | Oturum (geçici parolalı da geçer) |
 | GET / PATCH | `/api/portfolio` | Kullanılabilir oturum (yalnızca kendi kaydı) |
 | GET | `/api/portfolio/summary` | Kullanılabilir oturum — sunucu tarafı pozisyon + değerleme (salt okuma) |
+| GET | `/api/portfolio/version` | Kullanılabilir oturum — defter sürümü (ETag / 304, `no-store`); senkronizasyon sinyali |
 | GET | `/api/transactions` | Kullanılabilir oturum — defter (ACTIVE/VOID/REPLACED) |
 | POST | `/api/transactions` | Kullanılabilir oturum — OPENING_BALANCE / BUY / SELL ekle (idempotent) |
 | DELETE | `/api/transactions` | Kullanılabilir oturum — tüm aktif kayıtları VOID yap |
@@ -363,7 +364,7 @@ Tarayıcı ──(anon / authenticated JWT, Data API)──▶ PostgREST ──�
 - Varsayılan portföy profil oluşturulurken tetikleyiciyle hazırlanır; `GET`
   yolları veri oluşturmaz; onarım `provision_missing_defaults()` /
   `npm run admin:repair` ile idempotenttir.
-- Doğrulama: `npm run test:db` (124 pgTAP, temiz DB'ye 0001→0010) ve
+- Doğrulama: `npm run test:db` (184 pgTAP, temiz DB'ye 0001→0012) ve
   `npm run test:data-api` (gerçek JWT ile PostgREST). Ayrıntı: SECURITY.md bölüm 22.
 
 ## 11. Muhasebe motoru (Sprint 1)
@@ -400,3 +401,33 @@ GET /api/portfolio/summary ──▶ positions_list + sunucu fiyatı ──▶ v
 - **Idempotency:** `clientRequestId` form ömrü boyunca sabittir; `(user_id, client_request_id)`
   benzersiz; aynı içerik → replay, farklı içerik → 409.
 - Ayrıntı: [ACCOUNTING_MODEL.md](ACCOUNTING_MODEL.md).
+
+## 12. Cihazlar arası senkronizasyon (Sprint 2)
+
+```
+Cihaz A mutation ──▶ ledger_append/void/replace ──▶ ledger_bump_revision (aynı transaction)
+                                                       │  portfolios.ledger_revision += 1
+Cihaz B (görünür + çevrimiçi) ── ~9 sn ──▶ GET /api/portfolio/version (If-None-Match)
+                                            304 → değişiklik yok
+                                            200 + yeni revision → ledger + summary + portfolio meta yeniden yüklenir
+```
+
+- Sürüm yalnızca gerçek değişiklikte artar; idempotent replay ve başarısız işlem artırmaz;
+  `portfolios_guard_revision` tetikleyicisi elle yazımı reddeder (0012).
+- İstemci (`PortfolioProvider`): sekme arka plandayken durur; `visibilitychange` / `focus` /
+  `online` olaylarında hemen kontrol; tek istek (AbortController); üstel geri çekilme + jitter;
+  mutation yapan cihaz kendi görünümünü hemen yeniler ve bilinen sürümü günceller.
+- Supabase access token tarayıcıya çıkmaz; HttpOnly çerez + BFF korunur; Realtime aboneliği
+  kullanılmaz.
+
+## 13. Fiyat doğrulaması ve değerleme durumları
+
+- `src/prices/validate.ts` → `validateUsableQuote(snapshot, quote, productId, now)`: ürün
+  eşleşmesi, status, fiyat/makas, para birimi, sağlayıcı/piyasa (meta ile uyum), geçerli
+  zaman damgaları, gelecek toleransı (5 dk), `staleAfterMs` tazeliği (providerTimestamp, quote
+  ve snapshot fetchedAt), "fetched < provider" tutarsızlığı. Değerleme, MARKET_BASELINE
+  (sunucu servisi ve demo defteri) aynı fonksiyonu kullanır.
+- `AccountingSummary.valuationStatus` (`empty` / `full` / `partial` / `none`) ELDEKİ pozisyonlar
+  için gerçekten kullanılabilir quote kapsamından hesaplanır; `portfolioState`
+  (`NEVER_USED` / `CLOSED` / `OPEN`) defter etkinliğinden. Arayüz kararlarını bu iki alan verir;
+  sağlayıcı meta durumu (`priceStatus`) yalnızca bilgi amaçlıdır.

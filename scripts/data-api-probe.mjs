@@ -411,6 +411,15 @@ async function main() {
     expect("takvimde olmayan tarih (2026-02-30) RPC'de açık hatayla (P0004) reddedilir", badDate.status >= 400 && badDate.text.includes("P0004"), `${badDate.status} ${badDate.text.slice(0, 160)}`);
     const verify = await call("POST", "/rest/v1/rpc/ledger_verify", { token: SERVICE_KEY, body: { p_user_id: actualUserId } });
     expect("RPC sonrası projeksiyon defterle eşleşir (ledger_verify)", verify.status === 200 && Array.isArray(verify.json?.mismatches) && verify.json.mismatches.length === 0, `${verify.status} ${verify.text.slice(0, 160)}`);
+
+    // --- Sprint 2: defter sürümü (senkronizasyon sinyali) ---
+    const revision = await call("POST", "/rest/v1/rpc/ledger_revision", { token: SERVICE_KEY, body: { p_user_id: actualUserId } });
+    expect("ledger_revision service_role ile okunur ve gerçek değişikliklerden sonra > 0", revision.status === 200 && Number(revision.json?.revision) > 0, `${revision.status} ${revision.text.slice(0, 120)}`);
+    const revisionAsUser = await call("POST", "/rest/v1/rpc/ledger_revision", { token: userJwt, body: { p_user_id: actualUserId } });
+    expect("authenticated ledger_revision ÇAĞIRAMAZ", denied(revisionAsUser) || revisionAsUser.status === 404, `${revisionAsUser.status}`);
+    const revisionPatch = await call("PATCH", `/rest/v1/portfolios?user_id=eq.${actualUserId}`, { token: SERVICE_KEY, body: { ledger_revision: 999 } });
+    expect("service_role defter sürümünü elle DEĞİŞTİREMEZ (tetikleyici)", revisionPatch.status >= 400, `${revisionPatch.status} ${revisionPatch.text.slice(0, 120)}`);
+
     const ledgerReplay = await call("POST", "/rest/v1/rpc/ledger_append", {
       token: SERVICE_KEY,
       body: { p_user_id: actualUserId, p_payload: { ...JSON.parse(JSON.stringify({
@@ -425,8 +434,50 @@ async function main() {
     expect("positions_list ondalık metin döner (1 + 0.1 = 1.1)", gramPosition?.quantity === "1.1", `${positions.status} ${positions.text.slice(0, 160)}`);
     const ownPositions = await call("GET", "/rest/v1/portfolio_positions?select=product_id,quantity", { token: userJwt });
     expect("authenticated kendi türetilmiş pozisyonunu okur (RLS)", ownPositions.status === 200 && ownPositions.json?.length === 1, `${ownPositions.status} ${ownPositions.text.slice(0, 120)}`);
+
+    // --- Sprint 2: hesap silme cascade'i GERÇEKTEN kanıtlanır ---
+    const baseline = await call("POST", "/rest/v1/rpc/ledger_append", {
+      token: SERVICE_KEY,
+      body: {
+        p_user_id: actualUserId,
+        p_payload: {
+          kind: "OPENING_BALANCE", product_id: "yeni-ceyrek", quantity: "1", unit: "adet", occurred_at: "2026-02-05",
+          pricing_input_mode: "MARKET_BASELINE", unit_price: null, total_amount: null, fees: "0", workmanship: "0",
+          cost_basis_origin: "MARKET_BASELINE", note: "", client_request_id: null,
+          baseline_snapshot: {
+            product_id: "yeni-ceyrek", liquidation_price: "11000", replacement_price: "11300", provider: "mock", market: "TEST",
+            currency: "TRY", provider_status: "ok", is_real_market_data: false,
+            provider_timestamp: new Date().toISOString(), fetched_at: new Date().toISOString(), stale_after_ms: 300000,
+          },
+        },
+      },
+    });
+    expect("cascade kurulumu: MARKET_BASELINE anlık görüntüsü oluşturuldu", baseline.status === 200 && Boolean(baseline.json?.transaction?.priceSnapshotId), `${baseline.status} ${baseline.text.slice(0, 160)}`);
+    const sessionInsert = await call("POST", "/rest/v1/app_sessions", {
+      token: SERVICE_KEY,
+      prefer: "return=representation",
+      body: { user_id: actualUserId, token_hash: `probe-${randomUUID()}`, expires_at: new Date(Date.now() + 3600_000).toISOString(), absolute_expires_at: new Date(Date.now() + 3600_000).toISOString() },
+    });
+    expect("cascade kurulumu: oturum satırı oluşturuldu", sessionInsert.status === 201, `${sessionInsert.status} ${sessionInsert.text.slice(0, 120)}`);
+    const beforeCounts = await rowCounts(actualUserId);
+    expect(
+      "cascade öncesi: profil, portföy, işlem, anlık görüntü, pozisyon, oturum ve tercih satırları mevcut",
+      Object.values(beforeCounts).every((count) => count > 0),
+      JSON.stringify(beforeCounts),
+    );
+    const deleted = await deleteAuthUser(actualUserId);
+    expect("auth.admin.deleteUser (gerçek auth ucu) başarılı", deleted.ok, `${deleted.status} ${deleted.text.slice(0, 120)}`);
+    const afterCounts = await rowCounts(actualUserId);
+    expect(
+      "cascade sonrası: profiles, portfolios, transactions, price_snapshots, portfolio_positions, app_sessions, user_preferences = 0",
+      Object.values(afterCounts).every((count) => count === 0),
+      JSON.stringify(afterCounts),
+    );
   } finally {
-    await cleanup(actualUserId);
+    const cleaned = await cleanup(actualUserId);
+    if (!cleaned) {
+      failures.push("temizlik: test kullanıcısı silinemedi (sessizce yok sayılmadı)");
+    }
   }
 
   console.log("");
@@ -437,12 +488,40 @@ async function main() {
   }
 }
 
+/** Kullanıcıya bağlı satır sayıları (service_role; RLS atlanır). */
+async function rowCounts(userId) {
+  const counts = {};
+  const profiles = await call("GET", `/rest/v1/profiles?id=eq.${userId}&select=id`, { token: SERVICE_KEY });
+  counts.profiles = Array.isArray(profiles.json) ? profiles.json.length : -1;
+  for (const table of ["portfolios", "transactions", "price_snapshots", "portfolio_positions", "app_sessions", "user_preferences"]) {
+    const result = await call("GET", `/rest/v1/${table}?user_id=eq.${userId}&select=user_id`, { token: SERVICE_KEY });
+    counts[table] = Array.isArray(result.json) ? result.json.length : -1;
+  }
+  return counts;
+}
+
+/** Gerçek auth yönetim ucuyla siler; sonucu DÖNER (sessizce yok sayılmaz). */
+async function deleteAuthUser(userId) {
+  try {
+    const response = await fetch(`${API_URL}/auth/v1/admin/users/${userId}`, {
+      method: "DELETE",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+    });
+    const text = await response.text().catch(() => "");
+    return { ok: response.ok, status: response.status, text };
+  } catch (error) {
+    return { ok: false, status: 0, text: String(error) };
+  }
+}
+
+/** Temizlik: kullanıcı zaten silinmişse (404) başarılı sayılır; başka hata açıkça raporlanır. */
 async function cleanup(userId) {
-  // auth.users silinince profil/portföy/işlem cascade ile temizlenir.
-  await fetch(`${API_URL}/auth/v1/admin/users/${userId}`, {
-    method: "DELETE",
-    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
-  }).catch(() => undefined);
+  const result = await deleteAuthUser(userId);
+  if (result.ok || result.status === 404) return true;
+  const remaining = await rowCounts(userId).catch(() => null);
+  if (remaining && Object.values(remaining).every((count) => count === 0)) return true;
+  console.error(`Temizlik başarısız (${result.status}): ${result.text.slice(0, 160)}`);
+  return false;
 }
 
 main().catch((error) => {

@@ -21,6 +21,13 @@
     "package:source": "node scripts/package-source.mjs",
     "db:catalog": "tsx scripts/generate-catalog-sql.ts",
     "verify:bundle": "node scripts/check-client-bundle.mjs",
+    "staging:doctor": "node scripts/staging-doctor.mjs",
+    "staging:migrate": "node scripts/staging-migrate.mjs",
+    "staging:smoke": "node scripts/staging-smoke.mjs",
+    "staging:seed": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/staging-seed.ts",
+    "staging:cleanup": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/staging-cleanup.ts",
+    "staging:admin": "node scripts/staging-admin.mjs",
+    "test:staging": "playwright test -c playwright.staging.config.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle"
   },
   "dependencies": {
