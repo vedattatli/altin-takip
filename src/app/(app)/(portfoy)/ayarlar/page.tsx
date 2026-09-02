@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 
 import { toSessionUser } from "@/auth/types";
 import { SettingsView } from "@/components/settings-view";
-import { requireCurrentUser } from "@/server/auth";
+import { requireUsableUser } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Ayarlar" };
 
 export default async function SettingsPage() {
-  const profile = await requireCurrentUser();
-  return <SettingsView user={toSessionUser(profile)} />;
+  const actor = await requireUsableUser();
+  return <SettingsView user={toSessionUser(actor.profile)} />;
 }

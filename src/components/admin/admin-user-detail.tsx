@@ -5,7 +5,8 @@ import { useState } from "react";
 
 import { generateTemporaryPassword } from "@/auth/password";
 import { ROLE_LABELS, STATUS_LABELS, type UserProfile } from "@/auth/types";
-import type { AdminUserPortfolioView } from "@/server/auth/service";
+import type { AdminUserPortfolioView } from "@/domain/admin-view";
+import { apiFetch } from "@/lib/api-client";
 import {
   formatDateTime,
   formatGrams,
@@ -14,19 +15,6 @@ import {
   formatSignedMoney,
 } from "@/lib/format";
 import { Alert, Card, DeltaValue, Field, SectionTitle, cx } from "../ui";
-
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | { data?: T; error?: string }
-    | null;
-  if (!response.ok) throw new Error(payload?.error ?? "İşlem tamamlanamadı.");
-  return payload?.data as T;
-}
 
 export function AdminUserDetail({
   initial,
@@ -69,7 +57,7 @@ export function AdminUserDetail({
   async function changeStatus(status: "active" | "inactive") {
     const updated = await run(
       () =>
-        apiRequest<UserProfile>(`/api/admin/users/${user.id}`, {
+        apiFetch<UserProfile>(`/api/admin/users/${user.id}`, {
           method: "PATCH",
           body: JSON.stringify({ status }),
         }),
@@ -84,7 +72,7 @@ export function AdminUserDetail({
     event.preventDefault();
     const updated = await run(
       () =>
-        apiRequest<UserProfile>(`/api/admin/users/${user.id}/password`, {
+        apiFetch<UserProfile>(`/api/admin/users/${user.id}/password`, {
           method: "POST",
           body: JSON.stringify({ temporaryPassword }),
         }),
@@ -102,7 +90,7 @@ export function AdminUserDetail({
     event.preventDefault();
     const result = await run(
       () =>
-        apiRequest<{ deleted: boolean }>(`/api/admin/users/${user.id}`, {
+        apiFetch<{ deleted: boolean }>(`/api/admin/users/${user.id}`, {
           method: "DELETE",
           body: JSON.stringify({ confirmUsername }),
         }),

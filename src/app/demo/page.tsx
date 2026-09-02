@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { CsrfMeta } from "@/components/csrf-meta";
 import { DemoWorkspace } from "@/components/demo-workspace";
 import { serverEnv } from "@/server/env";
 import { PortfolioProvider } from "@/state/portfolio-store";
@@ -19,6 +20,7 @@ export default function DemoPage() {
 
   return (
     <PortfolioProvider mode="demo">
+      <CsrfMeta />
       <DemoWorkspace />
     </PortfolioProvider>
   );

@@ -6,21 +6,9 @@ import { useState } from "react";
 import { generateTemporaryPassword, PASSWORD_RULES_TR } from "@/auth/password";
 import { STATUS_LABELS, type UserProfile } from "@/auth/types";
 import { USERNAME_RULES_TR } from "@/auth/username";
+import { apiFetch } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import { Alert, Card, Field, SectionTitle, cx } from "../ui";
-
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => null)) as
-    | { data?: T; error?: string }
-    | null;
-  if (!response.ok) throw new Error(payload?.error ?? "İşlem tamamlanamadı.");
-  return payload?.data as T;
-}
 
 function StatusBadge({ status }: { status: UserProfile["status"] }) {
   return (
@@ -47,7 +35,7 @@ export function AdminUsersView({ initialUsers }: { initialUsers: UserProfile[] }
     setSearch(value);
     setSearching(true);
     try {
-      const rows = await apiRequest<UserProfile[]>(
+      const rows = await apiFetch<UserProfile[]>(
         `/api/admin/users?q=${encodeURIComponent(value)}`,
       );
       setUsers(rows);
@@ -64,7 +52,7 @@ export function AdminUsersView({ initialUsers }: { initialUsers: UserProfile[] }
     setCreated(null);
     setBusy(true);
     try {
-      const user = await apiRequest<UserProfile>("/api/admin/users", {
+      const user = await apiFetch<UserProfile>("/api/admin/users", {
         method: "POST",
         body: JSON.stringify({ username, displayName, temporaryPassword }),
       });

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { TEST_OVERRIDE_TOKEN } from "@/auth/types";
+import { csrfCookieName, sessionCookieName } from "./security/config";
 
 /**
  * Sunucu ortam değişkenleri.
@@ -26,7 +27,24 @@ export const serverEnv = {
    * gerektirdiği benzersiz kimlik alanını doldurur.
    */
   internalEmailDomain: read("AUTH_INTERNAL_EMAIL_DOMAIN") || "users.altin-takip.invalid",
-  sessionCookieName: read("AUTH_SESSION_COOKIE") || "altin_takip_session",
+  /**
+   * Oturum çerezi adı.
+   * Üretimde __Host- öneki kullanılır: bu önek tarayıcı tarafından yalnızca
+   * Secure, Path=/ ve Domain'siz çerezlerde kabul edilir; alt alan adından
+   * çerez sabitleme (cookie fixation) saldırısını engeller.
+   */
+  sessionCookieName: sessionCookieName(),
+  /** CSRF çerezi. Üretimde yine __Host- önekiyle. */
+  csrfCookieName: csrfCookieName(),
+  /** CSRF jetonunu imzalamak için gizli anahtar. Üretimde zorunludur. */
+  csrfSecret: read("AUTH_CSRF_SECRET"),
+  /** Hız sınırlayıcı anahtarını gizlemek için pepper. Üretimde zorunludur. */
+  rateLimitPepper: read("RATE_LIMIT_PEPPER"),
+  /**
+   * Uygulamanın beklenen origin'i (örn. https://altin-takip.ornek.com).
+   * Boşsa istek başlıklarından türetilir; üretimde açıkça verilmesi önerilir.
+   */
+  appOrigin: read("APP_ORIGIN"),
   sessionTtlHours: Number(read("AUTH_SESSION_TTL_HOURS") || "336"),
   isProduction: process.env.NODE_ENV === "production",
   /**

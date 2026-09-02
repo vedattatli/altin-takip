@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { toSessionUser } from "@/auth/types";
 import { AppShell } from "@/components/app-shell";
+import { CsrfMeta } from "@/components/csrf-meta";
 import { DeviceGuard } from "@/components/device-guard";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { getSessionContext } from "@/server/auth";
@@ -22,6 +23,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <>
+      <CsrfMeta />
       <AppShell user={toSessionUser(session.profile)}>{children}</AppShell>
       {/* Ortak cihaz kısıtları ve servis çalışanı kaydı yalnızca oturum içinde. */}
       <DeviceGuard deviceMode={session.deviceMode} authenticated />

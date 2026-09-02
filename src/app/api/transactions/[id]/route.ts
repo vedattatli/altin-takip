@@ -1,28 +1,19 @@
-import { getAuthBackend, requireCurrentUser } from "@/server/auth";
-import { failure, ok, readJson } from "@/server/http";
-import { parseTransactionInput } from "@/server/transactions";
+import { getUserPortfolioService, requireUsableUser } from "@/server/auth";
+import { ok, readJson } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
 type Context = { params: Promise<{ id: string }> };
 
-export async function PUT(request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentUser();
-    const { id } = await context.params;
-    const body = await readJson<unknown>(request);
-    const input = await parseTransactionInput(actor.id, body, { editingTransactionId: id });
-    return ok(await getAuthBackend().updateTransaction(actor.id, id, input));
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const PUT = apiRoute<Context>(async (request, context) => {
+  const actor = await requireUsableUser();
+  const { id } = await context.params;
+  const body = await readJson<unknown>(request);
+  return ok(await getUserPortfolioService().updateTransaction(actor, id, body));
+});
 
-export async function DELETE(_request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentUser();
-    const { id } = await context.params;
-    await getAuthBackend().deleteTransaction(actor.id, id);
-    return ok(null);
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const DELETE = apiRoute<Context>(async (_request, context) => {
+  const actor = await requireUsableUser();
+  const { id } = await context.params;
+  await getUserPortfolioService().deleteTransaction(actor, id);
+  return ok(null);
+});

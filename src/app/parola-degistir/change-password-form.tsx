@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { PASSWORD_RULES_TR } from "@/auth/password";
 import { useHydrated } from "@/components/hydration-marker";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { Alert, Field } from "@/components/ui";
 
 export function ChangePasswordForm({ forced }: { forced: boolean }) {
@@ -29,17 +30,10 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
 
     setBusy(true);
     try {
-      const response = await fetch("/api/auth/change-password", {
+      await apiFetch<{ changed: boolean }>("/api/auth/change-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-
-      if (!response.ok) {
-        setError(payload?.error ?? "Parola değiştirilemedi.");
-        return;
-      }
 
       // Güvenlik gereği tüm oturumlar düştü; kullanıcı yeni parolayla tekrar girer.
       setDone(true);
@@ -47,8 +41,12 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
         router.replace("/giris");
         router.refresh();
       }, 1800);
-    } catch {
-      setError("Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.");
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+      );
     } finally {
       setBusy(false);
     }

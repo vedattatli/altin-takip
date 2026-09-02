@@ -1,6 +1,6 @@
 # Yol Haritası
 
-## Tamamlanan — Sprint 0 + 1 (bu tur)
+## Tamamlanan — Sprint 0 + 0.5
 
 - Next.js 16 + TypeScript (strict) + Tailwind v4 tabanlı responsive web uygulaması ve PWA temeli.
 - Merkezi ürün yapılandırması (`src/config/app.config.ts`) — ürün adı tek dosyadan değişir.
@@ -18,31 +18,54 @@
   önbellek bırakılmaması, PWA kurulum çağrısının bastırılması.
 - 201 birim/güvenlik testi + üç ekran genişliğinde Playwright duman testleri.
 
+### Sprint 0.5 — güvenlik sertleştirme
+
+- **Yetkilendirme sınırı:** markalanmış `UserActor` / `AdminActor` / `DataScope`
+  tipleri; ham `userId` ile veri erişimi artık derleme hatası.
+  `UserPortfolioService` ve `AdminService` ayrıldı.
+- **Geçici parola guard'ı:** `requireUsableUser` ile sunucu tarafı koruma
+  (`PASSWORD_CHANGE_REQUIRED`).
+- **Sunucu tarafı oturum süresi:** ortak cihazda 15 dk hareketsizlik + 8 saat
+  mutlak; kişisel cihazda mutlak süre zorunlu; `__Host-` önekli çerez.
+- **CSRF:** Origin + Sec-Fetch-Site kontrolü ve imzalı senkronizasyon jetonu;
+  tüm route'lar merkezi `apiRoute()` sarmalayıcısından geçer.
+- **Güvenlik başlıkları:** CSP, HSTS (yalnızca üretim), Permissions-Policy,
+  Referrer-Policy, X-Content-Type-Options, frame-ancestors.
+- **Dağıtık hız sınırlayıcı:** Postgres tabanlı paylaşımlı sayaç, peppered HMAC
+  anahtar, fail-closed davranış.
+- **Veritabanı bütünlüğü:** tek portföy kısıtı, composite foreign key, birim
+  tetikleyicisi, atomik aşırı satış koruması (`0005_security_hardening.sql`).
+- **Denetim kaydı:** tetikleyici düzeyinde değiştirilemezlik; dürüst silme kaydı.
+- **RLS davranış testleri:** `supabase/tests/rls.test.sql` (pgTAP, 24 test).
+- **Temiz teslim paketi:** `npm run package:source` + SHA-256 + manifest.
+- 284 birim/güvenlik testi + genişletilmiş Playwright güvenlik senaryoları.
+
 ---
 
-## Sprint 2 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
+## Sprint 1 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
 
-Bu turda Supabase projesi olmadığı için `SupabaseAuthBackend` yolu **yerel olarak
-doğrulanamadı**. İlk iş bu boşluğu kapatmaktır.
+Supabase projesi olmadığı için `SupabaseAuthBackend`, atomik RPC'ler, veritabanı
+tetikleyicileri ve RLS testleri **gerçek veritabanında doğrulanamadı**.
+İlk iş bu boşluğu kapatmaktır.
 
-1. Supabase projesi aç, `0001` → `0004` migration'larını uygula.
-2. `npm run admin:create` ile gerçek yönetici hesabını oluştur.
-3. Entegrasyon testleri: giriş, parola değişimi, yönetim işlemleri, RLS davranışı.
-   Özellikle `is_admin()` ve `prevent_profile_privilege_escalation` politikalarını
-   gerçek bir `authenticated` oturumla doğrula.
-4. `app_sessions` için süresi geçmiş satırları temizleyen zamanlanmış görev (pg_cron).
-5. Yerel geliştirme arka ucunu CI'da devre dışı bırakan bir kontrol ekle.
+1. Supabase projesi aç, `0001` → `0005` migration'larını sırayla uygula.
+2. `npm run test:db` ile 24 pgTAP RLS testini çalıştır.
+3. `npm run admin:create` ile gerçek yönetici hesabını oluştur.
+4. Entegrasyon testleri: giriş, parola değişimi, yönetim işlemleri,
+   `create_transaction_checked` ve eşzamanlı satış senaryosu.
+5. `AUTH_CSRF_SECRET`, `RATE_LIMIT_PEPPER` ve `APP_ORIGIN` değerlerini üret ve ayarla.
+6. `pg_cron` ile `purge_expired_sessions()` ve `login_rate_limit_cleanup()` görevlerini kur.
+7. Yerel geliştirme arka ucunu CI'da devre dışı bırakan bir kontrol ekle.
 
-## Sprint 3 — Güvenlik sıkılaştırma
+## Sprint 2 — Kalan güvenlik işleri
 
-- Hız sınırlayıcıyı paylaşımlı depoya taşı (Redis veya Postgres) — çok örnekli dağıtım için.
-- CSRF için çift gönderim çerezi (double submit cookie) ekle.
-- Başarısız giriş denemeleri için ayrı bir güvenlik olay kaydı (audit'ten bağımsız).
-- İçerik Güvenliği Politikası (CSP) ve güvenlik başlıkları (`next.config.ts` headers).
+- Nonce tabanlı CSP (satır içi script izni kaldırılsın).
+- Başarısız giriş denemeleri için ayrı güvenlik olay kaydı (audit'ten bağımsız).
 - Oturum listesi ekranı: kullanıcı kendi aktif oturumlarını görüp sonlandırabilsin.
-- Yönetici için ikinci faktör (TOTP) — yalnızca yönetici hesapları için.
+- Yönetici için ikinci faktör (TOTP).
+- Denetim kaydı için dışa aktarma ve saklama politikası.
 
-## Sprint 4 — Gerçek fiyat entegrasyonu
+## Sprint 3 — Gerçek fiyat entegrasyonu
 
 **Ön koşul: lisans veya yazılı izin.** İzinsiz scraping yapılmayacak.
 
@@ -53,7 +76,7 @@ doğrulanamadı**. İlk iş bu boşluğu kapatmaktır.
 - Fiyat kaynağı ve tazelik bilgisinin arayüzde sağlayıcı adıyla gösterilmesi.
 - Birden fazla sağlayıcı desteklenirse: piyasa karıştırmayan, kullanıcı tarafından seçilebilir kaynak.
 
-## Sprint 5 — Ürün derinleştirme
+## Sprint 4 — Ürün derinleştirme
 
 - Portföy geçmişi ve zaman içinde değer grafiği.
 - Ürün bazlı detay ekranı ve işlem geçmişi filtreleri.
@@ -62,7 +85,7 @@ doğrulanamadı**. İlk iş bu boşluğu kapatmaktır.
 - Hedef takibi ("100 gram has altına ulaş").
 - Yönetici için toplu kullanıcı oluşturma.
 
-## Sprint 6 — Operasyon
+## Sprint 5 — Operasyon
 
 - Production deployment ve alan adı (bu turda kapsam dışıydı).
 - İzleme, hata takibi ve yedekleme politikası.

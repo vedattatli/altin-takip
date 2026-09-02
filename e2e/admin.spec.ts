@@ -95,6 +95,8 @@ test.describe("yönetim paneli", () => {
     const userContext = await browser.newContext();
     const userPage = await userContext.newPage();
     await loginAsUser(userPage, username);
+    // Deterministik başlangıç: kullanıcının önceki kayıtları temizlenir.
+    await browserApi(userPage, "DELETE", "/api/transactions");
     await gotoReady(userPage, "/islemler");
     await addPurchase(userPage, { product: "Gram Altın", quantity: "8", unitPrice: "5000" });
     await userContext.close();
@@ -259,14 +261,16 @@ test.describe("yetkilendirme", () => {
     await gotoReady(page, `/yonetim/${user.id}`);
     await expect(page.getByText("Kullanıcının portföyü")).toBeVisible();
 
-    const response = await browserApi<{
-      data: { action: string; targetUsername: string | null }[];
-    }>(page, "GET", "/api/admin/audit?limit=50");
+    const response = await browserApi<{ action: string; targetUsername: string | null }[]>(
+      page,
+      "GET",
+      "/api/admin/audit?limit=50",
+    );
     expect(response.status).toBe(200);
-    const payload = response.body!;
+    const rows = response.data!;
 
-    const entries = payload.data.filter((row) => row.targetUsername === username);
+    const entries = rows.filter((row) => row.targetUsername === username);
     expect(entries.some((row) => row.action === "user.portfolio_view")).toBe(true);
-    expect(JSON.stringify(payload.data)).not.toContain(TEST_PASSWORD);
+    expect(JSON.stringify(rows)).not.toContain(TEST_PASSWORD);
   });
 });

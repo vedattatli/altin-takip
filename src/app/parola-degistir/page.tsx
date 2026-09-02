@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { CsrfMeta } from "@/components/csrf-meta";
 import { BrandMark } from "@/components/ui";
 import { DeviceGuard } from "@/components/device-guard";
 import { appConfig } from "@/config/app.config";
@@ -18,6 +19,7 @@ export default async function ChangePasswordPage() {
 
   return (
     <main id="icerik" className="flex flex-1 items-center justify-center px-4 py-10">
+      <CsrfMeta />
       <div className="w-full max-w-sm">
         <div className="mb-7 flex flex-col items-center text-center">
           <BrandMark size={44} />

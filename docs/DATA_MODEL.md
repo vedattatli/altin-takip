@@ -1,6 +1,8 @@
 # Veri Modeli
 
-Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla `0001` → `0002` → `0003`.
+Migration'lar: [`supabase/migrations/`](../supabase/migrations/) — sırayla
+`0001` → `0002` → `0003` → `0004` → `0005`.
+RLS davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql)
 
 ## 1. İlişki şeması
 
@@ -18,7 +20,8 @@ portfolios  transactions  app_sessions  user_preferences       │
 gold_products ──< transactions                                 │
 gold_products ──< current_prices >── price_sources             │
                                                                │
-admin_audit_logs  (yabancı anahtar YOK — kullanıcı silinse de kayıt kalır)
+admin_audit_logs   (yabancı anahtar YOK — kullanıcı silinse de kayıt kalır)
+login_rate_limits  (yalnızca peppered HMAC özeti; kullanıcıya bağlı değildir)
 ```
 
 ## 2. `profiles`
@@ -55,8 +58,10 @@ cihazlardaki oturumlar** geçersiz kılınır.
 | `id` | `uuid` PK | |
 | `user_id` | `uuid` | `profiles(id)` → `CASCADE` |
 | `token_hash` | `text` UNIQUE | Jetonun kendisi değil, **SHA-256 özeti** |
-| `expires_at` | `timestamptz` | |
+| `expires_at` | `timestamptz` | Eski alan; `absolute_expires_at` ile aynı değeri taşır |
 | `created_at` | `timestamptz` | |
+
+`0005` ile eklenen süre alanları için bkz. bölüm 13.1.
 
 İndeksler: `app_sessions_user_id_idx`, `app_sessions_expires_at_idx`
 RLS: politika **yok** — yalnızca `service_role` erişir.
@@ -187,3 +192,84 @@ Alış ve satışın ters kaydedilmesi veritabanı düzeyinde engellenir.
 - Gerçekleşmemiş kâr/zarar = bozdurma değeri − kalan maliyet
 - Fiyatı olmayan pozisyon **sıfır değil `null`** sayılır ve toplam değerlemeye dâhil edilmez;
   arayüz bunu ayrıca belirtir.
+
+## 13. Sprint 0.5 eklemeleri (`0005_security_hardening.sql`)
+
+### 13.1 `app_sessions` — oturum süreleri
+
+| Sütun | Tip | Notlar |
+| --- | --- | --- |
+| `device_mode` | `text` | `personal` \| `shared` |
+| `last_seen_at` | `timestamptz` | En fazla 60 saniyede bir güncellenir |
+| `idle_expires_at` | `timestamptz` | Ortak cihazda dolu, kişiselde `null` |
+| `absolute_expires_at` | `timestamptz` | **Her zaman dolu** |
+| `revoked_at` | `timestamptz` | Dolu ise oturum geçersiz |
+
+- `app_sessions_shared_needs_idle` kısıtı: `device_mode = 'shared'` ise
+  `idle_expires_at` boş olamaz.
+- İndeksler: `app_sessions_idle_expires_idx` (kısmi), `app_sessions_absolute_expires_idx`
+- `purge_expired_sessions()` süresi geçmiş satırları siler.
+
+### 13.2 Portföy ve işlem bütünlüğü
+
+| Kısıt | Anlamı |
+| --- | --- |
+| `portfolios_user_id_key` UNIQUE(`user_id`) | Kullanıcı başına **tek** portföy |
+| `portfolios_id_user_id_key` UNIQUE(`id`, `user_id`) | Composite FK için gerekli |
+| `transactions_portfolio_owner_fkey` | `(portfolio_id, user_id)` → `portfolios(id, user_id)` |
+
+Composite foreign key sayesinde bir işlemin `portfolio_id` ve `user_id` değerleri
+**aynı sahibe** ait olmak zorundadır; başka kullanıcının portföyüne satır
+eklenemez (veritabanı düzeyinde).
+
+Migration mevcut veriyle güvenle çalışır: kısıt eklemeden önce çakışan satırlar
+sayılır, varsa açık bir hata ile durdurulur ve hiçbir şey değiştirilmez.
+
+### 13.3 Birim tutarlılığı
+
+`enforce_transaction_unit()` tetikleyicisi her `INSERT`/`UPDATE` öncesi:
+
+- `transactions.unit` değerinin `gold_products.unit` ile aynı olmasını,
+- `adet` ile takip edilen üründe miktarın tam sayı olmasını
+
+zorunlu kılar. Bilinmeyen `product_id` reddedilir.
+
+### 13.4 Atomik işlem yazımı
+
+| Fonksiyon | İş |
+| --- | --- |
+| `lock_user_portfolio(user_id)` | Portföy satırını `FOR UPDATE` ile kilitler, yoksa oluşturur |
+| `assert_no_oversell(user_id, product_id)` | Kronolojik bakiyeyi doğrular; ihlalde `ALTIN_OVERSELL` |
+| `create_transaction_checked(...)` | Kilitle → ekle → doğrula |
+| `update_transaction_checked(...)` | Kilitle → güncelle → eski ve yeni ürünü doğrula |
+| `delete_transaction_checked(...)` | Kilitle → sil → doğrula |
+
+Kontrol ile yazma **aynı transaction** içindedir; iki eşzamanlı satış birlikte
+eldeki miktarı aşamaz. İhlalde transaction geri alınır.
+
+Bu fonksiyonlar yalnızca `service_role` tarafından çağrılabilir
+(`revoke all ... from public`).
+
+### 13.5 `login_rate_limits`
+
+| Sütun | Tip | Notlar |
+| --- | --- | --- |
+| `key_hash` | `text` PK | `HMAC-SHA256(IP\|kullanıcı adı, RATE_LIMIT_PEPPER)` |
+| `failure_count` | `integer` | Pencere içindeki başarısız deneme |
+| `window_started_at` | `timestamptz` | Kayan pencere başlangıcı |
+| `lock_level` | `integer` | Artan bekleme seviyesi |
+| `locked_until` | `timestamptz` | Bekleme bitiş zamanı |
+| `updated_at` | `timestamptz` | Temizlik için |
+
+**Ham IP veya kullanıcı adı saklanmaz.** RLS açıktır ve politika tanımlı
+değildir: tabloya yalnızca `service_role` erişir.
+
+Fonksiyonlar: `login_rate_limit_check`, `login_rate_limit_record_failure`
+(satır kilidiyle atomik), `login_rate_limit_reset`, `login_rate_limit_cleanup`.
+
+### 13.6 Denetim kaydı değiştirilemezliği
+
+`reject_audit_mutation()` tetikleyicisi `admin_audit_logs` üzerinde `UPDATE` ve
+`DELETE` işlemlerini `42501` hatasıyla reddeder. Bu kural RLS'ten bağımsızdır ve
+`service_role` için de geçerlidir.
+

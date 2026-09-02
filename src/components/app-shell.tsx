@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 
 import type { SessionUser } from "@/auth/types";
 import { appConfig } from "@/config/app.config";
+import { apiFetch } from "@/lib/api-client";
 import { BrandMark, cx } from "./ui";
 
 export interface NavItem {
@@ -85,7 +86,7 @@ export function AppShell({
   async function signOut() {
     setSigningOut(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await apiFetch("/api/auth/logout", { method: "POST" });
       router.replace("/giris");
       router.refresh();
     } finally {

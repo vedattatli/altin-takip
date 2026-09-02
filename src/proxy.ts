@@ -1,0 +1,64 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+import { csrfCookieName, csrfSecretOrNull, isProductionRuntime } from "@/server/security/config";
+import {
+  CSRF_REQUEST_HEADER,
+  createSignedCsrfCookie,
+  readSignedCsrfCookie,
+} from "@/server/security/csrf";
+
+/**
+ * CSRF jetonunu üretir ve taşır.
+ *
+ * Next.js 16'da "middleware" dosya kuralı "proxy" olarak yeniden adlandırıldı;
+ * bu dosya yeni kuralı kullanır.
+ *
+ * - Geçerli imzalı çerez yoksa yenisi üretilir ve HttpOnly çerezde saklanır.
+ * - Ham jeton istek başlığıyla sunucu bileşenlerine iletilir; onlar da
+ *   sayfaya <meta name="csrf-token"> olarak basar.
+ * - Jeton hiçbir zaman localStorage/sessionStorage'a yazılmaz ve çerez
+ *   HttpOnly olduğu için document.cookie ile okunamaz.
+ */
+export async function proxy(request: NextRequest) {
+  const secret = csrfSecretOrNull();
+
+  // Üretimde gizli anahtar yoksa jeton üretilmez; durum değiştiren istekler
+  // route katmanında zaten açık bir yapılandırma hatasıyla reddedilir.
+  if (!secret) return NextResponse.next();
+
+  const name = csrfCookieName();
+  const existing = request.cookies.get(name)?.value;
+
+  let token = await readSignedCsrfCookie(existing, secret);
+  let issuedCookie: string | null = null;
+
+  if (!token) {
+    const issued = await createSignedCsrfCookie(secret);
+    token = issued.token;
+    issuedCookie = issued.cookieValue;
+  }
+
+  const headers = new Headers(request.headers);
+  headers.set(CSRF_REQUEST_HEADER, token);
+
+  const response = NextResponse.next({ request: { headers } });
+
+  if (issuedCookie) {
+    response.cookies.set(name, issuedCookie, {
+      httpOnly: true,
+      // __Host- öneki Secure zorunlu kılar; yerel http geliştirmede önek yoktur.
+      secure: isProductionRuntime(),
+      sameSite: "lax",
+      path: "/",
+    });
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: [
+    // Statik varlıklar ve servis çalışanı dışındaki her istek.
+    "/((?!_next/static|_next/image|favicon.ico|icons/|sw.js|manifest.webmanifest).*)",
+  ],
+};

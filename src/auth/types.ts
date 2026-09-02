@@ -16,6 +16,46 @@ export const DEVICE_MODE_LABELS: Record<DeviceMode, string> = {
 /** Paylaşılan cihazda hareketsizlik sonrası otomatik çıkış süresi. */
 export const SHARED_DEVICE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
+/** Paylaşılan cihazda oturumun en uzun ömrü (hareket olsa bile). */
+export const SHARED_DEVICE_ABSOLUTE_LIFETIME_MS = 8 * 60 * 60 * 1000;
+
+/** Kişisel cihazda oturumun en uzun ömrü. Mutlak süre burada da zorunludur. */
+export const PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * last_seen_at / idle_expires_at yazımı bu aralıktan sık yapılmaz.
+ * Her istekte veritabanına yazmak gereksiz yüktür.
+ */
+export const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+
+export interface SessionPolicy {
+  /** Hareketsizlik süresi. null ise hareketsizlik zaman aşımı yoktur. */
+  idleTimeoutMs: number | null;
+  /** Oturumun mutlak ömrü. Her cihaz türünde zorunludur. */
+  absoluteLifetimeMs: number;
+  /** Çerez kalıcı mı? Ortak cihazda tarayıcı kapanınca silinir. */
+  persistentCookie: boolean;
+}
+
+/**
+ * Oturum süresi politikası — GÜVENLİK SINIRI SUNUCUDADIR.
+ * İstemcideki sayaç yalnızca kullanıcı deneyimi içindir.
+ */
+export function sessionPolicyFor(deviceMode: DeviceMode): SessionPolicy {
+  if (deviceMode === "shared") {
+    return {
+      idleTimeoutMs: SHARED_DEVICE_IDLE_TIMEOUT_MS,
+      absoluteLifetimeMs: SHARED_DEVICE_ABSOLUTE_LIFETIME_MS,
+      persistentCookie: false,
+    };
+  }
+  return {
+    idleTimeoutMs: null,
+    absoluteLifetimeMs: PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS,
+    persistentCookie: true,
+  };
+}
+
 /**
  * Test kaçış kapısı belirteci.
  *

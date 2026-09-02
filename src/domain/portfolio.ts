@@ -148,6 +148,44 @@ export function availableQuantity(
   return roundQuantity(position.quantity);
 }
 
+export interface NegativeHolding {
+  productId: string;
+  /** Miktarın negatife düştüğü işlemin kimliği. */
+  transactionId: string;
+  tradedAt: string;
+  /** O andaki (negatif) miktar. */
+  quantity: number;
+}
+
+/**
+ * İşlem dizisinde herhangi bir anda eldeki miktarın negatife düşüp düşmediğini
+ * bulur. Yalnızca "son durum" değil, KRONOLOJİK HER AN kontrol edilir; böylece
+ * geçmişe dönük bir alışın düzenlenmesi sonraki satışları geçersiz kılamaz.
+ *
+ * Aynı kural veritabanı tarafında da uygulanır (bkz. 0005_security_hardening.sql).
+ */
+export function findNegativeHolding(transactions: readonly Transaction[]): NegativeHolding | null {
+  const quantities = new Map<string, number>();
+
+  for (const tx of sortTransactions(transactions)) {
+    const current = quantities.get(tx.productId) ?? 0;
+    const next = roundQuantity(tx.side === "buy" ? current + tx.quantity : current - tx.quantity);
+    quantities.set(tx.productId, next);
+
+    // Kayan nokta artıklarını tolere et; gerçek negatifliği yakala.
+    if (next < -1e-6) {
+      return {
+        productId: tx.productId,
+        transactionId: tx.id,
+        tradedAt: tx.tradedAt,
+        quantity: next,
+      };
+    }
+  }
+
+  return null;
+}
+
 export function buildPortfolio(
   transactions: readonly Transaction[],
   snapshot: PriceSnapshot | null,

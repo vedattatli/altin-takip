@@ -5,7 +5,7 @@ import {
   PASSWORD_MIN_LENGTH,
   validatePassword,
 } from "@/auth/password";
-import { formatRetryAfter, LoginRateLimiter } from "@/auth/rate-limit";
+import { formatRetryAfter, SlidingWindowRateLimiter } from "@/auth/rate-limit";
 
 describe("parola politikası", () => {
   it("güçlü parolayı kabul eder", () => {
@@ -72,7 +72,7 @@ describe("parola politikası", () => {
 
 describe("giriş hız sınırlayıcı", () => {
   function limiter(now: () => number) {
-    return new LoginRateLimiter({
+    return new SlidingWindowRateLimiter({
       maxAttempts: 3,
       windowMs: 60_000,
       baseLockMs: 30_000,

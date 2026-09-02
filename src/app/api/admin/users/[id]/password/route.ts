@@ -1,25 +1,17 @@
-import { getAuthService, requireCurrentAdmin } from "@/server/auth";
-import { failure, ok, readJson } from "@/server/http";
+import { getAdminService, requireCurrentAdmin } from "@/server/auth";
+import { ok, readJson } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
 type Context = { params: Promise<{ id: string }> };
 
 /**
  * Yönetici: geçici parola atama.
  * Yönetici mevcut parolayı GÖREMEZ; yalnızca yeni geçici parola belirleyebilir.
- * Sıfırlama sonrası kullanıcının tüm oturumları düşer ve parola değiştirmesi istenir.
+ * Sıfırlama sonrası kullanıcının tüm oturumları düşer.
  */
-export async function POST(request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const { id } = await context.params;
-    const body = await readJson<{ temporaryPassword?: string }>(request);
-    const updated = await getAuthService().resetUserPassword(
-      actor,
-      id,
-      body.temporaryPassword ?? "",
-    );
-    return ok(updated);
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const POST = apiRoute<Context>(async (request, context) => {
+  const actor = await requireCurrentAdmin();
+  const { id } = await context.params;
+  const body = await readJson<{ temporaryPassword?: string }>(request);
+  return ok(await getAdminService().resetUserPassword(actor, id, body.temporaryPassword ?? ""));
+});

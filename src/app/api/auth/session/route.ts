@@ -1,12 +1,17 @@
 import { toSessionUser } from "@/auth/types";
-import { getCurrentUser } from "@/server/auth";
-import { failure, ok } from "@/server/http";
+import { getSessionContext } from "@/server/auth";
+import { ok } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
-export async function GET() {
-  try {
-    const profile = await getCurrentUser();
-    return ok({ user: profile ? toSessionUser(profile) : null });
-  } catch (error) {
-    return failure(error);
-  }
-}
+/**
+ * Mevcut oturum bilgisi.
+ * Geçici parolalı kullanıcı da erişebilir; istemci mustChangePassword
+ * alanına bakarak parola değiştirme ekranına yönlenir.
+ */
+export const GET = apiRoute(async () => {
+  const session = await getSessionContext();
+  return ok({
+    user: session ? toSessionUser(session.profile) : null,
+    deviceMode: session?.deviceMode ?? null,
+  });
+});

@@ -1,46 +1,35 @@
-import { getAuthService, requireCurrentAdmin } from "@/server/auth";
 import { badRequest } from "@/server/auth/errors";
-import { failure, ok, readJson } from "@/server/http";
+import { getAdminService, requireCurrentAdmin } from "@/server/auth";
+import { ok, readJson } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
 type Context = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const { id } = await context.params;
-    return ok(await getAuthService().getUserDetail(actor, id));
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const GET = apiRoute<Context>(async (_request, context) => {
+  const actor = await requireCurrentAdmin();
+  const { id } = await context.params;
+  return ok(await getAdminService().getUserDetail(actor, id));
+});
 
 /** Pasifleştirme / yeniden aktifleştirme. Varsayılan yönetim işlemi budur. */
-export async function PATCH(request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const { id } = await context.params;
-    const body = await readJson<{ status?: string }>(request);
-    if (body.status !== "active" && body.status !== "inactive") {
-      throw badRequest("Durum yalnızca active veya inactive olabilir.");
-    }
-    return ok(await getAuthService().setUserStatus(actor, id, body.status));
-  } catch (error) {
-    return failure(error);
+export const PATCH = apiRoute<Context>(async (request, context) => {
+  const actor = await requireCurrentAdmin();
+  const { id } = await context.params;
+  const body = await readJson<{ status?: string }>(request);
+  if (body.status !== "active" && body.status !== "inactive") {
+    throw badRequest("Durum yalnızca active veya inactive olabilir.");
   }
-}
+  return ok(await getAdminService().setUserStatus(actor, id, body.status));
+});
 
 /**
  * KALICI SİLME. Açık onay olmadan çalışmaz:
- * gövdede confirmUsername alanı hedefin kullanıcı adıyla birebir eşleşmelidir.
+ * gövdedeki confirmUsername hedefin kullanıcı adıyla birebir eşleşmelidir.
  */
-export async function DELETE(request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const { id } = await context.params;
-    const body = await readJson<{ confirmUsername?: string }>(request);
-    await getAuthService().deleteUser(actor, id, body.confirmUsername ?? "");
-    return ok({ deleted: true });
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const DELETE = apiRoute<Context>(async (request, context) => {
+  const actor = await requireCurrentAdmin();
+  const { id } = await context.params;
+  const body = await readJson<{ confirmUsername?: string }>(request);
+  const result = await getAdminService().deleteUser(actor, id, body.confirmUsername ?? "");
+  return ok(result);
+});

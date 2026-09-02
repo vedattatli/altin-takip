@@ -8,11 +8,15 @@ import {
   scopedUsername,
 } from "./helpers";
 
-const SESSION_COOKIE = "altin_takip_session";
+/**
+ * Üretimde çerez adı __Host- öneklidir (Secure + Path=/ + Domain'siz zorunlu).
+ * Test her iki adı da tanısın diye sonek eşleşmesi kullanılır.
+ */
+const SESSION_COOKIE_SUFFIX = "altin_takip_session";
 
 async function sessionCookie(context: import("@playwright/test").BrowserContext) {
   const cookies = await context.cookies();
-  return cookies.find((cookie) => cookie.name === SESSION_COOKIE);
+  return cookies.find((cookie) => cookie.name.endsWith(SESSION_COOKIE_SUFFIX));
 }
 
 test.describe("cihaz türü seçimi", () => {
@@ -104,7 +108,7 @@ test.describe("cihaz türü seçimi", () => {
     await page.waitForURL("**/panel");
 
     const visibleCookies = await page.evaluate(() => document.cookie);
-    expect(visibleCookies).not.toContain(SESSION_COOKIE);
+    expect(visibleCookies).not.toContain(SESSION_COOKIE_SUFFIX);
   });
 
   test("kurulu PWA olmadan tüm ekranlar çalışır", async ({ page }) => {

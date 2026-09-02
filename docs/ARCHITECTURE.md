@@ -29,12 +29,27 @@ src/
 ├── server/          YALNIZCA SUNUCU — "server-only" işaretli
 │   ├── env.ts           Ortam değişkenleri ve arka uç seçimi
 │   ├── http.ts          API yanıt zarfı ve hata eşlemesi
+│   ├── security/
+│   │   ├── csrf.ts           İmzalı CSRF jetonu + origin kontrolü
+│   │   ├── config.ts         Çerez adları ve gizli anahtar (middleware ile ortak)
+│   │   └── route.ts          apiRoute() merkezi sarmalayıcı
+│   ├── rate-limit/
+│   │   ├── types.ts          LoginRateLimiter sözleşmesi
+│   │   ├── memory.ts         Geliştirme/test uygulaması
+│   │   ├── postgres.ts       Üretim: paylaşımlı atomik sayaç
+│   │   └── index.ts          Fail-closed seçim
+│   ├── portfolio/
+│   │   └── user-portfolio-service.ts   Kullanıcının KENDİ verisi (UserActor)
+│   ├── admin/
+│   │   └── admin-service.ts  Yönetim işlemleri (AdminActor) + denetim kaydı
 │   └── auth/
-│       ├── backend.ts        AuthBackend sözleşmesi
-│       ├── supabase-backend.ts   Üretim uygulaması
+│       ├── actor.ts          Markalanmış aktör/kapsam tipleri
+│       ├── backend.ts        AuthBackend sözleşmesi (DataScope alır)
+│       ├── supabase-backend.ts   Üretim uygulaması (atomik RPC'ler)
 │       ├── local-backend.ts      Geliştirme test ikizi
-│       ├── service.ts        Yetkilendirme, denetim kaydı, iş kuralları
-│       └── index.ts          Tekil örnekler, çerez ve oturum yardımcıları
+│       ├── service.ts        Giriş, oturum, parola + guard'lar
+│       └── index.ts          Tekil örnekler, çerez ve guard yardımcıları
+├── proxy.ts         CSRF jetonu üretimi ve taşınması (Next 16 proxy kuralı)
 ├── state/           React bağlamı (portföy durumu)
 ├── components/      Arayüz bileşenleri
 └── app/             Sayfalar ve API route'ları
@@ -109,6 +124,89 @@ mevcut oturumu ilk istekte geçersiz olur.
 - `admin` rolü yalnızca `npm run admin:create` ile verilir.
 - Arayüzdeki menü gizleme yalnızca sadelik içindir; güvenlik sunucuda ve RLS'de sağlanır.
 
+## 3.6 Yetkilendirme sınırı (Sprint 0.5)
+
+### Neden bu tasarım
+
+Tarayıcı Supabase Data API'ye doğrudan bağlanmaz. Sunucu (BFF) Supabase'e
+**`service_role` anahtarıyla** bağlanır ve bu anahtar **RLS'yi atlar**.
+Dolayısıyla BFF içinden yapılan sorgularda satır düzeyi güvenlik uygulanmaz.
+
+- **Birincil güvenlik sınırı:** sunucu tarafı actor authorization.
+- **RLS:** Supabase Data API'ye kullanıcı JWT'siyle doğrudan erişim
+  girişimlerine karşı **ikinci savunma katmanı**.
+
+Bu ayrım `docs/SECURITY.md` bölüm 14'te ayrıntılı anlatılır ve dokümanın hiçbir
+yerinde "veriler RLS ile korunuyor" gibi belirsiz bir ifade kullanılmaz.
+
+### Markalanmış aktör tipleri
+
+`src/server/auth/actor.ts`:
+
+```
+UserActor   <- requireAuthenticatedUser() / requireUsableUser()
+AdminActor  <- requireCurrentAdmin()
+DataScope   <- ownScope(userActor) | adminScope(adminActor, targetUserId)
+```
+
+Arka ucun veri metotları `userId: string` yerine `DataScope` alır:
+
+```ts
+listTransactions(scope: DataScope): Promise<Transaction[]>
+createTransaction(scope: DataScope, input: TransactionInput): Promise<Transaction>
+```
+
+Bir route gövdeden gelen dizeyi `DataScope`'a dönüştüremez — bu bir derleme
+hatasıdır. Normal kullanıcı route'ları `AdminActor` üretemediği için
+`adminScope()` çağıramaz.
+
+### Servis katmanı
+
+| Servis | Dosya | Aktör | Kapsam |
+| --- | --- | --- | --- |
+| `AuthService` | `src/server/auth/service.ts` | — | Giriş, oturum, parola |
+| `UserPortfolioService` | `src/server/portfolio/user-portfolio-service.ts` | `UserActor` | Yalnızca kendi verisi |
+| `AdminService` | `src/server/admin/admin-service.ts` | `AdminActor` | Başka kullanıcı + denetim kaydı |
+
+### Guard matrisi
+
+| Uç | Guard |
+| --- | --- |
+| `POST /api/auth/login` | Herkese açık (origin + CSRF + hız sınırı) |
+| `POST /api/auth/logout` | Herkese açık |
+| `GET /api/auth/session` | Herkese açık |
+| `POST /api/auth/change-password` | `requireAuthenticatedUser` (geçici parolalı geçer) |
+| `/api/portfolio` | `requireUsableUser` |
+| `/api/transactions`, `/api/transactions/[id]` | `requireUsableUser` |
+| `/api/admin/**` | `requireCurrentAdmin` |
+
+`tests/authorization-matrix.test.ts` bu tabloyu kaynak kod üzerinde doğrular.
+
+## 3.7 Merkezi route sarmalayıcısı
+
+Tüm API route'ları `apiRoute()` ile sarılır (`src/server/security/route.ts`):
+
+1. Durum değiştiren isteklerde origin + CSRF doğrulaması.
+2. `AppError` → HTTP yanıtı dönüşümü; beklenmeyen hataların iç detayı sızmaz.
+
+Bir route'un bu kontrolü atlaması test tarafından engellenir.
+
+## 3.8 Oturum yaşam döngüsü
+
+```
+login()
+  → sessionPolicyFor(deviceMode)          idle + absolute + çerez kalıcılığı
+  → backend.createSession(...)            app_sessions satırı
+  → çerez (HttpOnly, Secure, SameSite=Lax, Path=/, __Host- öneki)
+
+her istek
+  → backend.resolveSession(token, now)    idle VE absolute kontrolü
+  → süresi geçmişse satır silinir, null döner
+  → 60 sn'de bir touchSession()           last_seen_at + idle_expires_at
+```
+
+İstemcideki `DeviceGuard` sayacı yalnızca kullanıcı deneyimi içindir.
+
 ## 4. Arka uç seçimi
 
 ```
@@ -131,10 +229,10 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | POST | `/api/auth/login` | Herkese açık |
 | POST | `/api/auth/logout` | Herkese açık |
 | GET | `/api/auth/session` | Herkese açık (oturum yoksa `null`) |
-| POST | `/api/auth/change-password` | Oturum |
-| GET / PATCH | `/api/portfolio` | Oturum (yalnızca kendi kaydı) |
-| GET / POST / DELETE | `/api/transactions` | Oturum (yalnızca kendi kayıtları) |
-| PUT / DELETE | `/api/transactions/[id]` | Oturum (yalnızca kendi kayıtları) |
+| POST | `/api/auth/change-password` | Oturum (geçici parolalı da geçer) |
+| GET / PATCH | `/api/portfolio` | Kullanılabilir oturum (yalnızca kendi kaydı) |
+| GET / POST / DELETE | `/api/transactions` | Kullanılabilir oturum (yalnızca kendi kayıtları) |
+| PUT / DELETE | `/api/transactions/[id]` | Kullanılabilir oturum (yalnızca kendi kayıtları) |
 | GET / POST | `/api/admin/users` | Yönetici |
 | GET / PATCH / DELETE | `/api/admin/users/[id]` | Yönetici |
 | POST | `/api/admin/users/[id]/password` | Yönetici |
@@ -144,6 +242,7 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 **Kayıt (register/signup) ucu bilinçli olarak yoktur** ve varlığı testle engellenir.
 
 Tüm yanıtlar tek zarf kullanır: başarıda `{ data }`, hatada `{ error, code }`.
+Durum değiştiren her uç origin + CSRF kontrolünden geçer (bkz. 3.7).
 
 ## 6. Depolama soyutlaması
 
@@ -185,6 +284,7 @@ Sağlayıcı başarısız olduğunda `status: "unavailable"` döner; **başka pi
 - `src/app/manifest.ts` — ad, kısa ad, standalone mod, tema renkleri, simgeler.
 - `public/sw.js` — yalnızca statik varlık önbelleği. `/api/*` **ve kimliği doğrulanmış sayfa
   yanıtları** asla önbelleğe alınmaz.
+- Güvenlik başlıkları (CSP, HSTS, Permissions-Policy vb.) `next.config.ts` içindedir.
 - `src/app/cevrimdisi/page.tsx` — çevrimdışı yedek sayfa; fiyatların güncellenmediğini açıkça yazar.
 - Servis çalışanı yalnızca üretim derlemesinde kaydedilir; geliştirmede eski kayıtlar temizlenir.
 - Simgeler `npm run icons` ile koddan üretilir (fotoğraf veya dış kaynak yok).

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS,
   resolveIdleTimeoutMs,
+  sessionPolicyFor,
+  SHARED_DEVICE_ABSOLUTE_LIFETIME_MS,
   SHARED_DEVICE_IDLE_TIMEOUT_MS,
   TEST_OVERRIDE_TOKEN,
   type UserProfile,
@@ -9,6 +12,7 @@ import {
 import { sessionCookieOptions } from "@/server/auth/cookies";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { AuthService } from "@/server/auth/service";
+import { MemoryLoginRateLimiter } from "@/server/rate-limit/memory";
 
 /**
  * Şirket / ortak cihaz gereksinimleri.
@@ -26,7 +30,7 @@ let user: UserProfile;
 
 beforeEach(async () => {
   backend = new LocalAuthBackend({ inMemory: true });
-  service = new AuthService(backend);
+  service = new AuthService(backend, { rateLimiter: new MemoryLoginRateLimiter("test-pepper") });
   user = await backend.createUser({
     username: "ayse",
     displayName: "Ayşe Kullanıcı",
@@ -39,7 +43,7 @@ beforeEach(async () => {
 describe("oturum çerezi", () => {
   it("her zaman HttpOnly ve SameSite=Lax olur", () => {
     for (const mode of ["personal", "shared"] as const) {
-      const options = sessionCookieOptions(EXPIRES, mode, true);
+      const options = sessionCookieOptions(EXPIRES, sessionPolicyFor(mode), true);
       expect(options.httpOnly).toBe(true);
       expect(options.sameSite).toBe("lax");
       expect(options.path).toBe("/");
@@ -47,19 +51,44 @@ describe("oturum çerezi", () => {
   });
 
   it("HTTPS üzerinde Secure işaretlenir", () => {
-    expect(sessionCookieOptions(EXPIRES, "personal", true).secure).toBe(true);
-    expect(sessionCookieOptions(EXPIRES, "shared", true).secure).toBe(true);
+    for (const mode of ["personal", "shared"] as const) {
+      expect(sessionCookieOptions(EXPIRES, sessionPolicyFor(mode), true).secure).toBe(true);
+    }
+  });
+
+  it("Path=/ verilir ve Domain verilmez (__Host- öneki için zorunlu)", () => {
+    const options = sessionCookieOptions(EXPIRES, sessionPolicyFor("personal"), true);
+    expect(options.path).toBe("/");
+    expect("domain" in options).toBe(false);
   });
 
   it("ortak cihazda KALICI DEĞİLDİR (son kullanma tarihi yok)", () => {
-    const options = sessionCookieOptions(EXPIRES, "shared", true);
+    const options = sessionCookieOptions(EXPIRES, sessionPolicyFor("shared"), true);
     expect("expires" in options).toBe(false);
   });
 
   it("kişisel cihazda kalıcıdır", () => {
-    const options = sessionCookieOptions(EXPIRES, "personal", true);
+    const options = sessionCookieOptions(EXPIRES, sessionPolicyFor("personal"), true);
     expect("expires" in options).toBe(true);
     expect((options as { expires: Date }).expires.toISOString()).toBe(EXPIRES);
+  });
+});
+
+describe("oturum süresi politikası", () => {
+  it("ortak cihaz: 15 dakika hareketsizlik, 8 saat mutlak süre", () => {
+    const policy = sessionPolicyFor("shared");
+    expect(policy.idleTimeoutMs).toBe(SHARED_DEVICE_IDLE_TIMEOUT_MS);
+    expect(policy.absoluteLifetimeMs).toBe(SHARED_DEVICE_ABSOLUTE_LIFETIME_MS);
+    expect(policy.absoluteLifetimeMs).toBe(8 * 60 * 60 * 1000);
+    expect(policy.persistentCookie).toBe(false);
+  });
+
+  it("kişisel cihaz: hareketsizlik sınırı yok ama mutlak süre ZORUNLU", () => {
+    const policy = sessionPolicyFor("personal");
+    expect(policy.idleTimeoutMs).toBeNull();
+    expect(policy.absoluteLifetimeMs).toBe(PERSONAL_DEVICE_ABSOLUTE_LIFETIME_MS);
+    expect(policy.absoluteLifetimeMs).toBeGreaterThan(0);
+    expect(policy.persistentCookie).toBe(true);
   });
 });
 

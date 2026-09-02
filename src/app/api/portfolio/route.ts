@@ -1,27 +1,18 @@
-import { getAuthBackend, requireCurrentUser } from "@/server/auth";
-import { failure, ok, readJson } from "@/server/http";
+import { getUserPortfolioService, requireUsableUser } from "@/server/auth";
+import { ok, readJson } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
-export async function GET() {
-  try {
-    const actor = await requireCurrentUser();
-    return ok(await getAuthBackend().getPortfolio(actor.id));
-  } catch (error) {
-    return failure(error);
-  }
-}
+/**
+ * Kullanıcının KENDİ portföyü.
+ * Hedef kullanıcı kimliği gövdeden/parametreden ALINMAZ; her zaman oturumdan gelir.
+ */
+export const GET = apiRoute(async () => {
+  const actor = await requireUsableUser();
+  return ok(await getUserPortfolioService().getPortfolio(actor));
+});
 
-export async function PATCH(request: Request) {
-  try {
-    const actor = await requireCurrentUser();
-    const body = await readJson<{ name?: string; displayName?: string }>(request);
-    const patch = {
-      ...(typeof body.name === "string" ? { name: body.name.trim().slice(0, 80) } : {}),
-      ...(typeof body.displayName === "string"
-        ? { displayName: body.displayName.trim().slice(0, 80) }
-        : {}),
-    };
-    return ok(await getAuthBackend().updatePortfolio(actor.id, patch));
-  } catch (error) {
-    return failure(error);
-  }
-}
+export const PATCH = apiRoute(async (request) => {
+  const actor = await requireUsableUser();
+  const body = await readJson<{ name?: string; displayName?: string }>(request);
+  return ok(await getUserPortfolioService().renamePortfolio(actor, body));
+});

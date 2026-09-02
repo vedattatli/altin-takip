@@ -1,9 +1,10 @@
 /**
- * Giriş denemeleri için kayan pencere + artan bekleme (backoff) sınırlayıcı.
+ * Kayan pencere + artan bekleme (backoff) algoritması — SAF uygulama.
  *
- * Sunucu belleğinde tutulur. Tek örnekli (single instance) dağıtımlar için
- * yeterlidir; çok örnekli üretim dağıtımında paylaşımlı bir depoya
- * (Redis / Postgres) taşınmalıdır — bkz. docs/SECURITY.md.
+ * Süreç belleğinde çalışır. Üretimde tek başına KULLANILMAZ; çok örnekli
+ * dağıtımda sayaç bölüneceği için Postgres tabanlı paylaşımlı uygulama
+ * kullanılır (src/server/rate-limit/postgres.ts). Bu sınıf yalnızca
+ * geliştirme/test uygulamasının çekirdeğidir.
  */
 
 export interface RateLimitDecision {
@@ -32,7 +33,7 @@ interface Bucket {
   lockLevel: number;
 }
 
-export class LoginRateLimiter {
+export class SlidingWindowRateLimiter {
   private readonly maxAttempts: number;
   private readonly windowMs: number;
   private readonly baseLockMs: number;

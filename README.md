@@ -57,13 +57,26 @@ Yönetim ekranından son kullanıcıları oluşturabilirsiniz.
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anahtar (RLS ile korunur) |
    | `SUPABASE_SERVICE_ROLE_KEY` | **Yalnızca sunucu.** `NEXT_PUBLIC_` öneki asla verilmez |
    | `AUTH_INTERNAL_EMAIL_DOMAIN` | Kullanıcı adından türetilen dahili kimliğin alan adı |
+   | `AUTH_CSRF_SECRET` | CSRF jetonlarını imzalar. **Üretimde zorunlu** |
+   | `RATE_LIMIT_PEPPER` | Hız sınırlayıcı anahtarını gizler. **Üretimde zorunlu** |
+   | `APP_ORIGIN` | Beklenen origin (CSRF kontrolü). Üretimde önerilir |
 
 3. `supabase/migrations/` altındaki SQL dosyalarını **sırayla** çalıştırın:
 
    ```
-   0001_init.sql                 -> tablolar, kısıtlar, indeksler
-   0002_rls.sql                  -> satır düzeyi güvenlik politikaları
-   0003_seed_reference_data.sql  -> altın ürün kataloğu ve fiyat kaynağı
+   0001_init.sql                  -> tablolar, kısıtlar, indeksler
+   0002_rls.sql                   -> satır düzeyi güvenlik politikaları
+   0003_seed_reference_data.sql   -> altın ürün kataloğu ve fiyat kaynağı
+   0004_device_mode.sql           -> oturum cihaz türü
+   0005_security_hardening.sql    -> oturum süreleri, bütünlük kısıtları,
+                                     atomik işlem yazımı, dağıtık hız sınırlayıcı,
+                                     denetim kaydı tetikleyicileri
+   ```
+
+   RLS politikalarını doğrulamak için (Supabase CLI + Docker gerekir):
+
+   ```bash
+   npm run test:db
    ```
 
 4. İlk yöneticiyi oluşturun:
@@ -87,8 +100,10 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
-| `npm run test:e2e` | Tarayıcı duman testleri (Playwright, 390/768/1440 px) |
-| `npm run verify` | lint + typecheck + test + build |
+| `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
+| `npm run test:db` | RLS davranış testleri (pgTAP; Supabase CLI + Docker gerektirir) |
+| `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
+| `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
 | `npm run admin:create` | İlk yönetici hesabını oluşturur |
 | `npm run icons` | PWA simgelerini koddan üretir |
 | `npm run db:catalog` | Ürün kataloğunu SQL migration'ına yazar |
@@ -148,7 +163,37 @@ Her iki modda da:
 - Bildirim, push, konum veya kamera izni istenmez.
 - Kurulu PWA ile normal tarayıcı kullanımı arasında görsel ve işlevsel fark yoktur.
 
-Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 12.
+Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 12 ve 16.
+
+## Güvenlik özeti
+
+- **Yetkilendirme sınırı sunucudadır.** BFF, Supabase'e `service_role` ile bağlanır
+  ve bu anahtar RLS'yi atlar; hangi satırın kime ait olduğunu markalanmış actor
+  tipleri belirler. RLS, Data API'ye doğrudan erişime karşı ikinci katmandır.
+  Ayrıntı: [docs/SECURITY.md](docs/SECURITY.md) bölüm 14.
+- **Geçici parolalı kullanıcı** portföy, işlem ve yönetim uçlarını kullanamaz
+  (`PASSWORD_CHANGE_REQUIRED`).
+- **Oturum süreleri sunucuda uygulanır:** ortak cihazda 15 dk hareketsizlik ve
+  8 saat mutlak süre; kişisel cihazda mutlak süre zorunludur.
+- **CSRF:** durum değiştiren her istek `Origin` + `Sec-Fetch-Site` ve imzalı
+  senkronizasyon jetonu ile korunur; jeton hiçbir tarayıcı deposuna yazılmaz.
+- **Hız sınırlayıcı** üretimde Postgres'te paylaşılır; yapılandırma eksikse
+  sessizce zayıf moda düşülmez.
+- **Veritabanı bütünlüğü:** kullanıcı başına tek portföy, portföy sahipliği
+  composite foreign key ile zorlanır, birim kataloğa uyar ve aşırı satış
+  eşzamanlı isteklerde de atomik olarak engellenir.
+- **Denetim kayıtları** tetikleyici düzeyinde değiştirilemez.
+
+## Teslim paketi
+
+```bash
+npm run package:source
+```
+
+`dist/Altin-Takip-Source.zip` üretir; yanında SHA-256 ve dosya manifesti oluşturur.
+Pakete `.git`, `node_modules`, `.next`, `.data`, test çıktıları ve gerçek `.env`
+dosyaları **girmez**. Komut paketi yeniden açıp secret taraması yapar; iz bulursa
+paketi siler ve hata verir.
 
 ## Demo modu
 

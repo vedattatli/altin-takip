@@ -11,8 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:db": "node scripts/run-db-tests.mjs",
     "admin:create": "tsx scripts/admin-create.ts",
     "icons": "node scripts/generate-icons.mjs",
+    "package:source": "node scripts/package-source.mjs",
     "db:catalog": "tsx scripts/generate-catalog-sql.ts",
     "verify:bundle": "node scripts/check-client-bundle.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle"

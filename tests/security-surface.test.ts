@@ -144,7 +144,7 @@ describe("yönetim uçları korunur", () => {
     }
   });
 
-  it("kullanıcı verisi uçları oturum zorunlu kılar", () => {
+  it("kullanıcı verisi uçları kullanılabilir oturum zorunlu kılar", () => {
     const userRoutes = ROUTE_FILES.filter(
       (file) =>
         !file.includes(`${sep}admin${sep}`) &&
@@ -152,7 +152,8 @@ describe("yönetim uçları korunur", () => {
     );
     expect(userRoutes.length).toBeGreaterThan(0);
     for (const file of userRoutes) {
-      expect(read(file), file).toContain("requireCurrentUser");
+      // requireUsableUser: geçici parolalı kullanıcı bu uçlara ERİŞEMEZ.
+      expect(read(file), file).toContain("requireUsableUser");
     }
   });
 

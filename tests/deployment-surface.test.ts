@@ -98,8 +98,9 @@ describe("cihaz izinleri istenmez", () => {
 
 describe("kimlik bilgisi ve portföy verisi tarayıcı deposuna yazılmaz", () => {
   it("localStorage veya sessionStorage kullanılmaz", () => {
+    // Yorumlar ayıklanır: denetlenen şey kural metni değil, çalışan koddur.
     const offenders = SOURCE_FILES.filter((file) =>
-      /\b(localStorage|sessionStorage)\b/.test(read(file)),
+      /\b(localStorage|sessionStorage)\b/.test(readCode(file)),
     );
     expect(offenders).toEqual([]);
   });

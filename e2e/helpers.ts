@@ -118,32 +118,88 @@ export async function addPurchase(
 
 export interface BrowserApiResult<T = unknown> {
   status: number;
-  body: T | null;
+  /** Başarılı yanıtın { data } içeriği. */
+  data: T | null;
+  /** Hata yanıtının mesajı ve kodu. */
+  error: string | null;
+  code: string | null;
 }
 
 /**
  * API isteğini TARAYICI İÇİNDEN yapar.
  *
  * Playwright'ın `page.request` istemcisi Node tarafında çalışır ve `Secure`
- * işaretli oturum çerezini düz HTTP üzerinden göndermez. Gerçek kullanıcı
- * davranışını doğrulamak için istek sayfanın kendi bağlamından atılır.
+ * işaretli oturum çerezini düz HTTP üzerinden göndermez. Ayrıca durum
+ * değiştiren istekler CSRF jetonu ister; jeton sayfadaki meta etiketindedir.
  */
 export async function browserApi<T = unknown>(
   page: Page,
   method: string,
   path: string,
   body?: unknown,
+  options: { csrf?: "auto" | "omit" | "invalid" } = {},
 ): Promise<BrowserApiResult<T>> {
   return page.evaluate(
-    async ({ method, path, body }) => {
+    async ({ method, path, body, csrf }) => {
+      const headers: Record<string, string> = {};
+      if (body) headers["Content-Type"] = "application/json";
+
+      if (csrf !== "omit") {
+        const token =
+          document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ?? "";
+        headers["X-CSRF-Token"] = csrf === "invalid" ? "gecersiz-jeton" : token;
+      }
+
       const response = await fetch(path, {
         method,
-        headers: body ? { "Content-Type": "application/json" } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
-      const parsed = await response.json().catch(() => null);
-      return { status: response.status, body: parsed };
+      const parsed = (await response.json().catch(() => null)) as
+        | { data?: unknown; error?: string; code?: string }
+        | null;
+
+      return {
+        status: response.status,
+        data: parsed?.data ?? null,
+        error: parsed?.error ?? null,
+        code: parsed?.code ?? null,
+      };
     },
-    { method, path, body: body ?? null },
+    { method, path, body: body ?? null, csrf: options.csrf ?? "auto" },
   ) as Promise<BrowserApiResult<T>>;
+}
+
+/**
+ * Kullanıcının tüm oturumlarını SUNUCU TARAFINDA süresi geçmiş hâle getirir.
+ *
+ * Yerel geliştirme deposundaki idle/absolute süreler geçmişe alınır; böylece
+ * 15 dakika beklemeden sunucunun süresi dolmuş oturumu reddettiği doğrulanabilir.
+ */
+export async function expireSessionsOnServer(username: string): Promise<number> {
+  const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const file = join(process.cwd(), ".data", E2E_STORE_FILE);
+  if (!existsSync(file)) return 0;
+
+  const store = JSON.parse(readFileSync(file, "utf8")) as {
+    users: { id: string; username: string }[];
+    sessions: { userId: string; idleExpiresAt: string | null; absoluteExpiresAt: string }[];
+  };
+
+  const user = store.users.find((candidate) => candidate.username === username);
+  if (!user) return 0;
+
+  const past = new Date(Date.now() - 60_000).toISOString();
+  let touched = 0;
+  for (const session of store.sessions) {
+    if (session.userId !== user.id) continue;
+    session.idleExpiresAt = past;
+    session.absoluteExpiresAt = past;
+    touched += 1;
+  }
+
+  writeFileSync(file, JSON.stringify(store, null, 2), "utf8");
+  return touched;
 }

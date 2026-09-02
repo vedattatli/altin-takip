@@ -12,6 +12,11 @@
 | Anahtar sızıntısı | `service_role` yalnızca `server-only` modüllerde; testle denetlenir |
 | Pasifleştirilen kullanıcının erişimi sürmesi | Oturumlar anında silinir; her istekte `status` yeniden okunur |
 | Yönetici yetkisinin izlenememesi | `admin_audit_logs` ile değiştirilemez denetim kaydı |
+| Siteler arası istek sahteciliği (CSRF) | Origin + Sec-Fetch-Site kontrolü ve imzalı senkronizasyon jetonu |
+| Geçici parolayla uygulamayı kullanma | requireUsableUser guard'ı; UI yönlendirmesi tek önlem değildir |
+| Ortak cihazda açık kalan oturum | Sunucu tarafında hareketsizlik (15 dk) ve mutlak (8 sa) süre |
+| Çok örnekli dağıtımda hız sınırının bölünmesi | Postgres tabanlı paylaşımlı sayaç; üretimde zorunlu |
+| Eşzamanlı isteklerle aşırı satış | Portföy satırı kilidiyle atomik Postgres RPC |
 
 ## 2. Parola custody'si
 
@@ -75,6 +80,7 @@ normalizeUsername(girdi) + "@" + AUTH_INTERNAL_EMAIL_DOMAIN
 - Çerez: `httpOnly`, `sameSite=lax`, HTTPS üzerinde `secure`. Kişisel cihazda açık son
   kullanma tarihi verilir; şirket/ortak cihazda verilmez (tarayıcı kapanınca silinir).
 - Her istekte profil yeniden okunur; `status !== 'active'` ise oturum reddedilir.
+- Her istekte hem hareketsizlik hem mutlak süre SUNUCUDA denetlenir (bölüm 16).
 - Oturumlar şu durumlarda topluca silinir:
   - kullanıcı kendi parolasını değiştirdiğinde,
   - yönetici parolayı sıfırladığında,
@@ -89,12 +95,18 @@ normalizeUsername(girdi) + "@" + AUTH_INTERNAL_EMAIL_DOMAIN
 - Varsayılan: 15 dakikada 5 başarısız deneme → 60 sn bekleme, her ihlalde ikiye katlanır (en fazla 15 dk).
 - Bekleme sırasında **doğru parola bile** kabul edilmez.
 
-> **Üretim notu:** sayaç süreç belleğindedir. Çok örnekli (birden fazla sunucu) dağıtımda
-> paylaşımlı bir depoya (Redis veya Postgres) taşınmalıdır. Bkz. [ROADMAP.md](ROADMAP.md).
+> **Üretimde sayaç Postgres'te paylaşılır.** Süreç belleğindeki uygulama yalnızca
+> geliştirme/test içindir ve üretimde sessizce kullanılamaz. Ayrıntı: bölüm 18.
 
 ## 6. Satır düzeyi güvenlik (RLS)
 
 Politikalar: [`supabase/migrations/0002_rls.sql`](../supabase/migrations/0002_rls.sql)
+Davranış testleri: [`supabase/tests/rls.test.sql`](../supabase/tests/rls.test.sql) — `npm run test:db`
+
+> **Önemli:** RLS, BFF içinden yapılan `service_role` sorgularında UYGULANMAZ.
+> Burada tanımlı politikalar, Supabase Data API'ye kullanıcı JWT'siyle doğrudan
+> erişim girişimlerine karşı **ikinci savunma katmanıdır**. Birincil sınır
+> sunucu tarafı actor authorization'dır (bölüm 14).
 
 | Tablo | Normal kullanıcı | Yönetici | Notlar |
 | --- | --- | --- | --- |
@@ -165,10 +177,9 @@ Kayıtlar değiştirilemez ve silinemez: `UPDATE`/`DELETE` politikası tanımlan
 
 | Sınır | Etki | Plan |
 | --- | --- | --- |
-| Hız sınırı süreç belleğinde | Çok örnekli dağıtımda sayaç bölünür | Redis/Postgres'e taşı |
-| CSRF için ayrı token yok | `sameSite=lax` çerez + JSON gövde gereksinimi ile azaltılmıştır | Sprint 1'de çift gönderim çerezi |
-| Sunucu verilere `service_role` ile eriştiği için RLS çalışma zamanında ikinci savunma hattıdır | Uygulama hatası veri sızdırabilir | Erişimler her zaman oturumdan gelen `user_id` ile filtrelenir; testlerle doğrulanır |
-| Supabase ortamı olmadan `SupabaseAuthBackend` çalıştırılamadı | Bu yol yerel olarak doğrulanmadı | Supabase projesi açıldığında entegrasyon testi |
+| Supabase ortamı olmadan SupabaseAuthBackend ve SQL yolları çalıştırılamadı | RPC'ler, tetikleyiciler ve RLS testleri gerçek veritabanında doğrulanmadı | Supabase projesi açıldığında `npm run test:db` ve entegrasyon testleri |
+| CSP script-src satır içi koda izin verir | Next.js bootstrap script'i için gereklidir | Nonce tabanlı CSP (middleware ile) |
+| purge_expired_sessions() otomatik çağrılmıyor | Süresi geçen satırlar birikir (erişim yine reddedilir) | pg_cron zamanlanmış görevi |
 
 ## 12. Şirket bilgisayarları ve ortak cihaz kullanımı
 
@@ -219,7 +230,180 @@ senkronizasyon sunucu üzerinden yapılır (`ServerPortfolioRepository`). Cihazd
 veri bırakılmaz. IndexedDB yalnızca geliştirme ortamındaki demo modunda kullanılır ve arayüzde
 verinin senkronize olmadığı açıkça belirtilir.
 
-## 13. Secret yönetimi
+## 14. Service-role ve RLS sınırı (NET AÇIKLAMA)
+
+Bu ürün bir **BFF (Backend For Frontend)** mimarisi kullanır. Tarayıcı Supabase
+Data API'ye doğrudan bağlanmaz; yalnızca bu uygulamanın API uçlarını çağırır.
+Sunucu ise Supabase'e **`service_role` anahtarıyla** bağlanır.
+
+> **`service_role` RLS'yi ATLAR.** BFF içinden yapılan sorgularda satır düzeyi
+> güvenlik politikaları **UYGULANMAZ**. Bu bilinçli bir tasarım tercihidir ve
+> aşağıdaki iki kural onu güvenli kılar.
+
+**Birincil güvenlik sınırı: sunucu tarafı actor authorization.**
+Hangi satırın kime ait olduğunu belirleyen tek gerçek mekanizma budur.
+
+**RLS ikinci katmandır.** Kullanıcı JWT'siyle Supabase Data API'ye doğrudan
+erişim denenirse (anon anahtar sızarsa, ileride istemci tarafı bir özellik
+eklenirse veya bir yanlış yapılandırma olursa) RLS devreye girer. RLS'nin
+gerçekten çalıştığı `supabase/tests/rls.test.sql` ile doğrulanır.
+
+**Yanlış olurdu:** "Veriler RLS ile korunuyor." — BFF sorguları için bu ifade
+DOĞRU DEĞİLDİR ve dokümanda bu şekilde geçmemelidir.
+
+### 14.1 Actor tipleri ile derleme zamanı koruma
+
+`src/server/auth/actor.ts` markalanmış (branded) tipler tanımlar:
+
+| Tip | Nasıl üretilir | Ne işe yarar |
+| --- | --- | --- |
+| `UserActor` | `requireAuthenticatedUser` / `requireUsableUser` | Kullanıcının kendisi |
+| `AdminActor` | `requireCurrentAdmin` | Yönetici (rol veritabanından okunur) |
+| `DataScope` | `ownScope(actor)` veya `adminScope(admin, targetId)` | Veri erişim kapsamı |
+
+Arka ucun veri metotları artık `userId: string` DEĞİL, `DataScope` alır. Bu
+sayede bir route gövdeden gelen bir kimliği veri metoduna geçiremez — bu bir
+**derleme hatasıdır**. Normal kullanıcı route'ları `AdminActor` üretemediği için
+`adminScope()` de çağıramaz.
+
+Servis ayrımı:
+
+| Servis | Aktör | Kapsam |
+| --- | --- | --- |
+| `AuthService` | — | Giriş, oturum, parola |
+| `UserPortfolioService` | `UserActor` | YALNIZCA kullanıcının kendi verisi |
+| `AdminService` | `AdminActor` | Başka kullanıcıyı hedefleyen işlemler + denetim kaydı |
+
+`tests/authorization-matrix.test.ts` her API ucunun hangi guard'ı kullandığını
+tablo hâlinde doğrular; yeni bir uç eklenirse tablo güncellenmeden test geçmez.
+
+## 15. Geçici parola guard'ı
+
+İki ayrı guard vardır:
+
+| Guard | Geçici parolalı kullanıcı | Kullanıldığı uçlar |
+| --- | --- | --- |
+| `requireAuthenticatedUser` | **Geçer** | `/api/auth/session`, `/api/auth/logout`, `/api/auth/change-password` |
+| `requireUsableUser` | **Geçemez** | Portföy, işlemler, ayarlar |
+| `requireCurrentAdmin` | **Geçemez** | Tüm yönetim uçları |
+
+Reddedilen istek `403` ve `code: "PASSWORD_CHANGE_REQUIRED"` döner. Arayüz
+yönlendirmesi tek önlem DEĞİLDİR; sunucu bağımsız olarak reddeder.
+Parola değiştikten sonra tüm oturumlar düşer ve kullanıcı yeniden giriş yapar.
+
+## 16. Sunucu tarafı oturum süresi
+
+| | Kişisel cihaz | Şirket / ortak cihaz |
+| --- | --- | --- |
+| Hareketsizlik | Yok | **15 dakika** |
+| Mutlak süre | 14 gün | **8 saat** |
+| Çerez | Kalıcı | Tarayıcı kapanınca silinir |
+
+`app_sessions` tablosunda `device_mode`, `last_seen_at`, `idle_expires_at`,
+`absolute_expires_at` ve `revoked_at` alanları tutulur. `resolveSession()` her
+istekte **hem** hareketsizlik **hem** mutlak süreyi kontrol eder; süresi geçen
+oturum reddedilir ve kaydı silinir.
+
+- `last_seen_at` her istekte yazılmaz: en fazla 60 saniyede bir tazelenir.
+- İstemcideki 15 dakikalık sayaç yalnızca kullanıcı deneyimi içindir; askıya
+  alınmış sekme veya tarayıcı oturum geri yükleme senaryolarında bile
+  **güvenlik sınırı sunucudadır** (`tests/session-expiry.test.ts`).
+- `purge_expired_sessions()` SQL fonksiyonu zamanlanmış görevle çağrılabilir.
+
+Üretimde çerez adı `__Host-` öneklidir: tarayıcı bu öneki yalnızca `Secure`,
+`Path=/` ve `Domain` verilmemiş çerezlerde kabul eder; alt alan adından çerez
+sabitleme saldırısını engeller.
+
+## 17. CSRF ve same-origin koruması
+
+Durum değiştiren her istek (`POST`, `PUT`, `PATCH`, `DELETE`) iki kontrolden geçer:
+
+1. **Origin + Sec-Fetch-Site.** `Origin` beklenen origin ile birebir eşleşmeli;
+   `Sec-Fetch-Site` yalnızca `same-origin` veya `none` olabilir. Alt alan adından
+   gelen istek (`same-site`) de reddedilir.
+2. **İmzalı senkronizasyon jetonu.** Sunucu rastgele bir değer üretir, HMAC ile
+   imzalar ve `HttpOnly` çerezde saklar. Aynı ham değer sayfaya
+   `<meta name="csrf-token">` olarak basılır; istemci onu `X-CSRF-Token`
+   başlığında geri gönderir.
+
+- Jeton `localStorage`/`sessionStorage`'a **yazılmaz**; çerez `HttpOnly` olduğu
+  için `document.cookie` ile de okunamaz.
+- Klasik double-submit'ten daha güçlüdür: saldırgan alt alan adından çerez yazsa
+  bile geçerli **imza** üretemez.
+- Giriş ucu da aynı kontrolden geçer ve ayrıca hız sınırına tabidir.
+- Kontrolün unutulmasını engellemek için **tüm** route'lar `apiRoute()`
+  sarmalayıcısını kullanır; `tests/authorization-matrix.test.ts` bunu denetler.
+
+### 17.1 Güvenlik başlıkları
+
+`next.config.ts` içinde tanımlıdır:
+
+| Başlık | Değer |
+| --- | --- |
+| `Content-Security-Policy` | `default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `X-Frame-Options` | `DENY` |
+| `Permissions-Policy` | kamera, konum, mikrofon, ödeme vb. tamamen kapalı |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Strict-Transport-Security` | **yalnızca üretimde** (HTTPS) |
+
+CSP, Next.js'in satır içi bootstrap script'lerini bozmayacak biçimde yazılmıştır
+(script-src için `unsafe-inline`; geliştirmede ayrıca `unsafe-eval` ve websocket).
+Üretim derlemesi ve E2E testleriyle doğrulanır.
+
+## 18. Dağıtık hız sınırlayıcı
+
+| Ortam | Uygulama |
+| --- | --- |
+| Geliştirme/test | `MemoryLoginRateLimiter` (süreç belleği) |
+| Üretim | `PostgresLoginRateLimiter` (paylaşımlı, atomik SQL) |
+
+- Anahtar (`IP|kullanıcı adı`) **ham hâliyle saklanmaz**: `RATE_LIMIT_PEPPER` ile
+  HMAC-SHA256 özeti tutulur.
+- Sayaç güncellemesi `SELECT ... FOR UPDATE` ile atomiktir; çok örnekli
+  dağıtımda birlikte çalışır.
+- **Fail closed:** üretimde Supabase yapılandırması veya `RATE_LIMIT_PEPPER`
+  eksikse bellek sınırlayıcısına sessizce DÜŞÜLMEZ; açık bir yapılandırma hatası
+  verilir. Sınırlayıcı sorgusu hata verirse istek reddedilir, geçilmez.
+- `login_rate_limit_cleanup()` eski sayaçları temizler.
+
+## 19. Veritabanı bütünlüğü
+
+`0005_security_hardening.sql` ile eklenenler:
+
+| Kural | Nasıl |
+| --- | --- |
+| Kullanıcı başına tek portföy | `portfolios(user_id)` UNIQUE |
+| İşlemin portföyü sahibiyle uyumlu | `transactions(portfolio_id, user_id)` composite foreign key |
+| Birim ürün kataloğuyla uyumlu | `enforce_transaction_unit()` tetikleyicisi |
+| Adet ürününde tam sayı miktar | Aynı tetikleyici |
+| Aşırı satış engeli (eşzamanlı dâhil) | `lock_user_portfolio()` + `assert_no_oversell()` içeren atomik RPC'ler |
+
+Yazma yolları `create_transaction_checked`, `update_transaction_checked` ve
+`delete_transaction_checked` fonksiyonlarıdır. Her biri kullanıcının portföy
+satırını kilitler, yazar ve **aynı transaction içinde** kronolojik bakiyeyi
+doğrular; ihlal varsa `ALTIN_OVERSELL` hatasıyla geri alır. Bir alışın silinmesi
+veya azaltılması sonraki satışları geçersiz kılıyorsa da engellenir.
+
+Migration mevcut veriyle güvenle çalışır: kısıt eklemeden önce çakışan satırlar
+sayılır ve varsa açık bir hata ile durdurulur.
+
+## 20. Denetim kaydının değiştirilemezliği
+
+- RLS'e ek olarak **tetikleyici** düzeyinde `UPDATE` ve `DELETE` engellenir
+  (`reject_audit_mutation`). Bu kural `service_role` için de geçerlidir.
+- Uygulamada denetim kaydı düzenleme veya silme ucu **yoktur**.
+- Kayda parola, oturum jetonu, ham IP veya tam finansal içerik **yazılmaz**.
+- Kullanıcı silme akışı dürüsttür: `user.delete_attempt` (başarılı/başarısız),
+  `user.delete` (başarılı) ve arka uç hatası durumunda `user.delete` (başarısız)
+  ayrı ayrı kaydedilir.
+- Silme başarılı olduğu hâlde son denetim kaydı **yazılamazsa** bu gizlenmez:
+  yanıtta `auditWriteFailed: true` döner ve sunucuya `ALTIN_AUDIT_WRITE_FAILURE`
+  işaretiyle kritik log yazılır.
+
+
+## 21. Secret yönetimi
 
 - Depoya **yalnızca** `.env.example` girer ve içinde gerçek değer bulunmaz.
 - `.gitignore` tüm `.env*` dosyalarını dışlar (`.env.example` hariç) ve `.data/` klasörünü kapsar.

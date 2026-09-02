@@ -1,12 +1,14 @@
-import { getAuthService, requireCurrentAdmin } from "@/server/auth";
-import { failure, ok } from "@/server/http";
+import { getAdminService, requireCurrentAdmin } from "@/server/auth";
+import { ok } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
-export async function GET(request: Request) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const limit = Number(new URL(request.url).searchParams.get("limit") ?? "50");
-    return ok(await getAuthService().listAudit(actor, Math.min(Math.max(limit, 1), 200)));
-  } catch (error) {
-    return failure(error);
-  }
-}
+/**
+ * Denetim kayıtları — SALT OKUNUR.
+ * Kayıt düzenleme veya silme ucu bilinçli olarak YOKTUR; veritabanı da
+ * tetikleyici ile UPDATE/DELETE işlemlerini engeller.
+ */
+export const GET = apiRoute(async (request) => {
+  const actor = await requireCurrentAdmin();
+  const limit = Number(new URL(request.url).searchParams.get("limit") ?? "50");
+  return ok(await getAdminService().listAudit(actor, Math.min(Math.max(limit, 1), 200)));
+});

@@ -1,43 +1,45 @@
 import { validatePassword } from "@/auth/password";
-import { formatRetryAfter, LoginRateLimiter } from "@/auth/rate-limit";
+import { formatRetryAfter } from "@/auth/rate-limit";
+import type { LoginRateLimiter } from "@/server/rate-limit/types";
 import {
-  ADMIN_CAN_EDIT_USER_PORTFOLIO,
-  type AdminAction,
+  SESSION_TOUCH_INTERVAL_MS,
+  sessionPolicyFor,
+  toSessionUser,
   type DeviceMode,
-  type AdminAuditLog,
+  type SessionPolicy,
   type SessionUser,
   type UserProfile,
-  type UserStatus,
-  toSessionUser,
 } from "@/auth/types";
-import { isReservedUsername, validateUsername } from "@/auth/username";
-import { buildPortfolio, type PortfolioSummary } from "@/domain/portfolio";
-import { GOLD_PRODUCTS } from "@/domain/catalog";
-import type { Transaction } from "@/domain/types";
-import { MockPriceProvider } from "@/prices/mock-provider";
+import { validateUsername } from "@/auth/username";
 import type { AuthBackend, ResolvedSession } from "./backend";
+import {
+  createAdminActor,
+  createUserActor,
+  type AdminActor,
+  type UserActor,
+} from "./actor";
 import {
   AppError,
   badRequest,
-  conflict,
   forbidden,
   GENERIC_LOGIN_ERROR,
-  notFound,
+  passwordChangeRequired,
   tooManyRequests,
   unauthorized,
 } from "./errors";
 
 /**
- * Kimlik doğrulama ve yönetim iş kuralları.
+ * Kimlik doğrulama ve oturum iş kuralları.
  *
- * Arka uçtan (Supabase / yerel) BAĞIMSIZDIR; bu sayede yetkilendirme,
- * denetim kaydı ve hız sınırlama kuralları tek yerden test edilebilir.
+ * Arka uçtan (Supabase / yerel) BAĞIMSIZDIR; bu sayede yetkilendirme ve hız
+ * sınırlama kuralları tek yerden test edilebilir. Yönetim işlemleri
+ * AdminService'te, kullanıcının kendi verisi UserPortfolioService'tedir.
  *
- * GÜVENLİK KURALLARI
- * - Rol yalnızca sunucuda atanır. Panelden oluşturulan her kullanıcı "user" olur;
- *   "admin" rolü yalnızca bootstrap CLI ile verilir.
- * - Admin uçlarına erişim her istekte veritabanındaki role bakılarak doğrulanır.
- * - Menüyü gizlemek yetkilendirme sayılmaz; kontrol burada yapılır.
+ * GÜVENLİK SINIRI
+ * - Oturum süresi kontrolü SUNUCUDADIR (hem hareketsizlik hem mutlak süre).
+ * - Geçici parolalı kullanıcı yalnızca oturum/çıkış/parola değiştirme
+ *   uçlarını kullanabilir; diğer her şey PASSWORD_CHANGE_REQUIRED ile reddedilir.
+ * - Rol yalnızca veritabanındaki profilden okunur; istemciden alınmaz.
  */
 
 export interface LoginResult {
@@ -45,32 +47,24 @@ export interface LoginResult {
   expiresAt: string;
   user: SessionUser;
   deviceMode: DeviceMode;
-}
-
-export interface AdminUserPortfolioView {
-  user: UserProfile;
-  summary: PortfolioSummary;
-  transactions: Transaction[];
-  /** Adminin bu portföyü düzenleme yetkisi. İlk sürümde kapalı. */
-  canEdit: boolean;
+  policy: SessionPolicy;
 }
 
 export interface AuthServiceOptions {
-  rateLimiter?: LoginRateLimiter;
-  sessionTtlMs?: number;
+  rateLimiter: LoginRateLimiter;
   now?: () => number;
 }
 
 export class AuthService {
   private readonly rateLimiter: LoginRateLimiter;
-  private readonly sessionTtlMs: number;
+  private readonly now: () => number;
 
   constructor(
     private readonly backend: AuthBackend,
-    options: AuthServiceOptions = {},
+    options: AuthServiceOptions,
   ) {
-    this.rateLimiter = options.rateLimiter ?? new LoginRateLimiter();
-    this.sessionTtlMs = options.sessionTtlMs ?? 14 * 24 * 60 * 60 * 1000;
+    this.rateLimiter = options.rateLimiter;
+    this.now = options.now ?? (() => Date.now());
   }
 
   get backendId(): AuthBackend["id"] {
@@ -81,7 +75,7 @@ export class AuthService {
     return this.backend.label;
   }
 
-  // ---------------------------------------------------------------- oturum
+  // ---------------------------------------------------------------- giriş
 
   async login(
     rawUsername: string,
@@ -94,16 +88,13 @@ export class AuthService {
     // Hız sınırı hem kullanıcı adına hem de isteği yapan istemciye bakar.
     const limiterKey = `${clientKey}|${username.value || "?"}`;
 
-    const decision = this.rateLimiter.check(limiterKey);
+    const decision = await this.rateLimiter.check(limiterKey);
     if (!decision.allowed) {
-      throw tooManyRequests(
-        `Çok fazla başarısız giriş denemesi. ${formatRetryAfter(decision.retryAfterMs)} sonra tekrar deneyin.`,
-        decision.retryAfterMs,
-      );
+      throw this.lockedOut(decision.retryAfterMs);
     }
 
     if (!username.ok || typeof password !== "string" || password.length === 0) {
-      const failure = this.rateLimiter.recordFailure(limiterKey);
+      const failure = await this.rateLimiter.recordFailure(limiterKey);
       throw this.loginFailure(failure.retryAfterMs);
     }
 
@@ -111,29 +102,34 @@ export class AuthService {
 
     // Kullanıcı yok, parola yanlış ve hesap pasif durumları AYNI mesajı verir.
     if (!profile || profile.status !== "active") {
-      const failure = this.rateLimiter.recordFailure(limiterKey);
+      const failure = await this.rateLimiter.recordFailure(limiterKey);
       throw this.loginFailure(failure.retryAfterMs);
     }
 
-    this.rateLimiter.reset(limiterKey);
-    const session = await this.backend.createSession(profile.id, this.sessionTtlMs, deviceMode);
+    await this.rateLimiter.reset(limiterKey);
+
+    const policy = sessionPolicyFor(deviceMode);
+    const session = await this.backend.createSession(profile.id, deviceMode, policy, this.now());
     await this.backend.recordLogin(profile.id);
 
     return {
       token: session.token,
-      expiresAt: session.expiresAt,
+      expiresAt: session.absoluteExpiresAt,
       user: toSessionUser(profile),
       deviceMode: session.deviceMode,
+      policy,
     };
   }
 
+  private lockedOut(retryAfterMs: number): AppError {
+    return tooManyRequests(
+      `Çok fazla başarısız giriş denemesi. ${formatRetryAfter(retryAfterMs)} sonra tekrar deneyin.`,
+      retryAfterMs,
+    );
+  }
+
   private loginFailure(retryAfterMs: number): AppError {
-    if (retryAfterMs > 0) {
-      return tooManyRequests(
-        `Çok fazla başarısız giriş denemesi. ${formatRetryAfter(retryAfterMs)} sonra tekrar deneyin.`,
-        retryAfterMs,
-      );
-    }
+    if (retryAfterMs > 0) return this.lockedOut(retryAfterMs);
     return new AppError(401, GENERIC_LOGIN_ERROR, "invalid_credentials");
   }
 
@@ -141,35 +137,69 @@ export class AuthService {
     if (token) await this.backend.destroySession(token);
   }
 
-  /** Oturum çerezinden profili ve cihaz modunu çözer. */
+  // ---------------------------------------------------------------- oturum
+
+  /**
+   * Jetonu çözer ve hareketsizlik penceresini gerekiyorsa ileri alır.
+   * Süre kontrolü arka uçta yapılır; bu katman yalnızca tazelemeyi sınırlar.
+   */
   async resolveSessionContext(token: string | null): Promise<ResolvedSession | null> {
     if (!token) return null;
-    return this.backend.resolveSession(token);
+    const now = this.now();
+    const session = await this.backend.resolveSession(token, now);
+    if (!session) return null;
+
+    const policy = sessionPolicyFor(session.deviceMode);
+    if (policy.idleTimeoutMs !== null) {
+      // last_seen_at her istekte değil, en fazla SESSION_TOUCH_INTERVAL_MS'de bir yazılır.
+      const lastSeen = Date.parse(session.lastSeenAt);
+      if (!Number.isNaN(lastSeen) && now - lastSeen >= SESSION_TOUCH_INTERVAL_MS) {
+        const nextIdle = new Date(now + policy.idleTimeoutMs).toISOString();
+        await this.backend.touchSession(session.sessionId, nextIdle, now);
+      }
+    }
+    return session;
   }
 
-  /** Oturum çerezinden profili çözer. Pasifleştirilen kullanıcı null döner. */
+  /** Yalnızca profili döner; süre/rol kontrolü çağıranın sorumluluğundadır. */
   async resolveSession(token: string | null): Promise<UserProfile | null> {
     const session = await this.resolveSessionContext(token);
     return session?.profile ?? null;
   }
 
-  async requireUser(token: string | null): Promise<UserProfile> {
-    const profile = await this.resolveSession(token);
-    if (!profile) throw unauthorized();
-    return profile;
+  /**
+   * Oturum zorunlu — ancak parola değiştirmesi gereken kullanıcı da GEÇER.
+   * Yalnızca /api/auth/session, /logout ve /change-password bu guard'ı kullanır.
+   */
+  async requireAuthenticatedUser(token: string | null): Promise<UserActor> {
+    const session = await this.resolveSessionContext(token);
+    if (!session) throw unauthorized();
+    return createUserActor(session.profile, session.deviceMode);
   }
 
-  /** Admin yetkisini her istekte veritabanındaki role bakarak doğrular. */
-  async requireAdmin(token: string | null): Promise<UserProfile> {
-    const profile = await this.requireUser(token);
-    if (profile.role !== "admin") throw forbidden("Bu alana yalnızca yöneticiler erişebilir.");
-    return profile;
+  /**
+   * Uygulamayı kullanabilir durumda olan kullanıcı.
+   * Geçici parolalı kullanıcı buradan GEÇEMEZ.
+   */
+  async requireUsableUser(token: string | null): Promise<UserActor> {
+    const actor = await this.requireAuthenticatedUser(token);
+    if (actor.profile.mustChangePassword) throw passwordChangeRequired();
+    return actor;
   }
 
-  // ------------------------------------------------------------ parola
+  /** Yönetici yetkisi her istekte veritabanındaki rolden doğrulanır. */
+  async requireAdmin(token: string | null): Promise<AdminActor> {
+    const actor = await this.requireUsableUser(token);
+    if (actor.profile.role !== "admin") {
+      throw forbidden("Bu alana yalnızca yöneticiler erişebilir.");
+    }
+    return createAdminActor(actor.profile, actor.deviceMode);
+  }
+
+  // ---------------------------------------------------------------- parola
 
   async changeOwnPassword(
-    actor: UserProfile,
+    actor: UserActor,
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
@@ -180,235 +210,20 @@ export class AuthService {
       throw badRequest("Yeni parola mevcut parolanızdan farklı olmalıdır.");
     }
 
-    const policy = validatePassword(newPassword, actor.username);
+    const policy = validatePassword(newPassword, actor.profile.username);
     if (!policy.ok) throw badRequest(policy.error ?? "Parola politikaya uymuyor.");
 
-    const verified = await this.backend.verifyPasswordForUser(actor.id, currentPassword);
+    const verified = await this.backend.verifyPasswordForUser(actor.profile.id, currentPassword);
     if (!verified) throw new AppError(401, "Mevcut parolanız hatalı.", "invalid_credentials");
 
-    await this.backend.setPassword(actor.id, newPassword);
-    await this.backend.setMustChangePassword(actor.id, false);
+    await this.backend.setPassword(actor.profile.id, newPassword);
+    await this.backend.setMustChangePassword(actor.profile.id, false);
     // Diğer cihazlardaki oturumlar düşürülür; kullanıcı bu cihazda yeniden giriş yapar.
-    await this.backend.destroyAllSessionsForUser(actor.id);
+    await this.backend.destroyAllSessionsForUser(actor.profile.id);
   }
 
-  // ------------------------------------------------------------ yönetim
-
-  private async audit(
-    actor: UserProfile,
-    action: AdminAction,
-    target: UserProfile | null,
-    success: boolean,
-    metadata: AdminAuditLog["metadata"] = {},
-  ): Promise<void> {
-    // Parola, tutar veya finansal içerik ASLA metadata'ya yazılmaz.
-    await this.backend.appendAudit({
-      adminUserId: actor.id,
-      adminUsername: actor.username,
-      targetUserId: target?.id ?? null,
-      targetUsername: target?.username ?? null,
-      action,
-      success,
-      metadata,
-    });
-  }
-
-  async listUsers(actor: UserProfile, search?: string): Promise<UserProfile[]> {
-    this.assertAdmin(actor);
-    return this.backend.listProfiles({ search, limit: 200 });
-  }
-
-  async listAudit(actor: UserProfile, limit = 100): Promise<AdminAuditLog[]> {
-    this.assertAdmin(actor);
-    return this.backend.listAudit(limit);
-  }
-
-  private assertAdmin(actor: UserProfile): void {
-    if (actor.role !== "admin") throw forbidden("Bu işlem için yönetici yetkisi gerekiyor.");
-  }
-
-  async getUserDetail(actor: UserProfile, userId: string): Promise<UserProfile> {
-    this.assertAdmin(actor);
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, "user.view", null, false, { userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-    await this.audit(actor, "user.view", target, true);
-    return target;
-  }
-
-  async getUserPortfolio(actor: UserProfile, userId: string): Promise<AdminUserPortfolioView> {
-    this.assertAdmin(actor);
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, "user.portfolio_view", null, false, { userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-
-    const transactions = await this.backend.listTransactions(userId);
-    const snapshot = await new MockPriceProvider().getQuotes(GOLD_PRODUCTS.map((p) => p.id));
-    const summary = buildPortfolio(transactions, snapshot);
-
-    // Denetim kaydına yalnızca sayısal olmayan, hassas olmayan özet yazılır.
-    await this.audit(actor, "user.portfolio_view", target, true, {
-      transactionCount: transactions.length,
-    });
-
-    return { user: target, summary, transactions, canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO };
-  }
-
-  async createUser(
-    actor: UserProfile,
-    input: { username: string; displayName: string; temporaryPassword: string },
-  ): Promise<UserProfile> {
-    this.assertAdmin(actor);
-
-    const username = validateUsername(input.username ?? "");
-    if (!username.ok) {
-      await this.audit(actor, "user.create", null, false, { reason: "invalid_username" });
-      throw badRequest(username.error ?? "Kullanıcı adı geçersiz.");
-    }
-    if (isReservedUsername(username.value)) {
-      await this.audit(actor, "user.create", null, false, { reason: "reserved_username" });
-      throw badRequest("Bu kullanıcı adı sistem tarafından ayrılmıştır.");
-    }
-
-    const displayName = (input.displayName ?? "").trim();
-    if (displayName.length < 2 || displayName.length > 80) {
-      await this.audit(actor, "user.create", null, false, { reason: "invalid_display_name" });
-      throw badRequest("Görünen ad 2-80 karakter olmalıdır.");
-    }
-
-    const policy = validatePassword(input.temporaryPassword ?? "", username.value);
-    if (!policy.ok) {
-      await this.audit(actor, "user.create", null, false, { reason: "weak_password" });
-      throw badRequest(policy.error ?? "Geçici parola politikaya uymuyor.");
-    }
-
-    const existing = await this.backend.findProfileByUsername(username.value);
-    if (existing) {
-      await this.audit(actor, "user.create", existing, false, { reason: "duplicate_username" });
-      throw conflict("Bu kullanıcı adı zaten kullanılıyor.");
-    }
-
-    // Rol İSTEMCİDEN ALINMAZ. Panelden oluşturulan her hesap normal kullanıcıdır.
-    const created = await this.backend.createUser({
-      username: username.value,
-      displayName,
-      temporaryPassword: input.temporaryPassword,
-      role: "user",
-    });
-
-    await this.audit(actor, "user.create", created, true, { mustChangePassword: true });
-    return created;
-  }
-
-  async setUserStatus(
-    actor: UserProfile,
-    userId: string,
-    status: UserStatus,
-  ): Promise<UserProfile> {
-    this.assertAdmin(actor);
-    const action: AdminAction = status === "inactive" ? "user.deactivate" : "user.activate";
-
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, action, null, false, { userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-    if (status === "inactive" && target.id === actor.id) {
-      await this.audit(actor, action, target, false, { reason: "self_deactivation" });
-      throw badRequest("Kendi hesabınızı pasifleştiremezsiniz.");
-    }
-    if (status === "inactive" && target.role === "admin") {
-      const admins = await this.backend.countAdmins();
-      if (admins <= 1) {
-        await this.audit(actor, action, target, false, { reason: "last_admin" });
-        throw badRequest("Sistemdeki son aktif yönetici pasifleştirilemez.");
-      }
-    }
-
-    const updated = await this.backend.setStatus(userId, status);
-    if (status === "inactive") {
-      // Mevcut erişim mümkün olan en kısa sürede kesilir.
-      await this.backend.destroyAllSessionsForUser(userId);
-    }
-    await this.audit(actor, action, updated, true);
-    return updated;
-  }
-
-  async resetUserPassword(
-    actor: UserProfile,
-    userId: string,
-    temporaryPassword: string,
-  ): Promise<UserProfile> {
-    this.assertAdmin(actor);
-
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, "user.password_reset", null, false, { userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-
-    const policy = validatePassword(temporaryPassword ?? "", target.username);
-    if (!policy.ok) {
-      await this.audit(actor, "user.password_reset", target, false, { reason: "weak_password" });
-      throw badRequest(policy.error ?? "Geçici parola politikaya uymuyor.");
-    }
-
-    await this.backend.setPassword(userId, temporaryPassword);
-    const updated = await this.backend.setMustChangePassword(userId, true);
-    // Parola sıfırlandığında tüm aktif oturumlar geçersiz olur.
-    await this.backend.destroyAllSessionsForUser(userId);
-
-    // Parola audit log'a YAZILMAZ.
-    await this.audit(actor, "user.password_reset", updated, true, { mustChangePassword: true });
-    return updated;
-  }
-
-  /**
-   * Kalıcı silme. Varsayılan yönetim işlemi DEĞİLDİR; pasifleştirme tercih edilir.
-   * Silme için hedefin kullanıcı adının birebir yazılması zorunludur.
-   */
-  async deleteUser(
-    actor: UserProfile,
-    userId: string,
-    confirmationUsername: string,
-  ): Promise<void> {
-    this.assertAdmin(actor);
-
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, "user.delete_attempt", null, false, { userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-    if (target.id === actor.id) {
-      await this.audit(actor, "user.delete_attempt", target, false, { reason: "self_delete" });
-      throw badRequest("Kendi hesabınızı silemezsiniz.");
-    }
-
-    const confirmation = validateUsername(confirmationUsername ?? "");
-    if (!confirmation.ok || confirmation.value !== target.username) {
-      await this.audit(actor, "user.delete_attempt", target, false, {
-        reason: "confirmation_mismatch",
-      });
-      throw badRequest(
-        "Silme onayı eşleşmedi. Kalıcı silme için kullanıcı adını birebir yazmalısınız.",
-      );
-    }
-
-    if (target.role === "admin") {
-      const admins = await this.backend.countAdmins();
-      if (admins <= 1) {
-        await this.audit(actor, "user.delete_attempt", target, false, { reason: "last_admin" });
-        throw badRequest("Sistemdeki son aktif yönetici silinemez.");
-      }
-    }
-
-    await this.audit(actor, "user.delete_attempt", target, true, { confirmed: true });
-    await this.backend.destroyAllSessionsForUser(userId);
-    await this.backend.deleteUser(userId);
-    await this.audit(actor, "user.delete", target, true, { cascade: "portfolio_and_transactions" });
+  /** Bakım görevi: süresi geçmiş oturumları siler. */
+  async purgeExpiredSessions(): Promise<number> {
+    return this.backend.purgeExpiredSessions(this.now());
   }
 }

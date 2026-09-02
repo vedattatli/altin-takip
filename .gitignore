@@ -55,3 +55,6 @@ next-env.d.ts
 
 # E2E koşum günlüğü
 /.e2e-final.log
+
+# Kaynak paketi çıktısı
+/dist/

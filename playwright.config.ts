@@ -28,6 +28,10 @@ const testEnv = {
   // Bu iki değişken olmadan süre her zaman 15 dakikadır.
   NEXT_PUBLIC_ALLOW_TEST_OVERRIDES: TEST_OVERRIDE_TOKEN,
   NEXT_PUBLIC_SHARED_IDLE_MS: "5000",
+  // Yalnızca yerel test sunucusu için sabit değerler. GERÇEK SECRET DEĞİLDİR;
+  // üretimde bu değişkenler güvenli rastgele değerlerle ayarlanır.
+  AUTH_CSRF_SECRET: "e2e-test-ortami-sabit-degeri-gercek-secret-degil",
+  RATE_LIMIT_PEPPER: "e2e-test-ortami-sabit-degeri-gercek-secret-degil",
 };
 
 export default defineConfig({

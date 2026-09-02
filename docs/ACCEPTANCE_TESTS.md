@@ -7,6 +7,17 @@ npm run verify
 ```
 
 `lint` → `typecheck` → `test` (Vitest) → `build` → `verify:bundle` sırasıyla çalışır.
+
+Ek komutlar:
+
+```bash
+npm run test:db
+```
+
+```bash
+npm run package:source
+```
+
 Tarayıcı testleri ayrıca:
 
 ```bash
@@ -160,6 +171,113 @@ Ayrıntı: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | 12.2 | 390 px'te yönetim ekranları taşmaz | `e2e/admin.spec.ts` → "yönetici kullanıcı listesini görür", "…portföyünü görüntüler…" |
 | 12.3 | 768 ve 1440 px'te aynı testler geçer | Playwright `tablet-768` ve `masaustu-1440` projeleri |
 | 12.4 | Uygulama derlenir, TypeScript ve lint hatası kalmaz | `npm run verify` |
+
+## 13. Yetkilendirme sınırı (Sprint 0.5)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 13.1 | Her API ucu beklenen guard'ı kullanır | `tests/authorization-matrix.test.ts` → "her route beklenen guard'ı kullanır" |
+| 13.2 | Her route merkezi `apiRoute()` sarmalayıcısından geçer | aynı dosya → "her route merkezi apiRoute sarmalayıcısını kullanır" |
+| 13.3 | Normal kullanıcı uçları hedef `userId` kabul etmez | aynı dosya → "normal kullanıcı uçları hedef kullanıcı kimliği KABUL ETMEZ" |
+| 13.4 | Kullanıcı uçları admin servisini çağırmaz | aynı dosya → "kullanıcı uçları admin servisini çağırmaz" |
+| 13.5 | `adminScope()` yalnızca admin servisinde çağrılır | aynı dosya → "actor sınırının kaynak kodda korunması" |
+| 13.6 | Kullanıcı başka kullanıcının kaydını okuyamaz/değiştiremez/silemez | aynı dosya → "kullanıcı verisi ayrımı"<br>`e2e/security.spec.ts` → "Kullanıcı A, Kullanıcı B kaydına API üzerinden ulaşamaz" |
+| 13.7 | Ham `userId` ile veri metodu çağrısı derleme hatasıdır | `DataScope` markalanmış tipi (`src/server/auth/actor.ts`); `npm run typecheck` |
+
+## 14. Geçici parola sunucu koruması
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 14.1 | `requireUsableUser` geçici parolalı kullanıcıyı reddeder | `tests/auth-service.test.ts` → "geçici parola sunucu koruması" |
+| 14.2 | Portföy ve işlem API'leri `PASSWORD_CHANGE_REQUIRED` döner | `e2e/security.spec.ts` → "geçici parolalı kullanıcı portföy API'sine erişemez" |
+| 14.3 | Yönetim API'leri de reddeder | `e2e/security.spec.ts` → "geçici parolalı kullanıcı yönetim API'sine de erişemez" |
+| 14.4 | Oturum, çıkış ve parola değiştirme uçları açıktır | `e2e/security.spec.ts` → "oturum ve parola değiştirme uçları geçici parolalı kullanıcıya açıktır" |
+| 14.5 | Parola değişince tüm oturumlar düşer, tekrar giriş gerekir | `e2e/security.spec.ts` → "parola değiştirdikten sonra tekrar giriş gerekir" |
+
+## 15. Sunucu tarafı oturum süresi
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 15.1 | Ortak cihazda 15 dakika hareketsizlik sınırı | `tests/session-expiry.test.ts` → "ortak cihaz: hareketsizlik zaman aşımı" |
+| 15.2 | Ortak cihazda 8 saat mutlak süre | aynı dosya → "sürekli hareket olsa bile 8 saatte oturum sona erer" |
+| 15.3 | Kişisel cihazda mutlak süre yine zorunlu | aynı dosya → "kişisel cihaz" bloğu |
+| 15.4 | Askıya alınmış sekme senaryosu | aynı dosya → "askıya alınmış sekme: uzun aradan sonra oturum düşer" |
+| 15.5 | Tarayıcı oturum geri yükleme senaryosu | aynı dosya → "tarayıcı yeniden açılsa bile sunucu süresi geçmiş oturumu kabul etmez" |
+| 15.6 | `last_seen_at` en fazla 60 sn'de bir yazılır | aynı dosya → "last_seen_at yazma sıklığı" |
+| 15.7 | Süresi geçen oturum SUNUCUDA reddedilir (uçtan uca) | `e2e/security.spec.ts` → "sunucu tarafı oturum süresi" bloğu |
+| 15.8 | Üretimde çerez `__Host-` önekli, Secure, Path=/, Domain'siz | `tests/device-mode.test.ts` → "oturum çerezi" bloğu; `src/server/security/config.ts` |
+
+## 16. CSRF ve güvenlik başlıkları
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 16.1 | İmzalı jeton üretilir ve doğrulanır | `tests/csrf.test.ts` → "imzalı CSRF jetonu" bloğu |
+| 16.2 | Kurcalanmış veya başka anahtarla imzalanmış jeton reddedilir | aynı dosya |
+| 16.3 | Origin ve Sec-Fetch-Site kontrolü | aynı dosya → "origin kontrolü" bloğu |
+| 16.4 | CSRF'siz mutation reddedilir | `e2e/security.spec.ts` → "CSRF jetonu olmayan mutation reddedilir" |
+| 16.5 | Geçersiz CSRF jetonu reddedilir | `e2e/security.spec.ts` → "geçersiz CSRF jetonu reddedilir" |
+| 16.6 | Farklı origin reddedilir | `e2e/security.spec.ts` → "farklı origin'den gelen mutation reddedilir" |
+| 16.7 | Okuma istekleri jeton gerektirmez | `e2e/security.spec.ts` → "okuma istekleri CSRF jetonu gerektirmez" |
+| 16.8 | Jeton hiçbir tarayıcı deposuna yazılmaz | `e2e/security.spec.ts` → "CSRF jetonu sayfada meta etiketiyle taşınır, depoya yazılmaz" |
+| 16.9 | Güvenlik başlıkları gönderilir | `e2e/security.spec.ts` → "güvenlik başlıkları" bloğu |
+| 16.10 | Uygulama CSP altında sorunsuz çalışır | `e2e/security.spec.ts` → "uygulama CSP altında sorunsuz çalışır" |
+
+## 17. Dağıtık hız sınırlayıcı
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 17.1 | Ham IP ve kullanıcı adı saklanmaz | `tests/rate-limit-distributed.test.ts` → "anahtar gizleme" bloğu |
+| 17.2 | Postgres uygulaması RPC'ye yalnızca özet gönderir | aynı dosya → "RPC'ye ham anahtar göndermez" |
+| 17.3 | Sınırlayıcı hata verirse istek reddedilir (fail closed) | aynı dosya → "RPC hatasında AÇIK KALMAZ" |
+| 17.4 | Üretimde bellek sınırlayıcısına sessizce düşülmez | aynı dosya → "üretimde bellek sınırlayıcısına sessizce düşülmez" bloğu |
+| 17.5 | Sayaç güncellemesi atomiktir | aynı dosya → "sayaç güncellemesi satır kilidiyle atomiktir" |
+| 17.6 | Başarılı girişte sayaç sıfırlanır | aynı dosya → "başarılı girişte sayaç sıfırlanır" |
+
+## 18. Veritabanı bütünlüğü
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 18.1 | Kullanıcı başına tek portföy | `tests/integrity.test.ts` → "migration bütünlük kuralları" |
+| 18.2 | İşlem portföyü sahibiyle uyumlu (composite FK) | aynı dosya |
+| 18.3 | Birim ürün kataloğuyla uyumlu | aynı dosya → "birim tutarlılığı" bloğu |
+| 18.4 | **Eşzamanlı iki satış oversell oluşturamaz** | aynı dosya → "EŞZAMANLI iki satış birlikte eldeki miktarı aşamaz" |
+| 18.5 | Çok sayıda eşzamanlı satışta yalnızca karşılanabilir olanlar yazılır | aynı dosya |
+| 18.6 | Alışı silmek/azaltmak sonraki satışları geçersiz kılamaz | aynı dosya |
+| 18.7 | Migration mevcut veriyle güvenle çalışır | aynı dosya → "migration mevcut veriyle güvenli çalışır" |
+
+## 19. Denetim kaydı sertleştirme
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 19.1 | UPDATE/DELETE tetikleyici ile engellenir | `tests/integrity.test.ts` → "denetim kayıtları tetikleyici ile değiştirilemez" |
+| 19.2 | Uygulamada düzenleme/silme ucu yoktur | `tests/authorization-matrix.test.ts` → route matrisi (yalnızca GET) |
+| 19.3 | Silme girişimi, sonucu ve hatası dürüstçe kaydedilir | `tests/admin-service.test.ts` → "silme sırasında hata olursa başarısızlık dürüstçe kaydedilir" |
+| 19.4 | Son denetim kaydı yazılamazsa gizlenmez | aynı dosya → "son denetim kaydı yazılamazsa bu durum gizlenmez" |
+| 19.5 | Parola / finansal içerik yazılmaz | aynı dosya → "denetim kaydına parola veya finansal içerik yazılmaz" |
+
+## 20. RLS davranış testleri (pgTAP)
+
+`supabase/tests/rls.test.sql` — 24 test. Çalıştırma: `npm run test:db`
+(Supabase CLI + Docker gerektirir).
+
+Kapsam: kullanıcı izolasyonu (profil/portföy/işlem okuma-yazma-silme), başka
+kullanıcının portföy kimliğiyle işlem ekleme, rol/durum/kullanıcı adı/
+`must_change_password` değiştirme girişimleri, yönetici salt okunur erişimi,
+`app_sessions` erişimi, denetim kaydı erişimi ve anon rolü.
+
+> Çıkış kodları: `0` geçti, `1` başarısız, **`2` çalıştırılamadı** (CLI veya
+> Docker yok). Komut ortam uygun değilse testleri çalıştırılmış gibi
+> raporlamaz.
+
+## 21. Temiz kaynak paketi
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 21.1 | ZIP `.git`, `node_modules`, `.next`, `.data`, test çıktıları, tsbuildinfo içermez | `npm run package:source` (yol denetimi + arşiv doğrulaması) |
+| 21.2 | Gerçek `.env` dosyaları girmez, `.env.example` girer | aynı komut |
+| 21.3 | Paket içinde secret izi yoktur | aynı komut (yeniden açıp tarar) |
+| 21.4 | SHA-256 ve dosya manifesti üretilir | `dist/Altin-Takip-Source.zip.sha256`, `dist/Altin-Takip-Source.manifest.txt` |
+
 
 Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop.png`
 (`e2e/screenshots.spec.ts` tarafından üretilir).

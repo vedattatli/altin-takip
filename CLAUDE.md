@@ -18,11 +18,18 @@ Bu dosya, projede çalışan yapay zekâ ajanları ve geliştiriciler için bağ
 npm run verify
 ```
 
-Bu komut sırayla `lint`, `typecheck`, `test` ve `build` çalıştırır. Dördü de geçmeden işi
-tamamlanmış sayma. Arayüzü etkileyen değişikliklerde ayrıca:
+Bu komut sırayla `lint`, `typecheck`, `test`, `build` ve `verify:bundle` çalıştırır.
+Beşi de geçmeden işi tamamlanmış sayma. Arayüzü veya güvenlik katmanını etkileyen
+değişikliklerde ayrıca:
 
 ```bash
 npm run test:e2e
+```
+
+Veritabanı politikalarını değiştirdiysen (ortam destekliyorsa):
+
+```bash
+npm run test:db
 ```
 
 ## Güvenlik kuralları (ihlal edilemez)
@@ -64,6 +71,76 @@ npm run test:e2e
   önbelleğe alınmaz.
 - Kullanıcı portföyü bulut veritabanında saklanır; cihazlar arası senkronizasyon sunucu
   üzerinden yapılır.
+
+## Yetkilendirme sınırı (ihlal edilemez)
+
+- **BFF içinde RLS UYGULANMAZ.** Sunucu Supabase'e `service_role` ile bağlanır ve
+  bu anahtar RLS'yi atlar. Birincil güvenlik sınırı **sunucu tarafı actor
+  authorization**'dır; RLS ikinci katmandır. Dokümanda "veriler RLS ile
+  korunuyor" gibi belirsiz bir ifade kullanma.
+- **Veri metotlarına ham `userId` geçirme.** Arka uç metotları markalanmış
+  `DataScope` alır. Kapsam yalnızca `ownScope(actor)` veya
+  `adminScope(admin, targetId)` ile üretilir.
+- **Normal kullanıcı uçları hedef kullanıcı kimliği kabul etmez.** Kimlik her
+  zaman doğrulanmış oturumdan türetilir; gövde, sorgu veya route parametresinden
+  ASLA okunmaz.
+- **Başka kullanıcıyı hedefleyen işlemler `AdminService`'tedir** ve
+  `requireCurrentAdmin()` zorunludur. Her erişim denetim kaydı üretir.
+- Yeni bir API ucu eklerken `tests/authorization-matrix.test.ts` içindeki guard
+  tablosunu da güncelle; aksi hâlde test başarısız olur.
+
+## Guard seçimi
+
+| Guard | Ne zaman |
+| --- | --- |
+| `requireAuthenticatedUser` | YALNIZCA `/api/auth/session`, `/logout`, `/change-password` |
+| `requireUsableUser` | Kullanıcının kendi verisiyle ilgili her uç |
+| `requireCurrentAdmin` | Yönetim uçları |
+
+Geçici parolalı kullanıcı `requireUsableUser` ve `requireCurrentAdmin`
+guard'larından **geçemez**; `PASSWORD_CHANGE_REQUIRED` ile reddedilir.
+Arayüz yönlendirmesine tek başına güvenme.
+
+## CSRF ve route sarmalayıcısı
+
+- **Her API route'u `apiRoute()` ile sarılır.** Ham `export async function POST`
+  yazma; sarmalayıcı hem CSRF/origin kontrolünü hem hata dönüşümünü yapar.
+- Durum değiştiren isteklerde `Origin` + `Sec-Fetch-Site` + imzalı CSRF jetonu
+  doğrulanır. İstemci tarafında `apiFetch()` kullan; ham `fetch` ile mutation
+  yapma (jeton eklenmez).
+- CSRF jetonunu `localStorage`/`sessionStorage`'a yazma. Jeton `<meta>` ile
+  taşınır, eşi `HttpOnly` çerezdedir.
+
+## Oturum süreleri
+
+- Süre kontrolü **sunucudadır**. İstemcideki sayaç yalnızca kullanıcı deneyimi
+  içindir; onu güvenlik önlemi gibi sunma.
+- Ortak cihaz: 15 dk hareketsizlik + 8 saat mutlak. Kişisel cihaz: mutlak süre
+  yine zorunludur.
+- `last_seen_at` her istekte yazılmaz (en fazla 60 sn'de bir).
+
+## Hız sınırlayıcı
+
+- Üretimde **paylaşımlı (Postgres)** sınırlayıcı zorunludur. Yapılandırma
+  eksikse bellek sınırlayıcısına **sessizce düşme**; açık yapılandırma hatası ver.
+- Anahtarı ham saklama; `RATE_LIMIT_PEPPER` ile HMAC'le.
+- Sınırlayıcı sorgusu hata verirse isteği geçirme (fail closed).
+
+## Veritabanı değişiklikleri
+
+- Mevcut migration dosyalarını **düzenleme**; yeni numaralı dosya ekle.
+- Kısıt eklerken mevcut veriyle çakışma olup olmadığını önce kontrol et ve
+  gerekiyorsa açık bir hata ile durdur.
+- Finansal yazma yollarında aşırı satış kontrolü **atomik** olmalıdır
+  (portföy satırı kilidi + aynı transaction içinde doğrulama).
+- Denetim kayıtlarını değiştirilebilir hâle getirme; tetikleyici korumasını kaldırma.
+
+## Teslim paketi
+
+- Build/cache dosyalarını depoya ekleme (`.next`, `node_modules`, `.data`,
+  `dist`, `test-results`, tsbuildinfo).
+- Kaynak paketi `npm run package:source` ile üretilir; komut secret taraması
+  yapar ve iz bulursa paketi siler.
 
 ## Fiyat verisi kuralları
 

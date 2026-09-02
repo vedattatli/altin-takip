@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { type DeviceMode } from "@/auth/types";
 import { useHydrated } from "@/components/hydration-marker";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { Alert, Field, cx } from "@/components/ui";
 
 /**
@@ -50,25 +51,19 @@ export function LoginForm() {
     setBusy(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, deviceMode }),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { data?: { user?: { mustChangePassword?: boolean } }; error?: string }
-        | null;
-
-      if (!response.ok) {
-        setError(payload?.error ?? "Giriş yapılamadı. Lütfen tekrar deneyin.");
-        setPassword("");
-        return;
-      }
-
-      router.replace(payload?.data?.user?.mustChangePassword ? "/parola-degistir" : "/panel");
+      const result = await apiFetch<{ user: { mustChangePassword: boolean } }>(
+        "/api/auth/login",
+        { method: "POST", body: JSON.stringify({ username, password, deviceMode }) },
+      );
+      router.replace(result.user.mustChangePassword ? "/parola-degistir" : "/panel");
       router.refresh();
-    } catch {
-      setError("Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.");
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+      );
+      setPassword("");
     } finally {
       setBusy(false);
     }

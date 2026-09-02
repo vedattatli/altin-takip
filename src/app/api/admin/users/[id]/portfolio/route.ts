@@ -1,15 +1,12 @@
-import { getAuthService, requireCurrentAdmin } from "@/server/auth";
-import { failure, ok } from "@/server/http";
+import { getAdminService, requireCurrentAdmin } from "@/server/auth";
+import { ok } from "@/server/http";
+import { apiRoute } from "@/server/security/route";
 
 type Context = { params: Promise<{ id: string }> };
 
-/** Yönetici: kullanıcının uygulamaya kaydettiği portföyü görüntüleme (salt okunur). */
-export async function GET(_request: Request, context: Context) {
-  try {
-    const actor = await requireCurrentAdmin();
-    const { id } = await context.params;
-    return ok(await getAuthService().getUserPortfolio(actor, id));
-  } catch (error) {
-    return failure(error);
-  }
-}
+/** Yönetici: kullanıcının portföyünü görüntüleme (salt okunur, denetim kaydı üretir). */
+export const GET = apiRoute<Context>(async (_request, context) => {
+  const actor = await requireCurrentAdmin();
+  const { id } = await context.params;
+  return ok(await getAdminService().getUserPortfolio(actor, id));
+});

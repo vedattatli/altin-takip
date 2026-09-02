@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 
 import { type DeviceMode, resolveIdleTimeoutMs } from "@/auth/types";
+import { apiFetch } from "@/lib/api-client";
 
 /**
  * Şirket / ortak cihaz kısıtlarını uygular.
@@ -45,7 +46,7 @@ export function DeviceGuard({
     if (signingOutRef.current) return;
     signingOutRef.current = true;
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await apiFetch("/api/auth/logout", { method: "POST" });
     } finally {
       router.replace("/giris?sebep=zaman-asimi");
       router.refresh();
