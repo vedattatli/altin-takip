@@ -45,10 +45,33 @@ export interface EnrollmentResult {
   /** Yalnızca bu yanıtta döner; tekrar gösterilmez. */
   secret: string;
   otpauthUri: string;
+  /**
+   * `otpauth://` adresinin QR görseli, gömülü `data:` URI olarak.
+   *
+   * Sunucuda üretilir: QR kütüphanesi tarayıcıya İNMEZ ve secret dış bir
+   * servise GİTMEZ. Elle 32 karakter yazmak hataya çok açıktı.
+   */
+  qrDataUri: string;
   recoveryCodes: string[];
 }
 
 const MAX_FAILED_ATTEMPTS = 5;
+
+/**
+ * otpauth adresini QR görseline çevirir.
+ *
+ * Hata düzeltme seviyesi M: telefon kamerası için yeterli, görsel küçük kalır.
+ * Üretim SUNUCUDA yapılır; adres hiçbir dış servise gönderilmez.
+ */
+async function renderQrDataUri(uri: string): Promise<string> {
+  const { toDataURL } = await import("qrcode");
+  return toDataURL(uri, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 240,
+    color: { dark: "#000000ff", light: "#ffffffff" },
+  });
+}
 
 export class MfaService {
   constructor(
@@ -108,9 +131,11 @@ export class MfaService {
     await this.backend.saveMfaCredential(actor.profile.id, encrypted);
     const { codes, hashes } = generateRecoveryCodes();
     await this.backend.replaceRecoveryCodes(actor.profile.id, hashes);
+    const uri = otpauthUri(secret, accountName, appConfig.name);
     return {
       secret,
-      otpauthUri: otpauthUri(secret, accountName, appConfig.name),
+      otpauthUri: uri,
+      qrDataUri: await renderQrDataUri(uri),
       recoveryCodes: codes,
     };
   }

@@ -25,6 +25,7 @@ export interface MfaStatus {
 interface EnrollmentPayload {
   secret: string;
   otpauthUri: string;
+  qrDataUri: string;
   recoveryCodes: string[];
 }
 
@@ -111,11 +112,39 @@ export function AdminMfaView({
       {enrollment ? (
         <div className="mt-4 space-y-3">
           <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 p-3.5">
-            <p className="text-xs text-subtle">Kimlik doğrulayıcı uygulamanıza elle girilecek anahtar</p>
-            <p className="tabular mt-1 break-all text-sm font-semibold text-ink" data-testid="mfa-secret">
-              {enrollment.secret}
+            <p className="text-xs text-subtle">
+              1. Doğrulayıcı uygulamanızda &quot;QR kodu tara&quot; deyip aşağıdaki kodu okutun.
             </p>
-            <p className="mt-2 break-all text-xs text-subtle">{enrollment.otpauthUri}</p>
+            <div className="mt-3 flex justify-center">
+              {/* Beyaz zemin şart: karanlık tema üstünde QR okunmaz. */}
+              {/* next/image kullanılmaz: kaynak gömülü bir data: URI'dir, optimize
+                  edilecek uzak bir görsel yoktur ve secret dışarı çıkmamalıdır. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={enrollment.qrDataUri}
+                alt="Kimlik doğrulayıcı uygulama için QR kodu"
+                width={240}
+                height={240}
+                className="rounded-[var(--radius-sm)] bg-white p-2"
+                data-testid="mfa-qr"
+              />
+            </div>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs text-subtle hover:text-muted">
+                QR okutamıyorum, elle gireyim
+              </summary>
+              <p className="mt-2 text-xs text-subtle">
+                Uygulamada &quot;Kurulum anahtarını gir&quot; seçeneğini ve{" "}
+                <strong>zaman tabanlı (TOTP)</strong> tipini seçin, sonra şu anahtarı yazın. Anahtar
+                yalnızca A–Z harfleri ile 2–7 rakamlarını içerir; 0, 1, 8, 9 veya küçük harf yoktur.
+              </p>
+              <p
+                className="tabular mt-2 break-all text-sm font-semibold tracking-wider text-ink"
+                data-testid="mfa-secret"
+              >
+                {enrollment.secret.replace(/(.{4})/gu, "$1 ").trim()}
+              </p>
+            </details>
           </div>
           <div className="rounded-[var(--radius-sm)] border border-[var(--notice-line)] bg-[var(--notice-soft)] p-3.5">
             <p className="text-xs font-semibold text-[var(--notice)]">
