@@ -1334,6 +1334,11 @@ export class LocalAuthBackend implements AuthBackend {
     return this.screenRowsStore.get(code) ?? null;
   }
 
+  async exportBackupTable(_table: string): Promise<unknown[]> {
+    // Yerel arka uç bellek içidir; yedek provası testlerde sahte veriyle yapılır.
+    return [];
+  }
+
   async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {
     this.refresh();
     const provider = this.providerRow(code);

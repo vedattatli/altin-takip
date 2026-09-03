@@ -332,6 +332,15 @@ export interface AuthBackend {
 
   /** Saklanan son ham satır kümesi. */
   screenRows(code: string): Promise<ScreenRowsSnapshot | null>;
+
+  /**
+   * Yedek için tek bir tabloyu dışa aktarır.
+   *
+   * Yalnız izin verilen tablolar okunabilir; parola hash'i, MFA secret'ı,
+   * oturum ve token sütunları çağıran tarafından DEĞİL, veritabanı
+   * fonksiyonunun kendisi tarafından dışarıda bırakılır.
+   */
+  exportBackupTable(table: string): Promise<unknown[]>;
   /** Bir sağlayıcının güncel fiyatları. */
   currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null>;
   /** Birden çok sağlayıcının fiyatları (karşılaştırma ekranı). */

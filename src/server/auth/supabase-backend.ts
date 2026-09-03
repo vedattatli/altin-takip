@@ -840,6 +840,15 @@ export class SupabaseAuthBackend implements AuthBackend {
     };
   }
 
+  async exportBackupTable(table: string): Promise<unknown[]> {
+    const result = await this.priceRpc<unknown[]>(
+      "backup_export_table",
+      { p_table: table },
+      "Yedek tablosu okunamadı",
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
   async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {
     const result = await this.priceRpc<IngestionResult>(
       "price_ingestion_apply",
