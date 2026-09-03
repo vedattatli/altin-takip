@@ -323,6 +323,20 @@ export class AuthService {
   }
 
   /**
+   * Yönetici + ikinci faktör.
+   * MFA kurulmamış veya bu oturumda doğrulanmamışsa yönetim işlemleri REDDEDİLİR.
+   */
+  async adminActorWithMfa(session: ResolvedSession | null): Promise<AdminActor> {
+    const actor = this.adminActorFrom(session);
+    const { MfaService } = await import("./mfa-service");
+    await new MfaService(this.backend, { now: () => this.now() }).assertSessionSatisfiesMfa(
+      actor.profile,
+      session?.mfaVerifiedAt ?? null,
+    );
+    return actor;
+  }
+
+  /**
    * Oturum zorunlu — ancak parola değiştirmesi gereken kullanıcı da GEÇER.
    * Yalnızca /api/auth/session, /logout(-all) ve /change-password bunu kullanır.
    */
@@ -336,6 +350,11 @@ export class AuthService {
   }
 
   async requireAdmin(token: string | null): Promise<AdminActor> {
+    return this.adminActorWithMfa(await this.resolveSessionContext(token));
+  }
+
+  /** İkinci faktör kurulumu/doğrulaması için: admin rolü yeter, MFA aranmaz. */
+  async requireAdminForMfaSetup(token: string | null): Promise<AdminActor> {
     return this.adminActorFrom(await this.resolveSessionContext(token));
   }
 

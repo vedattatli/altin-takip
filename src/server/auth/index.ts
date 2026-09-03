@@ -14,9 +14,13 @@ import type { AuthBackend } from "./backend";
 import { sessionCookieOptions } from "./cookies";
 import { LocalAuthBackend } from "./local-backend";
 import { AuthService, type SessionContext } from "./service";
+import { MfaService } from "./mfa-service";
+import { PriceIngestionService } from "@/server/prices/ingestion-service";
+import { PriceSourceService } from "@/server/prices/price-source-service";
 import { SupabaseAuthBackend } from "./supabase-backend";
 
 export { AuthService } from "./service";
+export { MfaService } from "./mfa-service";
 export * from "./errors";
 export { sessionCookieOptions } from "./cookies";
 export type { AdminActor, UserActor } from "./actor";
@@ -158,7 +162,24 @@ export async function requireUsableUser(): Promise<UserActor> {
 }
 
 export async function requireCurrentAdmin(): Promise<AdminActor> {
+  return getAuthService().adminActorWithMfa(await getSessionContext());
+}
+
+/** Yalnızca ikinci faktör kurulum/doğrulama uçları için (MFA henüz yok). */
+export async function requireAdminForMfaSetup(): Promise<AdminActor> {
   return getAuthService().adminActorFrom(await getSessionContext());
+}
+
+export function getMfaService(): MfaService {
+  return new MfaService(getAuthBackend());
+}
+
+export function getPriceSourceService(): PriceSourceService {
+  return new PriceSourceService(getAuthBackend());
+}
+
+export function getPriceIngestionService(): PriceIngestionService {
+  return new PriceIngestionService(getAuthBackend());
 }
 
 /**

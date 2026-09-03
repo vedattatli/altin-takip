@@ -24,6 +24,7 @@ import { getProduct, productsByCategory } from "@/domain/catalog";
 import type { GoldProduct } from "@/domain/types";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
+import { marketLabel } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
 /**
@@ -832,7 +833,7 @@ function BaselineQuotePanel({ quote, quantity, product }: { quote: PriceQuote; q
         <div>
           <dt className="text-xs text-subtle">Sağlayıcı · piyasa</dt>
           <dd className="text-ink">
-            {quote.provider} · {quote.market}{" "}
+            {quote.provider} · {marketLabel(quote.market)}{" "}
             <span className="badge badge-notice">Test verisi</span>
           </dd>
         </div>

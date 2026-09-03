@@ -310,6 +310,28 @@ export type ValuationStatus = "empty" | "full" | "partial" | "none";
  */
 export type PortfolioState = "NEVER_USED" | "CLOSED" | "OPEN";
 
+/**
+ * Değerlemede kullanılan fiyat kaynağının kullanıcıya gösterilecek özeti.
+ * Motor bu alanı üretmez; sunucu servisi doldurur (çoklu kaynak, Sprint 3).
+ */
+export interface PriceSourceInfo {
+  providerCode: string | null;
+  /** Kullanıcıya önce piyasa adı gösterilir. */
+  displayName: string;
+  /** Teknik sağlayıcı adı (detay/tooltip). */
+  technicalName: string;
+  marketId: string | null;
+  marketDisplayName: string;
+  attribution: string;
+  /** Sağlayıcının üst kaynağı; bilinmiyorsa çoklu kaynakta "Çoklu Kaynak". */
+  upstreamSourceLabel: string | null;
+  isRealMarketData: boolean;
+  lastQuoteAt: string | null;
+  status: "ok" | "stale" | "unavailable" | "not_selected";
+  coverage: number;
+  userSelectable: boolean;
+}
+
 export interface AccountingSummary {
   holdings: HoldingView[];
   /** Kalan miktarı sıfırdan büyük ürün sayısı. */
@@ -348,4 +370,6 @@ export interface AccountingSummary {
   /** Değerlemede kullanılan fiyat anlık görüntüsü (test verisi etiketiyle). */
   snapshot: PriceSnapshot | null;
   priceStatus: "ok" | "stale" | "unavailable";
+  /** Aktif fiyat kaynağı (sunucu doldurur; demo modunda null olabilir). */
+  priceSource?: PriceSourceInfo | null;
 }

@@ -386,3 +386,35 @@ Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop
 | 24.8 | Telefon–PC: masaüstü BUY → mobil ≤15 sn; mobil VOID → masaüstü ≤15 sn; User B görmez; `/api/portfolio/version` ETag/304 | `e2e/sync.spec.ts` |
 | 24.9 | Staging araçları fail closed; secret yazdırmaz; env dosyası pakete girmez | `scripts/staging/*.mjs`; `scripts/package-source.mjs` desenleri; `npm run staging:doctor` |
 | 24.10 | Gerçek staging E2E (§12 senaryoları) | `e2e-staging/staging.spec.ts` (`npm run test:staging`; dış kimlik doğrulama gerektirir) |
+
+## 25. Çoklu fiyat kaynağı ve kaynak seçimi (Sprint 3)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 25.1 | Sağlayıcı sözleşmesi: ham yanıt → kanonik quote; bilinmeyen sembol atlanır; alış/satış ters çevrilmez; para birimi ve zaman damgası doğrulanır | `tests/price-providers.test.ts` §1–§3 |
+| 25.2 | Lisans kapısı fail closed: değişken eksikse `NOT_CONFIGURED`, izin `true` değilse `LICENSE_REQUIRED`; bu durumda ağa çıkılmaz | `tests/price-providers.test.ts` §4; `tests/price-sources.test.ts` §1 |
+| 25.3 | Lisanssız kaynak etkinleştirilemez (409) ve kullanıcıya sunulmaz; API üzerinden zorlama da reddedilir | `tests/price-sources.test.ts` §1/§3; `e2e/price-sources.spec.ts` → "lisanssız kaynağı etkinleştiremez" |
+| 25.4 | Alım idempotenttir ve paralel koşum tekilleşir: aynı `run_key` iki kez uygulanmaz, ikinci eşzamanlı koşum `SKIPPED` | `tests/price-sources.test.ts` §2; pgTAP §15 |
+| 25.5 | Kalite kapısı: ters makas, aşırı sıçrama, bayat/gelecek sağlayıcı zamanı, sıfır/negatif fiyat karantinaya alınır ve değerlemeye girmez | `tests/price-sources.test.ts` §2; `tests/price-providers.test.ts` §5; pgTAP §15 |
+| 25.6 | Kullanıcı yalnızca açık kaynakları görür; başka portföyün tercihini okuyamaz/değiştiremez | `tests/price-sources.test.ts` §3; pgTAP §15 |
+| 25.7 | Kaynak değişimi açık onay ister, olay kaydı ve denetim izi üretir | `e2e/price-sources.spec.ts` → "değişim onay ister"; `tests/price-sources.test.ts` §3 |
+| 25.8 | **Sessiz fallback yok:** aktif kaynak düşerse başka sağlayıcıya geçilmez; "fiyat yok / bayat" gösterilir, 0 TL gösterilmez | `tests/price-sources.test.ts` §4; `e2e/valuation.spec.ts` |
+| 25.9 | Kaynak değişimi BUY/SELL tutarlarını, `MARKET_BASELINE` snapshot'ını ve gerçekleşmiş K/Z'yi değiştirmez | `tests/price-sources.test.ts` §4; `e2e/price-sources.spec.ts` → "geçmişi değiştirmez" |
+| 25.10 | Karşılaştırma ekranı yalnızca gösterimdir; aktif değerleme kaynağını değiştirmez | `e2e/price-sources.spec.ts` → "compare-table" |
+| 25.11 | Panelde aktif kaynak, piyasa, son güncelleme ve "Gerçek piyasa verisi değil" etiketi görünür; "Harem resmî" gibi ifade hiçbir yerde geçmez | `e2e/price-sources.spec.ts` → "panelde aktif kaynak"; `tests/price-providers.test.ts` §6 |
+| 25.12 | Cron ucu secret olmadan çalışmaz (403); secret tanımsızsa uç kapalıdır | `e2e/price-sources.spec.ts` → "zamanlanmış alım ucu"; `tests/authorization-matrix.test.ts` |
+| 25.13 | Yönetici MFA zorunlu: doğrulanmamış oturum yönetim uçlarında 403; TOTP ±1 pencere; 5 denemede kilit; kurtarma kodu tek kullanımlık | `tests/price-sources.test.ts` §5; `e2e/price-sources.spec.ts` → "MFA doğrulanmadan" |
+| 25.14 | MFA secret'ı dinlenmede şifreli (AES-256-GCM); açık secret sütunu yok; kurtarma kodları yalnızca özet | `tests/price-sources.test.ts` §5; pgTAP §15 "admin_mfa" |
+| 25.15 | Normal kullanıcı MFA olmadan çalışır; MFA yalnızca yöneticide zorunludur | `e2e/price-sources.spec.ts` → "normal kullanıcı ikinci faktör olmadan" |
+| 25.16 | Kullanıcı kendi verisini CSV indirir, silme talebi gönderir; gizlilik sayfası bağlayıcı teklif olmadığını belirtir | `e2e/price-sources.spec.ts` → "CSV indirebilir" |
+| 25.17 | Fiyat tabloları istemciye kapalı; yazma yalnızca RPC ile; tarihçe ve olay kaydı append-only | pgTAP §15; `npm run test:data-api` |
+| 25.18 | Sağlayıcı hataları güvenli koda indirgenir; ham yanıt, URL ve anahtar sızmaz | `tests/price-providers.test.ts` §4; `tests/security-surface.test.ts` |
+| 25.19 | Canlı sağlayıcı testi credential yoksa NOT_RUN raporlanır; eksik ayarlar yalnızca değişken adıyla listelenir | `npm run price:contract` |
+| 25.20 | Fiyat alımı uçtan uca: katalog eşitleme → alım → karantina → seçim → değerleme | `npm run price:smoke` (yerel Supabase) |
+| 25.21 | Sağlık ucu kimliksiz yalın durum döner; ayrıntı yalnızca cron secret'ıyla açılır ve secret/adres sızdırmaz | `tests/authorization-matrix.test.ts`; `e2e/price-sources.spec.ts` → "sağlık ucu" |
+| 25.22 | Katalog hiç eşitlenmemiş yeni kurulumda kaynak okuma/seçme çalışır; başarısız eşitleme önbelleğe alınmaz | `tests/price-sources.test.ts` §1 |
+| 25.23 | Üretimde kaynak seçili değilken test verisine düşülmez: anlık görüntü "unavailable", MARKET_BASELINE oluşmaz | `tests/price-sources.test.ts` §4b |
+| 25.24 | CSV dışa aktarma ayırıcı/tırnak/satır sonunu kaçırır ve `=`, `+`, `-`, `@` ile başlayan serbest metni formül olarak çalıştırmaz | `tests/csv-export.test.ts` |
+| 25.25 | Paylaşılan bileşene verilen `data-testid` DOM'a ulaşır (sessizce düşen prop yakalanır) | `tests/deployment-surface.test.ts` → "arayüz sözleşmesi" |
+| 25.26 | Yönetim fiyat kaynakları ekranı 390 px'te yatay taşma üretmez (uzun değişken adları ve düğme grubu dâhil) | `e2e/price-sources.spec.ts` → `expectNoHorizontalOverflow` |
+| 25.27 | Piyasa arayüzde okunur adıyla görünür ve kaynak hangi yoldan gelirse gelsin aynı adla etiketlenir | `e2e/portfolio.spec.ts` → "fiyat kaynağı test verisi olarak etiketlenir", "MARKET_BASELINE" |

@@ -212,17 +212,61 @@ Arayüz yönlendirmesine tek başına güvenme.
 
 ## Fiyat verisi kuralları
 
-- **Gerçek fiyat entegrasyonunu lisans/izin olmadan scrape ederek yapma.** KAYSARDER, Sarraf TV veya
-  başka bir siteden izinsiz veri çekme.
+- **Gerçek fiyat entegrasyonunu lisans/izin olmadan scrape ederek yapma.** KAYSARDER, Sarraf TV,
+  Altınkaynak veya Harem sayfalarından izinsiz veri çekme; CAPTCHA/bot korumasını aşma; gizli veya
+  özel WebSocket uçlarını reverse engineer etme.
+- **Hayali endpoint yazma.** Sözleşmesi bilinmeyen sağlayıcı için adres uydurma; taban adres
+  `*_API_URL` ile ortamdan gelir. Adres yoksa sağlayıcı `NOT_CONFIGURED`'dır ve veri çekmez.
+- **Lisans kapısı fail closed'dır.** `*_REDISTRIBUTION_ALLOWED` açıkça `"true"` değilse durum
+  `LICENSE_REQUIRED`'dır. `enabled = true` yalnızca `LICENSED` iken mümkündür (DB kısıtı da zorlar).
+  Bu mantığı gevşetme.
+- **Sağlayıcı anahtarı yalnızca sunucuda.** `src/prices/providers/*` istemci bileşeninden import
+  edilmez; anahtar API yanıtına, loga, denetim kaydına veya `price_providers` tablosuna yazılmaz.
+- **Sağlayıcı hatasını ham yayma.** `TIMEOUT`, `NETWORK`, `HTTP_401`, `HTTP_5XX`, `BAD_PAYLOAD`
+  gibi sabit güvenli kodlara indir; ham yanıt yalnızca hash olarak saklanır.
 - Alış ve satış fiyatlarını birbirine çevirme, türetme veya yer değiştirme.
   `liquidationPrice` = piyasanın alışı (kullanıcının bozdurma karşılığı),
   `replacementPrice` = piyasanın satışı (kullanıcının yeniden alım maliyeti).
   Kullanıcının kendi işlem fiyatı bu ikisinden bağımsızdır ve maliyette esas olan odur.
-- Bir sağlayıcı başarısız olduğunda başka piyasanın fiyatına **sessizce geçme**. Fiyat yoksa
-  arayüzde "fiyat yok" gösterilir, sıfır gösterilmez.
+- **Sessiz fallback EKLEME.** Bir sağlayıcı başarısız olduğunda başka sağlayıcıya, başka piyasaya
+  veya başka şehrin fiyatına otomatik geçme. Fiyat yoksa "fiyat yok" gösterilir, sıfır gösterilmez.
+- **Piyasaları karıştırma.** Bir portföyde tek aktif sağlayıcı/piyasa vardır; Kayseri fiyatıyla
+  genel Türkiye fiyatı aynı hesapta birleştirilmez. `REFERENCE_ONLY` kaynak (BIST) değerlemede
+  birincil kaynak olamaz.
 - Test verisini gerçek piyasa verisi gibi etiketleme. `isRealMarketData: false` olan her kaynak
-  arayüzde açıkça işaretlenir.
-- Bayat veriye "güncel" deme.
+  arayüzde açıkça işaretlenir. Bayat veriye "güncel" deme.
+- **Sağlayıcıyı bağlı olmadığı kurumun resmî servisi gibi anma.** "Harem resmî", "Altınkaynak
+  resmî" gibi ifadeler yasaktır; AltinAPI bağımsız bir veri sağlayıcısıdır. Üst kaynağı bilinmeyen
+  birleşik veri "Çoklu Kaynak" olarak etiketlenir.
+- **Sembol eşlemesi değişirse `mappingVersion` artır** (`src/prices/providers/mappings.ts`);
+  eski kayıtların hangi eşlemeyle üretildiği izlenebilir kalmalıdır.
+- **Alım merkezîdir.** Tarayıcı sağlayıcıya bağlanmaz. Yeni sağlayıcı eklerken istek ömrü içinde
+  kalıcı WebSocket açma; `price_ingestion_apply` yolunu (advisory lock + `run_key`) atlama.
+- `PRICE_CRON_SECRET` tanımsızsa `/api/cron/price-ingestion` kapalıdır; bu davranışı değiştirme.
+- **Test sağlayıcısının üretim kapısı tek yerdedir** (`src/prices/dev-gate.ts`). Yeni bir
+  `NODE_ENV === "production"` kontrolü yazma; `devOnlyProviderBlocked()` kullan. Kapı yalnızca
+  var olan test kaçış kapısıyla (`AUTH_ALLOW_LOCAL_BACKEND`) açılır; başka bir bayrak ekleme.
+- **Fiyat kaynağı okuyan/yazan her giriş noktası `ensureCatalog()` çağırır.** Katalog eşitlemesini
+  yalnızca yönetim sayfasına veya cron'a bağlama; yeni kurulumda kullanıcı ekranı boş kalır.
+- **Üretimde test verisine düşme.** `currentSnapshot()` aktif kaynak yoksa üretimde boş
+  "unavailable" anlık görüntü döner; MARKET_BASELINE oluşturulmaz. Bu davranışı kolaylık
+  gerekçesiyle geri alma.
+- **Kalite kapısı fiyatı DEĞİŞTİRMEZ.** `evaluateQuote` yalnızca kabul/ret kararı verir ve
+  quote'u olduğu gibi döndürür; eşik karşılaştırması için ürettiği `number` değerler asla
+  saklanan fiyatın yerine yazılmaz. Yuvarlama veya normalizasyon ekleme.
+
+## Yönetici ikinci faktörü (MFA)
+
+- **`requireCurrentAdmin()` MFA kontrolünü içerir.** Bu kontrolü kaldırma, guard'ı MFA'sız bir
+  varyantla değiştirme. `requireAdminForMfaSetup` YALNIZCA kurulum/doğrulama uçları içindir.
+- TOTP secret'ı `AUTH_MFA_ENCRYPTION_KEY` ile AES-256-GCM şifreli saklanır; açık secret sütunu
+  ekleme, secret'ı loga veya API yanıtına yazma (kurulum sırasında bir kez gösterilir).
+- Kurtarma kodları yalnızca SHA-256 özetiyle saklanır ve tek kullanımlıktır.
+- Kod karşılaştırmasını sabit zamanlı yap; deneme sayacını ve kilidi kaldırma.
+- MFA sıfırlaması yalnızca başka bir yönetici tarafından, kullanıcı adı onayıyla yapılır ve
+  hedefin oturumlarını kapatır. Parola değişimi MFA'yı sessizce kaldırmaz.
+- `e2e/totp.ts` test tarafı bağımsız üreteçtir; `src/server/auth/totp.ts` "server-only" kalmalıdır.
+  İkisinin eşliği `tests/price-sources.test.ts` §5'te doğrulanır.
 
 ## Arayüz kuralları
 
@@ -232,6 +276,15 @@ Arayüz yönlendirmesine tek başına güvenme.
   başka yerde sabit yazılmaz.
 - Mobil öncelikli çalış. **390 px genişlikte yatay kaydırma oluşmamalıdır**; geniş içerik kendi
   `overflow-x: auto` kabında kaydırılır.
+- **Dar ekranda `shrink-0` düğme grubu kullanma.** `shrink-0` esnek öğeye max-content genişlik
+  dayatır ve 390 px'te taşma üretir; grubu `w-full sm:w-auto` ile kendi satırına al.
+- **Bölünmeyen uzun metinlere `break-words` ver** (ortam değişkeni adları, kodlar, URL'ler).
+- **Piyasa kimliğini kullanıcıya HAM gösterme.** `marketLabel()` ile okunur ada çevir
+  ("kayseri" → "Kayseri Yerel Piyasa"); eşleme harf durumuna duyarsızdır ve bilinmeyen değeri
+  olduğu gibi bırakır (uydurma ad üretmez).
+- **Paylaşılan bileşenlere `data-testid` eklerken bileşenin onu DOM'a geçirdiğini doğrula.**
+  JSX'te `data-*` nitelikleri fazlalık özellik denetiminden muaftır; karşılanmayan prop sessizce
+  düşer ve test kancası hiç oluşmaz (`Card` bu yüzden `data-testid`'yi açıkça karşılar).
 - Erişilebilirlik: yeterli kontrast, klavye ile kullanılabilirlik, `aria-*` etiketleri,
   görünür odak halkası. Rengi tek bilgi taşıyıcı yapma.
 - Ürün kataloğu yalnızca `src/domain/catalog.ts` içinde tanımlanır; bileşenlere dağıtılmaz.

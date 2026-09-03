@@ -17,6 +17,7 @@ import { getPriceProvider } from "@/prices";
 import { adminScope, type AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
+import { ProviderNotSelectableError } from "@/server/prices/types";
 
 /**
  * Yönetim işlemleri.
@@ -87,6 +88,74 @@ export class AdminService {
       });
       return false;
     }
+  }
+
+  // --- Fiyat kaynakları (Sprint 3) ---
+
+  /** Yönetici sağlayıcıyı etkinleştirir / kullanıcıya açar. Her değişiklik denetlenir. */
+  async setPriceProviderFlags(
+    actor: AdminActor,
+    code: string,
+    enabled: boolean,
+    userSelectable: boolean,
+  ): Promise<unknown> {
+    const { PriceIngestionService } = await import("@/server/prices/ingestion-service");
+    // Katalog hiç eşitlenmemişse sağlayıcı satırı bulunmaz; eşitleme idempotenttir.
+    await new PriceIngestionService(this.backend, { now: () => this.now() }).ensureCatalog();
+    try {
+      const row = await this.backend.setPriceProviderFlags(code, enabled, userSelectable);
+      await this.audit(actor, "price.provider_update", null, true, { providerCode: code, enabled, userSelectable });
+      return row;
+    } catch (error) {
+      await this.audit(actor, "price.provider_update", null, false, { providerCode: code, enabled, userSelectable });
+      if (error instanceof ProviderNotSelectableError) throw conflict(error.message);
+      throw error;
+    }
+  }
+
+  /** Yönetici elle fiyat alımı tetikler. */
+  async refreshPriceProvider(actor: AdminActor, code: string): Promise<unknown> {
+    const { PriceIngestionService } = await import("@/server/prices/ingestion-service");
+    const ingestion = new PriceIngestionService(this.backend, { now: () => this.now() });
+    await ingestion.ensureCatalog();
+    const outcome = await ingestion.ingestProvider(code);
+    await this.audit(actor, "price.refresh", null, outcome.attempted, {
+      providerCode: code,
+      status: outcome.result?.status ?? "SKIPPED",
+      accepted: outcome.accepted,
+      quarantined: outcome.quarantined.length,
+      safeErrorCode: outcome.safeErrorCode,
+    });
+    return {
+      providerCode: outcome.providerCode,
+      attempted: outcome.attempted,
+      status: outcome.result?.status ?? "SKIPPED",
+      accepted: outcome.accepted,
+      quarantined: outcome.quarantined,
+      safeErrorCode: outcome.safeErrorCode,
+      message: outcome.message,
+    };
+  }
+
+  /** Bağlantı testi: yalnızca durum ve güvenli hata kodu döner; secret DÖNMEZ. */
+  async testPriceProvider(actor: AdminActor, code: string): Promise<unknown> {
+    const { getProviderInstance } = await import("@/prices/registry");
+    const provider = getProviderInstance(code);
+    if (!provider) throw notFound("Fiyat kaynağı bulunamadı.");
+    const health = await provider.healthCheck();
+    await this.audit(actor, "price.provider_update", null, health.status === "ok", {
+      providerCode: code,
+      test: true,
+      status: health.status,
+      safeErrorCode: health.safeErrorCode,
+    });
+    return health;
+  }
+
+  /** MFA sıfırlaması için denetim kaydı (sıfırlamayı MfaService yapar). */
+  async recordMfaReset(actor: AdminActor, targetUserId: string): Promise<void> {
+    const target = await this.backend.getProfile(targetUserId);
+    await this.audit(actor, "mfa.reset", target, true, { targetUserId });
   }
 
   async listUsers(actor: AdminActor, search?: string): Promise<UserProfile[]> {

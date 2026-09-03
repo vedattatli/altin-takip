@@ -180,3 +180,32 @@ describe("giriş ekranı: tek ve kalıcı oturum modeli", () => {
     }
   });
 });
+
+describe("arayüz sözleşmesi: test kancaları DOM'a ulaşır", () => {
+  it("data-testid verilen paylaşılan bileşen bunu DOM'a geçirir", () => {
+    // JSX'te data-* nitelikleri fazlalık özellik denetiminden muaftır: karşılanmayan
+    // bir prop sessizce DÜŞER ve test kancası hiç oluşmaz. Bu test o sessiz kaybı yakalar.
+    const ui = read(join("src", "components", "ui.tsx"));
+    const sources = SOURCE_FILES.filter((file) => file.endsWith(".tsx"));
+
+    const used = new Set<string>();
+    for (const file of sources) {
+      const content = read(file);
+      // [^<>] iç içe öğeye taşmayı engeller: bir prop içindeki <button data-testid>
+      // dıştaki bileşene ait sayılmamalıdır.
+      for (const match of content.matchAll(/<([A-Z][A-Za-z0-9]*)[^<>]*data-testid=/g)) {
+        used.add(match[1]!);
+      }
+    }
+    expect(used.size).toBeGreaterThan(0);
+
+    for (const component of used) {
+      const marker = `export function ${component}(`;
+      const at = ui.indexOf(marker);
+      if (at < 0) continue; // ui.tsx dışında tanımlı bileşenler bu testin kapsamı değil.
+      const next = ui.indexOf(`${String.fromCharCode(10)}export `, at + marker.length);
+      const body = ui.slice(at, next < 0 ? ui.length : next);
+      expect(body, `${component} data-testid'yi DOM'a geçirmelidir`).toContain("data-testid");
+    }
+  });
+});

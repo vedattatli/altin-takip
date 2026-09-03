@@ -137,6 +137,18 @@ Kartlar: **Tahmini Bozdurma Değeri**, **Yeniden Alım Değeri**, **Elde Kalan M
 - Fiyat kaynağı, piyasa, veri durumu ve son fiyat zamanı — panelin altında tek satırlık
   şeritte; "gerçek piyasa verisi değil" uyarısı her zaman görünür.
 
+### 6.1.1 Çoklu fiyat kaynağı (Sprint 3)
+
+- Kullanıcı, yöneticinin açtığı kaynaklar arasından **tek** bir fiyat kaynağı seçer. Bir
+  portföyde iki piyasa karıştırılmaz.
+- Kullanıcıya önce piyasa adı ("Kayseri Yerel Piyasa"), sonra teknik sağlayıcı adı gösterilir.
+  Hiçbir kaynak, bağlı olmadığı bir kurumun "resmî" servisi gibi anılmaz.
+- Kaynak değişimi açık onay ister ve şu metni gösterir: güncel değer ve gerçekleşmemiş K/Z
+  değişebilir, geçmiş işlem maliyetleri ve başlangıç snapshot'ları değişmez.
+- Kaynak karşılaştırma ekranı yalnızca gösterim amaçlıdır; değerlemeyi değiştirmez.
+- Aktif kaynak veri vermezse **başka kaynağa geçilmez**; durum dürüstçe bildirilir.
+- Lisanslı gerçek kaynak yokken yalnızca test verisi çalışır ve açıkça etiketlenir.
+
 ### 6.2 Altın ekleme akışları
 
 **Mevcut altınımı ekliyorum (açılış bakiyesi)** — en fazla üç adım: ürün + miktar →
@@ -201,12 +213,24 @@ Katalog tek merkezden yönetilir: `src/domain/catalog.ts`. Her ürün ayrı mali
 
 ## 7. Fiyat verisi
 
-- Bu sürümde yalnızca `MockPriceProvider` kullanılır ve **Test Verisi** olarak etiketlenir.
+- Uygulama çoklu kaynağı destekler; bu sürümde lisanslı gerçek kaynak olmadığı için yalnızca
+  test sağlayıcısı çalışır ve **Test Verisi** olarak etiketlenir. Katalog ve lisans kapısı:
+  [PRICE_PROVIDERS.md](PRICE_PROVIDERS.md).
 - Her fiyat kaydı şu alanları taşır: `productId`, `liquidationPrice` (bozdurma), `replacementPrice` (yeniden alım), `currency`, `market`,
   `provider`, `providerTimestamp`, `fetchedAt`, `status`.
 - Alış ve satış birbirine çevrilmez.
 - Bir sağlayıcı başarısız olduğunda başka piyasaya **sessiz geçiş yapılmaz**.
-- Hiçbir siteden izinsiz veri çekilmez.
+- Hiçbir siteden izinsiz veri çekilmez; CAPTCHA aşılmaz, gizli WebSocket reverse engineer edilmez.
+- Fiyatlar merkezî sunucu alımıyla toplanır; kullanıcı tarayıcısı sağlayıcıya bağlanmaz.
+- Şüpheli fiyat (ters makas, aşırı sıçrama, bayat zaman) karantinaya alınır ve değerlemeye girmez.
+
+### 7.1 Kullanıcı veri hakları
+
+- Kullanıcı kendi işlem defterini ve pozisyonlarını CSV olarak indirebilir.
+- Kullanıcı hesap ve veri silme talebi gönderebilir; talep denetim kaydına yazılır. Silmeyi
+  yönetici, kullanıcı adı onayıyla yapar.
+- Gizlilik sayfası hangi verinin neden tutulduğunu, fiyatların bağlayıcı bir alım satım teklifi
+  olmadığını ve yatırım tavsiyesi verilmediğini açıkça belirtir.
 
 ## 8. Demo modu
 

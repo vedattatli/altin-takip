@@ -6,6 +6,17 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { internalEmailForUsername } from "@/auth/internal-identity";
 import { normalizeUsername } from "@/auth/username";
 import type { AdminAuditLog, UserProfile, UserStatus } from "@/auth/types";
+import {
+  ProviderNotSelectableError,
+  type IngestionPayload,
+  type IngestionResult,
+  type PricePreferenceResult,
+  type PricePreferenceRow,
+  type PriceSourceEventRow,
+  type ProviderQuotesRow,
+  type ProviderStateRow,
+  type ProviderSyncInput,
+} from "@/server/prices/types";
 import type {
   LedgerAppendRequest,
   LedgerEntry,
@@ -33,6 +44,7 @@ import {
   type SessionTouch,
   type StoredSessionSummary,
   type LedgerRevision,
+  type MfaCredentialRecord,
 } from "./backend";
 
 /**
@@ -78,6 +90,8 @@ function toProfile(row: ProfileRow): UserProfile {
 /** Postgres tarafındaki aşırı satış hatasının tanınması için işaret. */
 const OVERSELL_MARKER = "ALTIN_OVERSELL";
 /** Portföy provisioning eksikliğinin tanınması için işaret. */
+const PROVIDER_LICENSE_MARKER = "ALTIN_PROVIDER_LICENSE_REQUIRED";
+const PROVIDER_NOT_SELECTABLE_MARKER = "ALTIN_PROVIDER_NOT_SELECTABLE";
 const NOT_PROVISIONED_MARKER = "ALTIN_PORTFOLIO_NOT_PROVISIONED";
 /** Aynı idempotency anahtarı farklı içerikle geldi. */
 const IDEMPOTENCY_MARKER = "ALTIN_IDEMPOTENCY_CONFLICT";
@@ -108,10 +122,11 @@ interface SessionRow {
   revoked_at: string | null;
   device_label: string;
   previous_token_valid_until: string | null;
+  mfa_verified_at: string | null;
 }
 
 const SESSION_COLUMNS =
-  "id, user_id, expires_at, idle_expires_at, absolute_expires_at, persistent, created_at, last_seen_at, renewed_at, rotated_at, revoked_at, device_label, previous_token_valid_until";
+  "id, user_id, expires_at, idle_expires_at, absolute_expires_at, persistent, created_at, last_seen_at, renewed_at, rotated_at, revoked_at, device_label, previous_token_valid_until, mfa_verified_at";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -260,6 +275,7 @@ export class SupabaseAuthBackend implements AuthBackend {
       idleExpiresAt: row.idle_expires_at,
       absoluteExpiresAt: row.absolute_expires_at,
       persistent: row.persistent,
+      mfaVerifiedAt: row.mfa_verified_at ?? null,
       lastSeenAt: row.last_seen_at,
       renewedAt: row.renewed_at,
       rotatedAt: row.rotated_at,
@@ -730,5 +746,244 @@ export class SupabaseAuthBackend implements AuthBackend {
       "Defter sürümü okunamadı",
     );
     return { revision: Number(result?.revision ?? 0), updatedAt: String(result?.updatedAt ?? "") };
+  }
+
+  // --- Fiyat kaynakları (Sprint 3) ---
+  // Bütün fiyat işlemleri SECURITY DEFINER RPC'lerden geçer; fiyat tablolarına
+  // service_role dâhil hiçbir rol doğrudan YAZAMAZ (0013 / 0014).
+
+  private async priceRpc<T>(fn: string, params: Record<string, unknown>, context: string): Promise<T> {
+    const { data, error } = await this.admin.rpc(fn, params);
+    if (error) {
+      const message = error.message ?? "";
+      if (message.includes(PROVIDER_LICENSE_MARKER) || message.includes(PROVIDER_NOT_SELECTABLE_MARKER)) {
+        throw new ProviderNotSelectableError(String(params.p_code ?? ""), message.replace(/^ALTIN_[A-Z_]+:\s*/, ""));
+      }
+      if (message.includes(NOT_PROVISIONED_MARKER)) {
+        throw new PortfolioNotProvisionedError(String(params.p_user_id ?? ""));
+      }
+      fail(context, error);
+    }
+    return data as T;
+  }
+
+  async syncPriceProviders(providers: readonly ProviderSyncInput[]): Promise<number> {
+    const count = await this.priceRpc<number>(
+      "price_providers_sync",
+      { p_payload: providers },
+      "Fiyat sağlayıcıları eşitlenemedi",
+    );
+    return Number(count ?? 0);
+  }
+
+  async syncPriceMappings(code: string, mappingVersion: string, mapping: Record<string, string>): Promise<number> {
+    const count = await this.priceRpc<number>(
+      "price_mappings_sync",
+      { p_code: code, p_mapping_version: mappingVersion, p_payload: mapping },
+      "Fiyat eşlemeleri güncellenemedi",
+    );
+    return Number(count ?? 0);
+  }
+
+  async listPriceProviders(): Promise<ProviderStateRow[]> {
+    const rows = await this.priceRpc<ProviderStateRow[] | null>(
+      "price_providers_state",
+      {},
+      "Fiyat sağlayıcıları okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async setPriceProviderFlags(code: string, enabled: boolean, userSelectable: boolean): Promise<ProviderStateRow> {
+    await this.priceRpc<unknown>(
+      "price_provider_set_flags",
+      { p_code: code, p_enabled: enabled, p_user_selectable: userSelectable },
+      "Fiyat sağlayıcısı güncellenemedi",
+    );
+    const providers = await this.listPriceProviders();
+    const updated = providers.find((provider) => provider.code === code);
+    if (!updated) fail("Fiyat sağlayıcısı güncellenemedi", { message: "Kayıt bulunamadı" });
+    return updated;
+  }
+
+  async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {
+    const result = await this.priceRpc<IngestionResult>(
+      "price_ingestion_apply",
+      { p_code: code, p_run_key: runKey, p_payload: payload },
+      "Fiyat alımı kaydedilemedi",
+    );
+    return {
+      runId: String(result?.runId ?? ""),
+      status: String(result?.status ?? "FAILED"),
+      skipped: Boolean(result?.skipped),
+      quoteCount: Number(result?.quoteCount ?? 0),
+      rejectedCount: Number(result?.rejectedCount ?? 0),
+      replayed: Boolean(result?.replayed),
+    };
+  }
+
+  async currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null> {
+    const row = await this.priceRpc<ProviderQuotesRow | null>(
+      "price_quotes_current",
+      { p_code: code },
+      "Güncel fiyatlar okunamadı",
+    );
+    return row ?? null;
+  }
+
+  async comparePriceQuotes(codes: readonly string[]): Promise<ProviderQuotesRow[]> {
+    const rows = await this.priceRpc<ProviderQuotesRow[] | null>(
+      "price_quotes_compare",
+      { p_codes: codes },
+      "Fiyat karşılaştırması okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async getPricePreference(scope: DataScope): Promise<PricePreferenceRow> {
+    const row = await this.priceRpc<PricePreferenceRow | null>(
+      "price_preference_get",
+      { p_user_id: scope.userId },
+      "Fiyat kaynağı tercihi okunamadı",
+    );
+    return (
+      row ?? { portfolioId: null, providerCode: null, marketId: null, selectedAt: null, selectedBy: null }
+    );
+  }
+
+  async setPricePreference(
+    scope: DataScope,
+    code: string,
+    actorId: string,
+    role: "user" | "admin",
+    reason: string,
+  ): Promise<PricePreferenceResult> {
+    return this.priceRpc<PricePreferenceResult>(
+      "price_preference_set",
+      { p_user_id: scope.userId, p_code: code, p_actor: actorId, p_role: role, p_reason: reason },
+      "Fiyat kaynağı değiştirilemedi",
+    );
+  }
+
+  async listPriceSourceEvents(scope: DataScope, limit = 50): Promise<PriceSourceEventRow[]> {
+    const rows = await this.priceRpc<PriceSourceEventRow[] | null>(
+      "price_source_events",
+      { p_user_id: scope.userId, p_limit: limit },
+      "Kaynak değişim geçmişi okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  // --- Yönetici ikinci faktörü (Sprint 3) ---
+  // Secret ŞİFRELİ saklanır (uygulama katmanı); kurtarma kodları yalnızca özet.
+
+  async getMfaCredential(userId: string): Promise<MfaCredentialRecord | null> {
+    const { data, error } = await this.admin
+      .from("admin_mfa_credentials")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) fail("İkinci faktör bilgisi okunamadı", error);
+    if (!data) return null;
+    return {
+      userId,
+      secretCiphertext: data.secret_ciphertext as string,
+      secretNonce: data.secret_nonce as string,
+      confirmedAt: (data.confirmed_at as string | null) ?? null,
+      lastVerifiedAt: (data.last_verified_at as string | null) ?? null,
+      failedAttempts: Number(data.failed_attempts ?? 0),
+      lockedUntil: (data.locked_until as string | null) ?? null,
+    };
+  }
+
+  async saveMfaCredential(userId: string, secret: { ciphertext: string; nonce: string }): Promise<void> {
+    const { error } = await this.admin.from("admin_mfa_credentials").upsert(
+      {
+        user_id: userId,
+        secret_ciphertext: secret.ciphertext,
+        secret_nonce: secret.nonce,
+        confirmed_at: null,
+        failed_attempts: 0,
+        locked_until: null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+    if (error) fail("İkinci faktör kaydedilemedi", error);
+  }
+
+  async confirmMfaCredential(userId: string, at: string): Promise<void> {
+    const { error } = await this.admin
+      .from("admin_mfa_credentials")
+      .update({ confirmed_at: at, last_verified_at: at, failed_attempts: 0, locked_until: null, updated_at: at })
+      .eq("user_id", userId);
+    if (error) fail("İkinci faktör onaylanamadı", error);
+  }
+
+  async deleteMfaCredential(userId: string): Promise<void> {
+    const { error } = await this.admin.from("admin_mfa_credentials").delete().eq("user_id", userId);
+    if (error) fail("İkinci faktör kaydı silinemedi", error);
+    const { error: codesError } = await this.admin.from("admin_mfa_recovery_codes").delete().eq("user_id", userId);
+    if (codesError) fail("Kurtarma kodları silinemedi", codesError);
+  }
+
+  async recordMfaAttempt(userId: string, success: boolean, at: string): Promise<MfaCredentialRecord | null> {
+    const current = await this.getMfaCredential(userId);
+    if (!current) return null;
+    const failedAttempts = success ? 0 : current.failedAttempts + 1;
+    // Art arda 5 hatalı denemede 15 dakika kilit.
+    const lockedUntil =
+      !success && failedAttempts >= 5 ? new Date(Date.parse(at) + 15 * 60_000).toISOString() : null;
+    const { error } = await this.admin
+      .from("admin_mfa_credentials")
+      .update({
+        failed_attempts: failedAttempts,
+        locked_until: lockedUntil,
+        last_verified_at: success ? at : current.lastVerifiedAt,
+        updated_at: at,
+      })
+      .eq("user_id", userId);
+    if (error) fail("İkinci faktör denemesi kaydedilemedi", error);
+    return { ...current, failedAttempts, lockedUntil, lastVerifiedAt: success ? at : current.lastVerifiedAt };
+  }
+
+  async replaceRecoveryCodes(userId: string, hashes: readonly string[]): Promise<void> {
+    const { error: deleteError } = await this.admin.from("admin_mfa_recovery_codes").delete().eq("user_id", userId);
+    if (deleteError) fail("Kurtarma kodları güncellenemedi", deleteError);
+    if (hashes.length === 0) return;
+    const { error } = await this.admin
+      .from("admin_mfa_recovery_codes")
+      .insert(hashes.map((hash) => ({ user_id: userId, code_hash: hash })));
+    if (error) fail("Kurtarma kodları yazılamadı", error);
+  }
+
+  async consumeRecoveryCode(userId: string, hash: string, at: string): Promise<boolean> {
+    const { data, error } = await this.admin
+      .from("admin_mfa_recovery_codes")
+      .update({ used_at: at })
+      .eq("user_id", userId)
+      .eq("code_hash", hash)
+      .is("used_at", null)
+      .select("id");
+    if (error) fail("Kurtarma kodu doğrulanamadı", error);
+    return Array.isArray(data) && data.length > 0;
+  }
+
+  async countRecoveryCodes(userId: string): Promise<number> {
+    const { count, error } = await this.admin
+      .from("admin_mfa_recovery_codes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("used_at", null);
+    if (error) fail("Kurtarma kodu sayısı okunamadı", error);
+    return count ?? 0;
+  }
+
+  async markSessionMfaVerified(sessionId: string, at: string): Promise<void> {
+    const { error } = await this.admin
+      .from("app_sessions")
+      .update({ mfa_verified_at: at })
+      .eq("id", sessionId);
+    if (error) fail("Oturum ikinci faktör durumu yazılamadı", error);
   }
 }

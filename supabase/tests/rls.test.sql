@@ -20,7 +20,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(184);
+select plan(220);
 
 -- -----------------------------------------------------------------------------
 -- Yardımcılar
@@ -1778,6 +1778,266 @@ select throws_ok(
   $$delete from public.price_snapshots where user_id = '22222222-2222-2222-2222-222222222222'$$,
   '42501', NULL,
   'Cascade dışı doğrudan anlık görüntü silme hâlâ reddedilir');
+
+-- =============================================================================
+-- 15. FİYAT KAYNAKLARI VE YÖNETİCİ MFA (0013 / 0014 / 0015)
+-- =============================================================================
+
+-- Fiyat tabloları istemciye kapalıdır (tercih/olay tabloları hariç: yalnızca kendi satırı)
+select ok(
+  (select bool_and(
+     not has_table_privilege('anon', t, 'SELECT')
+     and not has_table_privilege('anon', t, 'INSERT')
+     and not has_table_privilege('authenticated', t, 'INSERT')
+     and not has_table_privilege('authenticated', t, 'UPDATE')
+     and not has_table_privilege('authenticated', t, 'DELETE')
+     and not has_table_privilege('service_role', t, 'INSERT')
+     and not has_table_privilege('service_role', t, 'UPDATE')
+     and not has_table_privilege('service_role', t, 'DELETE'))
+   from unnest(array[
+     'public.price_providers', 'public.price_product_mappings', 'public.price_ingestion_runs',
+     'public.current_price_quotes', 'public.price_quote_history', 'public.provider_health_snapshots',
+     'public.portfolio_price_preferences', 'public.price_source_change_events'
+   ]) as t),
+  'Fiyat tabloları: anon kapalı, authenticated ve service_role YAZAMAZ (yalnızca RPC)'
+);
+
+select ok(
+  not has_table_privilege('authenticated', 'public.price_providers', 'SELECT')
+  and not has_table_privilege('authenticated', 'public.current_price_quotes', 'SELECT')
+  and has_table_privilege('authenticated', 'public.portfolio_price_preferences', 'SELECT')
+  and has_table_privilege('authenticated', 'public.price_source_change_events', 'SELECT'),
+  'Sağlayıcı ve fiyat tabloları istemciye kapalı; kullanıcı yalnızca kendi tercih/olay satırını okur'
+);
+
+select ok(
+  (select bool_and(
+     has_function_privilege('service_role', f, 'execute')
+     and not has_function_privilege('anon', f, 'execute')
+     and not has_function_privilege('authenticated', f, 'execute'))
+   from unnest(array[
+     'public.price_providers_sync(jsonb)',
+     'public.price_mappings_sync(text, text, jsonb)',
+     'public.price_provider_set_flags(text, boolean, boolean)',
+     'public.price_ingestion_apply(text, text, jsonb)',
+     'public.price_quotes_current(text)',
+     'public.price_providers_state()',
+     'public.price_quotes_compare(text[])',
+     'public.price_preference_get(uuid)',
+     'public.price_preference_set(uuid, text, uuid, text, text)',
+     'public.price_source_events(uuid, integer)'
+   ]) as f),
+  'Fiyat RPC''leri yalnızca service_role tarafından çağrılabilir'
+);
+
+select ok(
+  (select bool_and(
+     not has_table_privilege('anon', t, 'SELECT')
+     and not has_table_privilege('authenticated', t, 'SELECT')
+     and has_table_privilege('service_role', t, 'SELECT'))
+   from unnest(array['public.admin_mfa_credentials', 'public.admin_mfa_recovery_codes']) as t),
+  'Yönetici MFA tabloları istemciye tamamen kapalıdır'
+);
+
+-- Katalog eşitleme ve lisans kapısı
+select is(
+  public.price_providers_sync(jsonb_build_array(
+    jsonb_build_object('code', 'test-lisansli', 'displayName', 'Test Lisanslı', 'technicalName', 'Test',
+      'marketId', 'turkiye-genel', 'marketDisplayName', 'Genel Türkiye', 'providerType', 'REST',
+      'licenseStatus', 'LICENSED', 'licenseReference', 'SOZ-1', 'redistributionAllowed', true,
+      'capabilities', '["REST","PRODUCT_LEVEL"]'::jsonb, 'attribution', 'Test', 'referenceUrl', null),
+    jsonb_build_object('code', 'test-lisanssiz', 'displayName', 'Test Lisanssız', 'technicalName', 'Test',
+      'marketId', 'turkiye-genel', 'marketDisplayName', 'Genel Türkiye', 'providerType', 'REST',
+      'licenseStatus', 'LICENSE_REQUIRED', 'licenseReference', null, 'redistributionAllowed', false,
+      'capabilities', '["REST"]'::jsonb, 'attribution', 'Test', 'referenceUrl', null),
+    jsonb_build_object('code', 'test-referans', 'displayName', 'Test Referans', 'technicalName', 'Test',
+      'marketId', 'bist', 'marketDisplayName', 'BIST Referans', 'providerType', 'REFERENCE',
+      'licenseStatus', 'LICENSED', 'licenseReference', 'SOZ-2', 'redistributionAllowed', true,
+      'capabilities', '["REST","REFERENCE_ONLY"]'::jsonb, 'attribution', 'Test', 'referenceUrl', null)
+  )),
+  3, 'Katalog eşitlemesi üç sağlayıcı yazar');
+
+select is(
+  public.price_providers_sync(jsonb_build_array(
+    jsonb_build_object('code', 'test-lisansli', 'displayName', 'Test Lisanslı', 'technicalName', 'Test',
+      'marketId', 'turkiye-genel', 'marketDisplayName', 'Genel Türkiye', 'providerType', 'REST',
+      'licenseStatus', 'LICENSED', 'licenseReference', 'SOZ-1', 'redistributionAllowed', true,
+      'capabilities', '["REST","PRODUCT_LEVEL"]'::jsonb, 'attribution', 'Test', 'referenceUrl', null)
+  )),
+  1, 'Katalog eşitlemesi idempotenttir');
+
+select throws_ok(
+  $q$select public.price_provider_set_flags('test-lisanssiz', true, true)$q$,
+  'P0006', NULL,
+  'Lisanssız kaynak ETKİNLEŞTİRİLEMEZ (fail closed)');
+
+select throws_ok(
+  $q$select public.price_provider_set_flags('test-lisansli', false, true)$q$,
+  'P0004', NULL,
+  'Kapalı kaynak kullanıcıya sunulamaz');
+
+select lives_ok(
+  $q$select public.price_provider_set_flags('test-lisansli', true, true)$q$,
+  'Lisanslı kaynak etkinleştirilip kullanıcıya açılabilir');
+
+select lives_ok(
+  $q$select public.price_provider_set_flags('test-referans', true, false)$q$,
+  'Referans kaynağı etkinleştirilebilir (yalnızca kontrol amaçlı)');
+
+-- Fiyat alımı: idempotent, karantina sayacı, tarih geçmişi
+select is(
+  (public.price_ingestion_apply('test-lisansli', 'run-pgtap-1', jsonb_build_object(
+    'status', 'ok', 'safeErrorCode', null, 'latencyMs', '12', 'fetchedAt', now(),
+    'quotes', jsonb_build_array(
+      jsonb_build_object('canonicalProductId', 'gram-altin', 'liquidationPrice', '5000',
+        'replacementPrice', '5050', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'rawPayloadHash', 'h1')),
+    'quarantined', jsonb_build_array()))->>'status'),
+  'SUCCESS', 'Fiyat alımı uygulanır ve SUCCESS döner');
+
+select is(
+  (public.price_ingestion_apply('test-lisansli', 'run-pgtap-1', jsonb_build_object(
+    'status', 'ok', 'safeErrorCode', null, 'latencyMs', '12', 'fetchedAt', now(),
+    'quotes', jsonb_build_array(
+      jsonb_build_object('canonicalProductId', 'gram-altin', 'liquidationPrice', '9999',
+        'replacementPrice', '9999', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'rawPayloadHash', 'h2')),
+    'quarantined', jsonb_build_array()))->>'replayed'),
+  'true', 'Aynı koşum anahtarı ikinci kez uygulanmaz (idempotent)');
+
+select is(
+  (select public.ledger_num_text(liquidation_price) from public.current_price_quotes
+   where canonical_product_id = 'gram-altin'
+     and provider_id = (select id from public.price_providers where code = 'test-lisansli')),
+  '5000', 'Replay güncel fiyatı DEĞİŞTİRMEZ');
+
+select is(
+  (select count(*)::int from public.price_quote_history
+   where provider_id = (select id from public.price_providers where code = 'test-lisansli')),
+  1, 'Replay tarihçede ikinci kayıt oluşturmaz');
+
+select is(
+  (public.price_ingestion_apply('test-lisansli', 'run-pgtap-2', jsonb_build_object(
+    'status', 'partial', 'safeErrorCode', 'PARTIAL_COVERAGE', 'latencyMs', '20', 'fetchedAt', now(),
+    'quotes', jsonb_build_array(
+      jsonb_build_object('canonicalProductId', 'gram-altin', 'liquidationPrice', '5010',
+        'replacementPrice', '5060', 'upstreamSourceId', 'kayseri', 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'rawPayloadHash', 'h3')),
+    'quarantined', jsonb_build_array(jsonb_build_object('canonicalProductId', 'ata-altin', 'code', 'INVERTED_SPREAD'))
+  ))->>'status'),
+  'PARTIAL', 'Karantinalı kayıt olan koşum PARTIAL olur');
+
+select is(
+  (select quarantined_count from public.provider_health_snapshots
+   where provider_id = (select id from public.price_providers where code = 'test-lisansli')),
+  1, 'Karantina sayısı sağlık kaydına yazılır');
+
+select is(
+  (select count(*)::int from public.current_price_quotes
+   where provider_id = (select id from public.price_providers where code = 'test-lisansli')
+     and canonical_product_id = 'ata-altin'),
+  0, 'Karantinaya alınan ürün güncel fiyata GİRMEZ');
+
+select throws_ok(
+  $q$update public.price_quote_history set liquidation_price = 1$q$,
+  '42501', NULL,
+  'Fiyat geçmişi değiştirilemez (append-only)');
+
+select throws_ok(
+  $q$delete from public.price_quote_history$q$,
+  '42501', NULL,
+  'Fiyat geçmişi silinemez');
+
+select throws_ok(
+  $q$insert into public.current_price_quotes
+      (provider_id, market_id, canonical_product_id, liquidation_price, replacement_price,
+       provider_timestamp, fetched_at, mapping_version)
+    values ((select id from public.price_providers where code = 'test-lisansli'), 'turkiye-genel',
+            'has-altin', 5000, 4000, now(), now(), 'v1')$q$,
+  '23514', NULL,
+  'Ters makaslı güncel fiyat tablo kısıtıyla reddedilir');
+
+-- Kaynak tercihi ve denetim olayı
+select throws_ok(
+  $q$select public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-lisanssiz',
+      '11111111-1111-1111-1111-111111111111', 'user', 'deneme')$q$,
+  'P0006', NULL,
+  'Kullanıcı kapalı kaynağı seçemez');
+
+select throws_ok(
+  $q$select public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-referans',
+      '11111111-1111-1111-1111-111111111111', 'user', 'deneme')$q$,
+  'P0006', NULL,
+  'Referans kaynağı değerleme için seçilemez');
+
+select is(
+  (public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-lisansli',
+     '11111111-1111-1111-1111-111111111111', 'user', 'ilk seçim')->>'changed'),
+  'true', 'Kullanıcı açık kaynağı seçebilir');
+
+select is(
+  (public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-lisansli',
+     '11111111-1111-1111-1111-111111111111', 'user', 'tekrar')->>'changed'),
+  'false', 'Aynı kaynağa tekrar seçim değişiklik saymaz');
+
+select is(
+  (select count(*)::int from public.price_source_change_events
+   where user_id = '11111111-1111-1111-1111-111111111111'),
+  1, 'Kaynak değişimi tam olarak bir denetim olayı üretir');
+
+select is(
+  (select jsonb_array_length(public.price_source_events('11111111-1111-1111-1111-111111111111', 10))),
+  1, 'Kaynak değişim geçmişi okunabilir');
+
+select is(
+  (select jsonb_array_length(public.price_source_events('22222222-2222-2222-2222-222222222222', 10))),
+  0, 'Başka kullanıcının kaynak geçmişi boştur (izolasyon)');
+
+select throws_ok(
+  $q$update public.price_source_change_events set reason = 'değiştirildi'$q$,
+  '42501', NULL,
+  'Kaynak değişim kaydı değiştirilemez');
+
+select is(
+  (public.price_quotes_current('test-lisansli')->>'marketId'),
+  'turkiye-genel', 'Güncel fiyat okuması sağlayıcı ve piyasa bilgisini taşır');
+
+select is(
+  (select jsonb_array_length(public.price_quotes_compare(array['test-lisansli', 'test-referans']))),
+  2, 'Karşılaştırma birden çok sağlayıcıyı döner');
+
+-- Yönetici MFA
+select ok(
+  (select count(*)::int from information_schema.columns
+   where table_schema = 'public' and table_name = 'app_sessions' and column_name = 'mfa_verified_at') = 1,
+  'Oturumda ikinci faktör doğrulama zamanı alanı vardır');
+
+select ok(
+  (select count(*)::int from information_schema.columns
+   where table_schema = 'public' and table_name = 'admin_mfa_credentials'
+     and column_name in ('secret_ciphertext', 'secret_nonce')) = 2,
+  'TOTP secret şifreli alanlarda tutulur (düz metin sütunu yoktur)');
+
+select is(
+  (select count(*)::int from information_schema.columns
+   where table_schema = 'public' and table_name = 'admin_mfa_credentials' and column_name = 'secret'),
+  0, 'Düz metin secret sütunu YOKTUR');
+
+select lives_ok(
+  $q$insert into public.admin_audit_logs (admin_user_id, admin_username, action, success)
+    values ('33333333-3333-3333-3333-333333333333', 'yoneticix', 'mfa.enroll', true)$q$,
+  'Yeni denetim eylemleri (mfa.enroll) kısıtta tanımlıdır');
+
+select lives_ok(
+  $q$insert into public.admin_audit_logs (admin_user_id, admin_username, action, success)
+    values ('33333333-3333-3333-3333-333333333333', 'yoneticix', 'price.provider_update', true)$q$,
+  'Fiyat kaynağı denetim eylemi kısıtta tanımlıdır');
+
+select throws_ok(
+  $q$insert into public.admin_audit_logs (admin_user_id, admin_username, action, success)
+    values ('33333333-3333-3333-3333-333333333333', 'yoneticix', 'bilinmeyen.eylem', true)$q$,
+  '23514', NULL,
+  'Tanımsız denetim eylemi reddedilir');
 
 select * from finish();
 

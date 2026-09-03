@@ -3,8 +3,21 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { MARKET_DISPLAY_NAMES } from "@/prices/contract";
 import { isSnapshotStale, type PriceSnapshot } from "@/prices";
 import { cx } from "./ui";
+
+/**
+ * Piyasa kimliği kullanıcıya HAM gösterilmez ("kayseri" yerine "Kayseri Yerel Piyasa").
+ * Bilinmeyen/eski değerler olduğu gibi bırakılır; uydurma ad üretilmez.
+ */
+export function marketLabel(market: string | undefined): string {
+  if (!market) return "—";
+  // Eski kayıtlar piyasayı büyük harfle tutabilir ("TEST"); eşleme harf durumuna
+  // duyarsızdır ki aynı kaynak her yerde AYNI adla görünsün.
+  const key = market.toLowerCase() as keyof typeof MARKET_DISPLAY_NAMES;
+  return MARKET_DISPLAY_NAMES[key] ?? market;
+}
 
 const SERVER_CLOCK = () => null;
 
@@ -74,7 +87,7 @@ export function PriceSourceLine({
         ) : null}
 
         <Dot />
-        <span>{snapshot?.provider.market ?? "—"}</span>
+        <span>{marketLabel(snapshot?.provider.market)}</span>
         <Dot />
         <span>{dataStatusLabel}</span>
         <Dot />

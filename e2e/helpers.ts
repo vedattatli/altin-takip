@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { LocalAuthBackend } from "../src/server/auth/local-backend";
+import { E2E_MFA_ENCRYPTION_KEY } from "./test-env";
+import { decryptStoredSecret, totpCode } from "./totp";
 import { E2E_STORE_FILE } from "./global-setup";
 
 export const TEST_PASSWORD = "Kuyumcu7Defter";
@@ -73,6 +75,74 @@ export async function login(
   if (options.keepSignedIn ?? true) await keep.check();
   else await keep.uncheck();
   await page.getByRole("button", { name: "Giriş yap" }).click();
+}
+
+/**
+ * Yönetici girişi + ikinci faktör.
+ *
+ * Yönetim paneli MFA olmadan açılmaz. İlk girişte kurulum yapılır (secret yanıtta
+ * döner ve testte TOTP kodu hesaplanır), sonraki girişlerde yalnızca doğrulama.
+ * Secret test süreci belleğinde tutulur; dosyaya veya log'a yazılmaz.
+ */
+/**
+ * YÖNETİCİ GİRİŞİ (ikinci faktör dâhil)
+ *
+ * Giriş sonrası yönlendirme istemci tarafında bir adım gecikebildiği için URL'e
+ * BAKILMAZ: durum her zaman /guvenlik sayfası açılarak belirlenir.
+ *
+ * Anahtar kaynağı iki yerden gelir ve süreç yeniden başlasa da kaybolmaz:
+ *  - ilk kurulumda ekrandaki anahtar okunur,
+ *  - kurulum daha önce yapıldıysa yerel depodaki şifreli anahtar çözülür.
+ */
+const adminSecrets = new Map<string, string>();
+
+async function storedAdminSecret(username: string): Promise<string | null> {
+  const cached = adminSecrets.get(username);
+  if (cached) return cached;
+  const store = backend();
+  const profile = await store.findProfileByUsername(username);
+  if (!profile) return null;
+  const credential = await store.getMfaCredential(profile.id);
+  if (!credential) return null;
+  const secret = decryptStoredSecret(
+    credential.secretCiphertext,
+    credential.secretNonce,
+    E2E_MFA_ENCRYPTION_KEY,
+  );
+  adminSecrets.set(username, secret);
+  return secret;
+}
+
+export async function loginAsAdmin(
+  page: Page,
+  username: string,
+  password: string,
+  options: LoginOptions = {},
+) {
+  await login(page, username, password, options);
+  await page.waitForURL(/giris|guvenlik|yonetim|panel/, { timeout: 30_000 });
+
+  await gotoReady(page, "/guvenlik");
+  const view = page.getByTestId("mfa-view");
+  if (await view.isVisible().catch(() => false)) {
+    const start = page.getByTestId("mfa-start");
+    if (await start.isVisible().catch(() => false)) {
+      await start.click();
+      const secret = (await page.getByTestId("mfa-secret").innerText()).trim();
+      adminSecrets.set(username, secret);
+    }
+    const secret = (await storedAdminSecret(username)) ?? adminSecrets.get(username) ?? null;
+    if (!secret) {
+      throw new Error(`Yönetici ${username} için TOTP anahtarı bulunamadı; kurulum ekranı da açılmadı.`);
+    }
+    await page.getByTestId("mfa-code").fill(totpCode(secret, Date.now()));
+    await page.getByTestId("mfa-submit").click();
+    await page.waitForURL((url) => !url.pathname.startsWith("/guvenlik"), { timeout: 30_000 });
+    await page.waitForSelector('html[data-hydrated="true"]', { timeout: 30_000 });
+  }
+
+  // Testler yönetici oturumunu panelden başlatır.
+  if (!page.url().includes("/panel")) await gotoReady(page, "/panel");
 }
 
 export async function loginAsUser(

@@ -22,6 +22,30 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
   const [logoutAllOpen, setLogoutAllOpen] = useState(false);
   const [logoutAllBusy, setLogoutAllBusy] = useState(false);
   const [logoutAllError, setLogoutAllError] = useState<string | null>(null);
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [deletionReason, setDeletionReason] = useState("");
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionNotice, setDeletionNotice] = useState<string | null>(null);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
+
+  /** Silme talebi: veriyi burada SİLMEZ; talebi kaydeder ve süreci bildirir. */
+  async function requestDeletion() {
+    setDeletionBusy(true);
+    setDeletionError(null);
+    try {
+      const result = await apiFetch<{ message: string }>("/api/account/deletion-request", {
+        method: "POST",
+        body: JSON.stringify({ reason: deletionReason.trim() }),
+      });
+      setDeletionNotice(result.message);
+      setDeletionOpen(false);
+      setDeletionReason("");
+    } catch (cause) {
+      setDeletionError(cause instanceof Error ? cause.message : "Talep gönderilemedi.");
+    } finally {
+      setDeletionBusy(false);
+    }
+  }
 
   async function logoutEverywhere() {
     setLogoutAllBusy(true);
@@ -188,6 +212,79 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
       ) : null}
 
       <section>
+        <SectionTitle
+          title="Verileriniz"
+          description="Uygulamaya kaydettiğiniz altın portföyünü dışa aktarabilir veya silinmesini talep edebilirsiniz."
+        />
+        <Card className="space-y-3 p-4">
+          <div className="flex flex-wrap gap-2">
+            <a className="btn btn-secondary min-h-11" href="/api/portfolio/export?tur=islem" data-testid="export-ledger">
+              İşlemleri CSV indir
+            </a>
+            <a
+              className="btn btn-secondary min-h-11"
+              href="/api/portfolio/export?tur=pozisyon"
+              data-testid="export-positions"
+            >
+              Pozisyonları CSV indir
+            </a>
+            <Link className="btn btn-secondary min-h-11" href="/gizlilik">
+              Gizlilik ve KVKK
+            </Link>
+          </div>
+
+          {deletionNotice ? <Alert tone="success">{deletionNotice}</Alert> : null}
+          {deletionError ? <Alert tone="danger">{deletionError}</Alert> : null}
+
+          {deletionOpen ? (
+            <div className="space-y-3 rounded-[var(--radius-sm)] border border-negative-soft p-3.5">
+              <p className="text-sm text-muted">
+                Hesabınız ve uygulamaya kaydettiğiniz portföy verisi yönetici onayıyla kalıcı olarak silinir.
+                Silmeden önce verilerinizi CSV olarak indirmeniz önerilir.
+              </p>
+              <Field label="Sebep (isteğe bağlı)" htmlFor="deletion-reason">
+                <input
+                  id="deletion-reason"
+                  className="control min-h-11"
+                  maxLength={500}
+                  value={deletionReason}
+                  onChange={(event) => setDeletionReason(event.target.value)}
+                />
+              </Field>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="btn btn-secondary min-h-11"
+                  onClick={() => setDeletionOpen(false)}
+                  disabled={deletionBusy}
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger min-h-11"
+                  data-testid="confirm-deletion-request"
+                  onClick={() => void requestDeletion()}
+                  disabled={deletionBusy}
+                >
+                  {deletionBusy ? "Gönderiliyor…" : "Silme talebi gönder"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost min-h-11 text-negative"
+              data-testid="open-deletion-request"
+              onClick={() => setDeletionOpen(true)}
+            >
+              Hesap ve veri silme talebi
+            </button>
+          )}
+        </Card>
+      </section>
+
+      <section>
         <SectionTitle title="Uygulama" />
         <Card className="p-4 text-sm text-muted">
           <p>
@@ -195,8 +292,12 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
             {appConfig.version}
           </p>
           <p className="mt-2 leading-relaxed">
-            Bu sürümde fiyatlar test verisidir; gerçek piyasa verisi değildir. Gerçek fiyat
-            entegrasyonu yalnızca lisanslı bir sağlayıcı üzerinden yapılacaktır.
+            Fiyat kaynağınızı <Link className="text-accent underline" href="/fiyat-kaynagi">Fiyat kaynağı</Link>{" "}
+            ekranından görebilir ve yöneticinin açtığı kaynaklar arasında değiştirebilirsiniz. Lisanssız
+            kaynaklar gerçek veri olarak kullanılmaz; test verisi her zaman açıkça etiketlenir.
+          </p>
+          <p className="mt-2 leading-relaxed">
+            Gösterilen fiyatlar bilgilendirme amaçlıdır ve bağlayıcı bir alım satım teklifi değildir.
           </p>
         </Card>
       </section>

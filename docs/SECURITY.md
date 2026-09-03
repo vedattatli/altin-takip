@@ -636,3 +636,63 @@ politikası **yoktur** (pgTAP bunu `pg_policies` üzerinden doğrular).
   yazdırmaz; `STAGING_ENVIRONMENT=staging`, sabit https `APP_ORIGIN`, demo modu kapalı,
   production ref koruması ve NEXT_PUBLIC_ secret taraması **fail closed** uygulanır. Test
   hesaplarının parolaları yalnızca `.staging/accounts.local.json` (0600) dosyasındadır.
+
+## 26. Fiyat sağlayıcı sınırı (Sprint 3)
+
+**Anahtarlar yalnızca sunucudadır.** Sağlayıcı adresi, API anahtarı ve lisans referansı
+`src/prices/providers/*` içinde `process.env` üzerinden okunur. Bu modüller istemci paketine
+girmez (`npm run verify:bundle`), veritabanına yazılmaz ve API yanıtına konmaz. `price_providers`
+tablosu yalnızca lisans **durumunu** ve **referans metnini** tutar.
+
+**Lisans kapısı fail closed'dır.** Sağlayıcı üç durumdan birindedir:
+
+| Durum | Anlamı | Davranış |
+| --- | --- | --- |
+| `NOT_CONFIGURED` | Gerekli ortam değişkenlerinden biri eksik | Veri çekmez, etkinleştirilemez |
+| `LICENSE_REQUIRED` | Ayar var ama yeniden gösterim izni açıkça `true` değil | Veri çekmez, etkinleştirilemez |
+| `LICENSED` | Ayar tam + izin `true` | Yönetici etkinleştirebilir |
+
+`enabled = true` yalnızca `LICENSED` iken mümkündür; veritabanı kısıtı bunu ayrıca zorlar.
+Lisans düşerse katalog eşitlemesi kaynağı otomatik kapatır. Lisanssız kaynağı etkinleştirme
+girişimi `409` döner ve denetim kaydına yazılır.
+
+**Hata mesajları güvenlidir.** Sağlayıcı hataları `TIMEOUT`, `NETWORK`, `HTTP_401`, `HTTP_403`,
+`HTTP_5XX`, `BAD_PAYLOAD` gibi sabit kodlara indirgenir. Ham yanıt, URL ve anahtar hiçbir loga,
+API yanıtına veya yönetim ekranına yazılmaz; tarihçede yalnızca yanıt özeti (hash) tutulur.
+
+**Zamanlanmış alım ucu.** `POST /api/cron/price-ingestion` oturum kullanmaz; `PRICE_CRON_SECRET`
+ile `Authorization: Bearer` veya `X-Cron-Secret` başlığından doğrulanır. Secret tanımsızsa uç
+**kapalıdır** (403). Karşılaştırma sabit zamanlıdır. Test sağlayıcısı üretim koşumunda atlanır.
+
+**İstemci sağlayıcıya bağlanmaz.** Bütün alım sunucu tarafındadır; tarayıcı yalnızca kendi
+API'mizi okur. Böylece anahtar sızmaz ve sağlayıcı istek limiti kullanıcı sayısıyla çarpılmaz.
+
+**Sessiz fallback yasağı.** Aktif kaynak başarısız olduğunda başka sağlayıcıya, başka piyasaya
+veya başka şehrin fiyatına geçilmez. Bu bir güvenlik değil **veri doğruluğu** sınırıdır ve
+`tests/price-sources.test.ts` ile E2E'de doğrulanır.
+
+## 27. Yönetici ikinci faktörü (TOTP)
+
+- **Zorunludur.** `requireCurrentAdmin()` artık oturumun `mfa_verified_at` alanını kontrol eder.
+  Kurulmamış veya doğrulanmamış oturum yönetim uçlarında `403` alır; arayüz `/guvenlik` sayfasına
+  yönlendirir. Menü gizlemek tek başına önlem sayılmaz.
+- **Algoritma:** RFC 6238 TOTP, 30 saniyelik pencere, ±1 tolerans, sabit zamanlı karşılaştırma.
+- **Secret dinlenmede şifrelidir:** AES-256-GCM, anahtar `AUTH_MFA_ENCRYPTION_KEY` ortam
+  değişkeninden gelir. Veritabanında açık secret sütunu yoktur.
+- **Kurtarma kodları** yalnızca SHA-256 özetiyle saklanır, tek kullanımlıktır ve bir kez gösterilir.
+- **Kaba kuvvet:** 5 başarısız denemeden sonra kilit; denemeler denetim kaydına yazılır (kod yazılmaz).
+- **Sıfırlama** yalnızca başka bir yönetici tarafından, kullanıcı adı birebir yazılarak yapılır.
+  Sıfırlama hedefin bütün oturumlarını kapatır ve ayrı denetim kaydı üretir.
+- Parola değişimi ikinci faktörü sessizce kaldırmaz.
+
+## 28. Kullanıcı veri hakları (Sprint 3)
+
+- **Dışa aktarma:** `GET /api/portfolio/export` yalnızca oturum sahibinin kendi verisini üretir
+  (işlem defteri veya pozisyonlar, noktalı virgülle ayrılmış CSV, ondalık dize). Hedef `userId`
+  parametresi kabul edilmez. Kullanıcının yazdığı serbest metin (not, iptal sebebi) `=`, `+`,
+  `-`, `@` veya sekme ile başlıyorsa tek tırnakla düz metne zorlanır; hücre Excel/LibreOffice
+  tarafından formül olarak çalıştırılamaz.
+- **Silme talebi:** `POST /api/account/deletion-request` talebi denetim kaydına yazar; silmeyi
+  **yapmaz**. Gerçek silme yalnızca yöneticinin kullanıcı adı onayıyla yaptığı cascade işlemidir.
+- **Gizlilik sayfası** hangi verinin neden tutulduğunu, fiyatların bağlayıcı teklif olmadığını ve
+  yatırım tavsiyesi verilmediğini açıkça belirtir.

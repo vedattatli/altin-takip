@@ -31,7 +31,7 @@ test("panel ekran görüntüsü", async ({ page }, testInfo) => {
   await gotoReady(page, "/panel");
   await expect(page.getByTestId("holdings-list")).toBeVisible();
   // Göreli zaman metninin yerleşmesini bekle.
-  await expect(page.getByText("Fiyat kaynağı")).toBeVisible();
+  await expect(page.getByText("Fiyat kaynağı:", { exact: true })).toBeVisible();
 
   mkdirSync("docs/screenshots", { recursive: true });
   await page.screenshot({ path: target.path, fullPage: target.fullPage });

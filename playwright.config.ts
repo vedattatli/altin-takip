@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { E2E_CRON_SECRET, E2E_MFA_ENCRYPTION_KEY } from "./e2e/test-env";
+
 /**
  * Tarayıcı duman (smoke) testleri.
  *
@@ -34,6 +36,10 @@ const testEnv = {
   TRUSTED_PROXY_PROVIDER: "local",
   // Test sağlayıcısı bu ürünler için fiyat ÜRETMEZ: "hiç fiyat yok" ve "kısmi" durumları uçtan uca test edilir.
   PRICE_MOCK_UNAVAILABLE_PRODUCTS: "resat-altin,hamit-altin",
+  // Yönetici ikinci faktörü için şifreleme anahtarı. GERÇEK SECRET DEĞİLDİR; yalnızca test.
+  AUTH_MFA_ENCRYPTION_KEY: E2E_MFA_ENCRYPTION_KEY,
+  // Zamanlanmış fiyat alımı ucu için test secret'ı.
+  PRICE_CRON_SECRET: E2E_CRON_SECRET,
 };
 
 export default defineConfig({

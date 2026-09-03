@@ -124,13 +124,15 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0012 uygular, 184 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0015 uygular, 220 pgTAP testi koşar (Supabase CLI + Docker) |
 | `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
 | `npm run admin:create` | İlk yönetici hesabını oluşturur |
 | `npm run admin:repair` | Eksik varsayılan portföy/tercih kayıtlarını idempotent biçimde tamamlar (yönetici onarımı) |
 | `npm run accounting:verify` | Defteri yeniden oynatır; türetilmiş pozisyonlar ve Postgres içi doğrulamayla karşılaştırır; tutarsızlıkta başarısız olur |
+| `npm run price:contract` | Sağlayıcı sözleşmesi testleri (fixture). Credential varsa canlı sağlık kontrolü ekler; yoksa eksik DEĞİŞKEN ADLARINI listeleyip NOT_RUN raporlar |
+| `npm run price:smoke` | Yalnızca yerel Supabase: katalog eşitleme → alım → karantina → kaynak seçimi yolunu uçtan uca doğrular |
 | `npm run accounting:smoke` | Yalnızca yerel Supabase: gerçek RPC yolundan kabul örneklerini (1, 4, 8, 9, VOID/REPLACE, MARKET_BASELINE) koşar |
 | `npm run staging:doctor` / `staging:migrate` / `staging:smoke` / `staging:seed` / `staging:admin` / `staging:cleanup` / `test:staging` | Staging araçları — bkz. [docs/STAGING.md](docs/STAGING.md). Değerler yazdırılmaz; eksik yapılandırmada fail closed |
 | `npm run icons` | PWA simgelerini koddan üretir |
@@ -159,13 +161,30 @@ kullanıcı adını içeren parolalar reddedilir.
 
 ## Fiyat verisi
 
-Bu sürümde yalnızca `MockPriceProvider` kullanılır ve arayüzde **Test Verisi** olarak etiketlenir.
+Uygulama **çoklu fiyat kaynağını** destekler. Bu sürümde hiçbir gerçek sağlayıcı lisansı
+yoktur: yalnızca **Test Verisi** çalışır ve arayüzde "Gerçek piyasa verisi değil" etiketiyle
+görünür. Gerçek kaynaklar katalogda tanımlıdır ama `NOT_CONFIGURED` / `LICENSE_REQUIRED`
+durumundadır ve veri çekmez.
+
+| Kaynak | Piyasa | Durum |
+| --- | --- | --- |
+| Test Verisi | Test | Yalnızca geliştirme; üretimde kapalı |
+| Kayseri Yerel Piyasa (Sarraf Pro / KAYSARDER) | Kayseri | Yetkili API/XML sözleşmesi bekleniyor |
+| AltinAPI — bağımsız veri sağlayıcısı | Genel Türkiye | Anahtar ve lisans bekleniyor |
+| Hasfiyat — çoklu kaynak | Çoklu Kaynak | Anahtar ve lisans bekleniyor |
+| Altınkaynak / Harem (doğrudan) | Genel Türkiye | Resmî sözleşme yok; adapter kapalı |
+| BIST Referans | BIST | Yalnızca anomali kontrolü; değerlemede kullanılamaz |
 
 - Alış ve satış fiyatları birbirine çevrilmez; ayrı alanlardır.
-- Bir sağlayıcı çalışmadığında başka bir piyasanın fiyatına sessizce geçilmez.
+- Bir sağlayıcı çalışmadığında başka bir piyasanın fiyatına **sessizce geçilmez**.
 - Bayat veri "güncel" diye sunulmaz; son fiyat zamanı her zaman görünür.
-- Hiçbir siteden izinsiz veri çekilmez. Gerçek fiyat entegrasyonu yalnızca lisanslı bir sağlayıcı
-  sözleşmesiyle `LicensedPriceProvider` olarak eklenecektir.
+- Hiçbir siteden izinsiz veri çekilmez, CAPTCHA aşılmaz, gizli WebSocket reverse engineer edilmez.
+- Fiyatlar merkezî sunucu alımıyla toplanır (varsayılan 60 sn); tarayıcı sağlayıcıya bağlanmaz.
+- API anahtarları yalnızca sunucudadır; istemci paketine veya veritabanına girmez.
+- Kaynak değişimi geçmiş işlem maliyetlerini, `MARKET_BASELINE` snapshot'larını ve gerçekleşmiş
+  kâr/zararı değiştirmez; yalnızca güncel değerlemeyi etkiler ve açık onay ister.
+
+Ayrıntı, katalog ve bir kaynağı üretimde açma adımları: [docs/PRICE_PROVIDERS.md](docs/PRICE_PROVIDERS.md).
 
 ---
 
@@ -226,7 +245,7 @@ açıkken bir cihazdaki değişiklik diğerinde sayfa yenilenmeden ≤ 15 sn iç
   tablolara **doğrudan yazamaz** (INSERT/UPDATE/DELETE grant'ı yok); kritik
   SECURITY DEFINER RPC'ler yalnızca `service_role` ile çağrılır. Finansal mutation
   yalnızca BFF + kontrollü RPC yolundan geçer. GRANT ve RLS iki ayrı katmandır ve
-  184 pgTAP testi + gerçek JWT sondası (46 beklenti) ile yerel Supabase'de doğrulanmıştır.
+  220 pgTAP testi + gerçek JWT sondası (46 beklenti) ile yerel Supabase'de doğrulanmıştır.
 - **Üretim sertleştirme:** `APP_ORIGIN` zorunlu (Host'tan türetilmez),
   `TRUSTED_PROXY_PROVIDER` ile `X-Forwarded-For` yalnızca güvenilir vekilde okunur,
   ham IP hiçbir yere yazılmaz, giriş hız sınırı IP / kullanıcı adı / kombinasyon
@@ -238,6 +257,15 @@ açıkken bir cihazdaki değişiklik diğerinde sayfa yenilenmeden ≤ 15 sn iç
 - **Veritabanı bütünlüğü:** kullanıcı başına tek portföy, portföy sahipliği
   composite foreign key ile zorlanır, birim kataloğa uyar ve aşırı satış
   eşzamanlı isteklerde de atomik olarak engellenir.
+- **Yönetici ikinci faktörü (TOTP) zorunludur.** Doğrulanmamış oturum yönetim uçlarında
+  reddedilir; secret dinlenmede AES-256-GCM ile şifrelidir, kurtarma kodları yalnızca özet
+  olarak saklanır ve tek kullanımlıktır. Sıfırlama yalnızca başka bir yönetici tarafından,
+  kullanıcı adı onayıyla yapılır ve hedefin oturumlarını kapatır.
+- **Fiyat sağlayıcı anahtarları yalnızca sunucudadır;** istemci paketine, veritabanına veya
+  loglara girmez. Sağlayıcı hataları sabit güvenli kodlara indirgenir. Lisans kapısı fail
+  closed'dır: izin açıkça verilmedikçe kaynak veri çekmez ve etkinleştirilemez.
+- **Sağlık kontrolü** `GET /api/health` ile yapılır. Kimliksiz yanıt yalnızca ayakta/erişilebilir
+  bilgisini verir; sağlayıcı ayrıntısı için operatör secret'ı gerekir.
 - **Denetim kayıtları** tetikleyici düzeyinde değiştirilemez.
 
 ## Teslim paketi
@@ -270,6 +298,8 @@ senkronize olmaz.
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Tablolar, ilişkiler, indeksler |
 | [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md) | Kabul kriterleri ve karşılık gelen testler |
 | [docs/ACCOUNTING_MODEL.md](docs/ACCOUNTING_MODEL.md) | Hareketli ağırlıklı ortalama, açılış bakiyesi, K/Z, decimal ve iptal/düzeltme politikası |
+| [docs/PRICE_PROVIDERS.md](docs/PRICE_PROVIDERS.md) | Fiyat sağlayıcı kataloğu, lisans kapısı, merkezî alım ve kaynak seçimi |
+| [docs/RUNBOOKS.md](docs/RUNBOOKS.md) | Sağlayıcı kesintisi, karantina, yedekleme/geri yükleme, MFA kurtarma, sağlık kontrolü |
 | [docs/STAGING.md](docs/STAGING.md) | Staging kurulumu, araçlar, telefon–PC senkronizasyonu |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sonraki sprintler |
 | [CLAUDE.md](CLAUDE.md) | Bu depoda çalışan yapay zekâ ajanları için kurallar |

@@ -283,9 +283,29 @@ describe("kaynak paketi (ZIP)", () => {
     expect(detects("# SUPABASE_SECRET_KEY tercih edilir")).toBe(false);
   });
 
+  it("secret taraması fiyat sağlayıcı ve MFA anahtarlarını da yakalar", async () => {
+    const packager = await loadPackager();
+    const detects = (content: string) => packager.SECRET_PATTERNS.some((pattern) => pattern.test(content));
+    expect(detects("PRICE_CRON_SECRET=degerVar")).toBe(true);
+    expect(detects("AUTH_MFA_ENCRYPTION_KEY=degerVar")).toBe(true);
+    expect(detects("SARRAFPRO_API_KEY=degerVar")).toBe(true);
+    expect(detects("ALTINAPI_API_KEY=degerVar")).toBe(true);
+    expect(detects("HASFIYAT_LICENSE_REFERENCE=SOZ-2026-1")).toBe(true);
+    expect(detects("SUPABASE_STAGING_JWT_SECRET=degerVar")).toBe(true);
+    // Boş örnek satırları ve düz metin anlatım tetiklemez.
+    const emptyLines = ["PRICE_CRON_SECRET=", "AUTH_MFA_ENCRYPTION_KEY=", "SARRAFPRO_API_KEY=", ""].join(
+      String.fromCharCode(10),
+    );
+    expect(detects(emptyLines)).toBe(false);
+    expect(detects('curl -H "X-Cron-Secret: <PRICE_CRON_SECRET>"')).toBe(false);
+  });
+
   it("zorunlu dosya listesi yeni migration ve bakım dosyasını içerir", async () => {
     const packager = await loadPackager();
     expect(packager.REQUIRED).toContain("supabase/migrations/0006_database_boundary.sql");
     expect(packager.REQUIRED).toContain("supabase/setup/maintenance-cron.sql");
+    expect(packager.REQUIRED).toContain("supabase/migrations/0013_price_providers.sql");
+    expect(packager.REQUIRED).toContain("supabase/migrations/0014_price_rpc.sql");
+    expect(packager.REQUIRED).toContain("supabase/migrations/0015_admin_mfa.sql");
   });
 });

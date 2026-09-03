@@ -43,7 +43,7 @@ function readCode(file: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-type Guard = "public" | "authenticated" | "usable" | "admin";
+type Guard = "public" | "public-health" | "authenticated" | "usable" | "admin" | "admin-mfa-setup" | "cron";
 
 /** Her uç için BEKLENEN guard. Yeni uç eklenince bu tablo da güncellenmelidir. */
 const EXPECTED_GUARDS: Record<string, Guard> = {
@@ -65,6 +65,26 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/users/[id]/sessions/route.ts": "admin",
   "admin/users/[id]/sessions/[sessionId]/route.ts": "admin",
   "admin/audit/route.ts": "admin",
+  // Sprint 3: fiyat kaynakları, ikinci faktör, veri hakları ve zamanlanmış alım.
+  "price-sources/route.ts": "usable",
+  "price-sources/compare/route.ts": "usable",
+  "portfolio/export/route.ts": "usable",
+  "account/deletion-request/route.ts": "usable",
+  "admin/price-sources/route.ts": "admin",
+  "admin/price-sources/[code]/route.ts": "admin",
+  "admin/price-sources/[code]/refresh/route.ts": "admin",
+  "admin/price-sources/[code]/test/route.ts": "admin",
+  "admin/users/[id]/mfa/route.ts": "admin",
+  // İkinci faktör durumunu geçici parolalı yönetici de sorgulayabilmelidir.
+  "auth/mfa/route.ts": "authenticated",
+  // Kurulum/doğrulama uçları MFA henüz yokken de çalışmalıdır (admin rolü yeter).
+  "auth/mfa/enroll/route.ts": "admin-mfa-setup",
+  "auth/mfa/confirm/route.ts": "admin-mfa-setup",
+  "auth/mfa/verify/route.ts": "admin-mfa-setup",
+  // Zamanlanmış alım: oturum değil, paylaşılan secret ile korunur.
+  "cron/price-ingestion/route.ts": "cron",
+  // Sağlık kontrolü: kimliksiz yanıt yalındır; ayrıntı yalnızca cron secret'ıyla açılır.
+  "health/route.ts": "public-health",
 };
 
 function routeKey(file: string): string {
@@ -72,6 +92,10 @@ function routeKey(file: string): string {
 }
 
 function detectGuard(source: string): Guard {
+  // Sağlık ucu secret'ı YALNIZCA ayrıntı seviyesini açar; erişimi kısıtlamaz.
+  if (source.includes("detailAuthorized")) return "public-health";
+  if (source.includes("PRICE_CRON_SECRET")) return "cron";
+  if (source.includes("requireAdminForMfaSetup")) return "admin-mfa-setup";
   if (source.includes("requireCurrentAdmin")) return "admin";
   if (source.includes("requireUsableUser")) return "usable";
   if (source.includes("requireAuthenticatedUser")) return "authenticated";
@@ -236,7 +260,13 @@ describe("actor sınırının kaynak kodda korunması", () => {
       const source = readCode(file);
       return /adminScope\(/.test(source) && !file.endsWith("actor.ts");
     });
-    expect(callers).toEqual([join("src", "server", "admin", "admin-service.ts")]);
+    // Kapsam üretebilen dosyalar AÇIKÇA listelidir; yeni bir dosya eklenirse test düşer.
+    expect(callers.sort()).toEqual(
+      [
+        join("src", "server", "admin", "admin-service.ts"),
+        join("src", "server", "prices", "price-source-service.ts"),
+      ].sort(),
+    );
   });
 
   it("ownScope yalnızca kullanıcı portföy servisinde çağrılır", () => {
@@ -244,9 +274,12 @@ describe("actor sınırının kaynak kodda korunması", () => {
       const source = readCode(file);
       return /ownScope\(/.test(source) && !file.endsWith("actor.ts");
     });
-    expect(callers).toEqual([
-      join("src", "server", "portfolio", "user-portfolio-service.ts"),
-    ]);
+    expect(callers.sort()).toEqual(
+      [
+        join("src", "server", "portfolio", "user-portfolio-service.ts"),
+        join("src", "server", "prices", "price-source-service.ts"),
+      ].sort(),
+    );
   });
 
   it("aktör fabrikaları yalnızca sunucu kimlik katmanında kullanılır", () => {

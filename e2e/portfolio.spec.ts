@@ -41,7 +41,7 @@ test.describe("portföy akışı", () => {
     await expect(strip).toContainText("Fiyat kaynağı:");
     await expect(strip.getByText("Test Verisi", { exact: true })).toBeVisible();
     await expect(strip.getByText("Gerçek piyasa verisi değil")).toBeVisible();
-    await expect(strip.getByText("TEST", { exact: true })).toBeVisible();
+    await expect(strip.getByText("Test Piyasası", { exact: true })).toBeVisible();
     await expect(strip).toContainText("Son fiyat:");
 
     await strip.getByText("Bu fiyatlar hakkında").click();
@@ -144,7 +144,7 @@ test.describe("portföy akışı", () => {
     const confirm = page.getByTestId("baseline-confirm");
     await expect(confirm).toContainText("Bozdurma fiyatı");
     await expect(confirm).toContainText("Yeniden alım fiyatı");
-    await expect(confirm).toContainText("mock · TEST");
+    await expect(confirm).toContainText("mock · Test Piyasası");
     await expect(confirm).toContainText("Fiyat zamanı");
     await expect(confirm).toContainText("gerçek tarihsel alış maliyetiniz değildir");
     const initialValue = parseMoney(await page.getByTestId("baseline-initial-value").textContent());

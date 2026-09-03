@@ -3,24 +3,25 @@ import { expect, test } from "@playwright/test";
 import { ADMIN } from "./global-setup";
 import {
   addPurchase,
+  login,
+  loginAsAdmin,
   browserApi,
   createReadyUser,
   expectNoHorizontalOverflow,
   gotoReady,
-  login,
   loginAsUser,
   scopedUsername,
   TEST_PASSWORD,
 } from "./helpers";
 
-async function loginAsAdmin(page: import("@playwright/test").Page) {
-  await login(page, ADMIN.username, ADMIN.password);
-  await page.waitForURL("**/panel");
+/** Yönetici girişi + ikinci faktör (panel MFA olmadan açılmaz). */
+async function signInAsAdmin(page: import("@playwright/test").Page) {
+  await loginAsAdmin(page, ADMIN.username, ADMIN.password);
 }
 
 test.describe("yönetim paneli", () => {
   test("yönetici kullanıcı listesini görür", async ({ page }) => {
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
 
     await page.getByRole("link", { name: "Yönetim" }).first().click();
     await page.waitForURL("**/yonetim");
@@ -37,7 +38,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("panelden");
     const temporaryPassword = "GeciciParola7Kasa";
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, "/yonetim");
 
     await page.getByTestId("open-create-user").click();
@@ -61,7 +62,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("kopyaad");
     await createReadyUser(username);
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, "/yonetim");
     await page.getByTestId("open-create-user").click();
     await page.getByLabel("Kullanıcı adı").fill(username.toUpperCase());
@@ -76,7 +77,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("aranan");
     await createReadyUser(username, "Aranan Kişi");
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, "/yonetim");
     await page.getByLabel("Kullanıcı ara").fill(username);
 
@@ -101,7 +102,7 @@ test.describe("yönetim paneli", () => {
     await addPurchase(userPage, { product: "Gram Altın", quantity: "8", unitPrice: "5000" });
     await userContext.close();
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     // Arama akışı ayrı bir testte doğrulanır; burada kullanıcıya doğrudan gidilir.
     await gotoReady(page, `/yonetim/${target.id}`);
 
@@ -116,7 +117,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("pasiflestir");
     const user = await createReadyUser(username);
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
     await page.getByTestId("deactivate-user").click();
     await expect(page.getByText(/pasifleştirildi/)).toBeVisible();
@@ -131,7 +132,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("aktiflestir");
     const user = await createReadyUser(username);
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
     await page.getByTestId("deactivate-user").click();
     await expect(page.getByText(/pasifleştirildi/)).toBeVisible();
@@ -150,7 +151,7 @@ test.describe("yönetim paneli", () => {
     const user = await createReadyUser(username);
     const newTemporary = "SifirlananP7Kasa";
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
     await page.getByTestId("open-reset-password").click();
 
@@ -177,7 +178,7 @@ test.describe("yönetim paneli", () => {
     const username = scopedUsername("silinecek");
     const user = await createReadyUser(username);
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
     await page.getByTestId("open-delete-user").click();
 
@@ -257,7 +258,7 @@ test.describe("yetkilendirme", () => {
     const username = scopedUsername("denetim");
     const user = await createReadyUser(username);
 
-    await loginAsAdmin(page);
+    await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
     await expect(page.getByText("Kullanıcının portföyü")).toBeVisible();
 

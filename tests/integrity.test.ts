@@ -243,4 +243,23 @@ describe("migration bütünlük kuralları", () => {
   it("denetim kayıtları tetikleyici ile değiştirilemez", () => {
     expect(hardening).toContain("reject_audit_mutation");
   });
+
+  it("denetim eylemi listesi TypeScript ile SQL arasında birebir aynıdır", () => {
+    // Listeler ayrışırsa yeni bir eylem çalışma zamanında check kısıtına takılır.
+    const types = readFileSync(join(process.cwd(), "src", "auth", "types.ts"), "utf8");
+    const block = types.slice(
+      types.indexOf("export type AdminAction"),
+      types.indexOf("export interface AdminAuditLog"),
+    );
+    const fromTypes = [...block.matchAll(/"([a-z_]+\.[a-z_]+)"/g)].map((match) => match[1]).sort();
+
+    const mfa = readFileSync(join(process.cwd(), "supabase", "migrations", "0015_admin_mfa.sql"), "utf8");
+    const constraint = mfa.slice(mfa.indexOf("add constraint admin_audit_logs_action_check"));
+    const fromSql = [...constraint.slice(0, constraint.indexOf(");")).matchAll(/'([a-z_]+\.[a-z_]+)'/g)]
+      .map((match) => match[1])
+      .sort();
+
+    expect(fromTypes.length).toBeGreaterThan(0);
+    expect(fromSql).toEqual(fromTypes);
+  });
 });

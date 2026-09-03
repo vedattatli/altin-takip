@@ -3,6 +3,10 @@ import type { PriceProvider } from "./types";
 
 export * from "./types";
 export * from "./validate";
+export * from "./contract";
+export * from "./descriptors";
+export * from "./registry";
+export * from "./quality";
 export { MockPriceProvider, MOCK_PROVIDER_META } from "./mock-provider";
 
 /**

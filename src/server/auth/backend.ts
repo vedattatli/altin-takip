@@ -8,6 +8,16 @@ import type {
   ProductPosition,
 } from "@/domain/accounting/types";
 import type { PortfolioMeta } from "@/domain/types";
+import type {
+  IngestionPayload,
+  IngestionResult,
+  PricePreferenceResult,
+  PricePreferenceRow,
+  PriceSourceEventRow,
+  ProviderQuotesRow,
+  ProviderStateRow,
+  ProviderSyncInput,
+} from "@/server/prices/types";
 import type { DataScope } from "./actor";
 
 export type { LedgerAppendResult, LedgerReplaceResult, LedgerVoidResult };
@@ -71,6 +81,8 @@ export interface ResolvedSession {
   idleExpiresAt: string | null;
   absoluteExpiresAt: string;
   persistent: boolean;
+  /** Bu oturumda ikinci faktörün doğrulandığı an (admin oturumlarında zorunlu). */
+  mfaVerifiedAt: string | null;
   lastSeenAt: string;
   /** Bitiş zamanının en son ileri alındığı an. */
   renewedAt: string;
@@ -149,6 +161,29 @@ export interface LedgerVerifyResult {
     stored: string | null;
     recomputed: string | null;
   }[];
+}
+
+export type {
+  IngestionPayload,
+  IngestionResult,
+  PricePreferenceResult,
+  PricePreferenceRow,
+  PriceSourceEventRow,
+  ProviderQuotesRow,
+  ProviderStateRow,
+  ProviderSyncInput,
+};
+export { ProviderNotSelectableError } from "@/server/prices/types";
+
+/** Yönetici TOTP kimlik bilgisi. Secret ŞİFRELİ saklanır; düz metin dönmez. */
+export interface MfaCredentialRecord {
+  userId: string;
+  secretCiphertext: string;
+  secretNonce: string;
+  confirmedAt: string | null;
+  lastVerifiedAt: string | null;
+  failedAttempts: number;
+  lockedUntil: string | null;
 }
 
 /** Defter sürümü: yalnızca gerçek değişiklikte artan sinyal (işlem sayısı değil). */
@@ -264,4 +299,52 @@ export interface AuthBackend {
   verifyLedger(scope: DataScope): Promise<LedgerVerifyResult>;
   /** Kullanıcının defter sürümü (cihazlar arası senkronizasyon sinyali). Salt okuma. */
   getLedgerRevision(scope: DataScope): Promise<LedgerRevision>;
+
+  // --- Fiyat kaynakları (Sprint 3) ---
+  /** Sağlayıcı kataloğunu koddaki tanımlarla eşitler (idempotent). */
+  syncPriceProviders(providers: readonly ProviderSyncInput[]): Promise<number>;
+  /** Sembol → kanonik ürün eşlemelerini eşitler. */
+  syncPriceMappings(code: string, mappingVersion: string, mapping: Record<string, string>): Promise<number>;
+  /** Sağlayıcı listesi + sağlık + son koşum (yönetici ekranı). */
+  listPriceProviders(): Promise<ProviderStateRow[]>;
+  /** Yönetici: kaynağı etkinleştir / kullanıcıya aç. Lisanssızsa reddedilir. */
+  setPriceProviderFlags(code: string, enabled: boolean, userSelectable: boolean): Promise<ProviderStateRow>;
+  /** Fiyat alımını uygular (atomik, kilitli, idempotent). */
+  applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult>;
+  /** Bir sağlayıcının güncel fiyatları. */
+  currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null>;
+  /** Birden çok sağlayıcının fiyatları (karşılaştırma ekranı). */
+  comparePriceQuotes(codes: readonly string[]): Promise<ProviderQuotesRow[]>;
+  /** Portföyün seçili fiyat kaynağı. */
+  getPricePreference(scope: DataScope): Promise<PricePreferenceRow>;
+  /** Portföyün fiyat kaynağını değiştirir; denetim olayı üretir. */
+  setPricePreference(
+    scope: DataScope,
+    code: string,
+    actorId: string,
+    role: "user" | "admin",
+    reason: string,
+  ): Promise<PricePreferenceResult>;
+  /** Kaynak değişim geçmişi. */
+  listPriceSourceEvents(scope: DataScope, limit?: number): Promise<PriceSourceEventRow[]>;
+
+  // --- Yönetici ikinci faktörü (Sprint 3) ---
+  /** Kayıtlı TOTP kimlik bilgisi (şifreli secret). Yoksa null. */
+  getMfaCredential(userId: string): Promise<MfaCredentialRecord | null>;
+  /** Yeni (henüz doğrulanmamış) TOTP secret'ını şifreli olarak kaydeder. */
+  saveMfaCredential(userId: string, secret: { ciphertext: string; nonce: string }): Promise<void>;
+  /** İlk doğru kodla kaydı onaylar. */
+  confirmMfaCredential(userId: string, at: string): Promise<void>;
+  /** MFA kaydını ve kurtarma kodlarını siler (yalnızca açık onaylı sıfırlama). */
+  deleteMfaCredential(userId: string): Promise<void>;
+  /** Başarılı/başarısız doğrulama sayaçlarını günceller. */
+  recordMfaAttempt(userId: string, success: boolean, at: string): Promise<MfaCredentialRecord | null>;
+  /** Kurtarma kodlarını (yalnızca özet) yazar; eski kodları geçersiz kılar. */
+  replaceRecoveryCodes(userId: string, hashes: readonly string[]): Promise<void>;
+  /** Kurtarma kodunu tek kullanımlık olarak harcar. */
+  consumeRecoveryCode(userId: string, hash: string, at: string): Promise<boolean>;
+  /** Kullanılmamış kurtarma kodu sayısı. */
+  countRecoveryCodes(userId: string): Promise<number>;
+  /** Oturumu "ikinci faktör doğrulandı" olarak işaretler. */
+  markSessionMfaVerified(sessionId: string, at: string): Promise<void>;
 }

@@ -41,6 +41,10 @@ async function sign(value: string, secret: string): Promise<string> {
 }
 
 /** Sabit süreli karşılaştırma — zamanlama sızıntısını engeller. */
+export function timingSafeEqualString(a: string, b: string): boolean {
+  return timingSafeEqual(a, b);
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;

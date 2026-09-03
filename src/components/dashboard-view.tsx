@@ -13,6 +13,7 @@ import {
   type HoldingView,
 } from "@/domain/accounting";
 import {
+  formatDateTime,
   formatGrams,
   formatMoney,
   formatPercent,
@@ -369,6 +370,44 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
       </section>
 
       {/* Fiyat kaynağı bilgisi ekranın ortasında yer kaplamaz; altta tek satırdır. */}
+      {summary.priceSource ? (
+        <div
+          className="rounded-[var(--radius)] border border-line bg-surface-2 px-3.5 py-3 text-xs"
+          data-testid="active-price-source"
+        >
+          <p className="text-sm font-semibold text-ink">{summary.priceSource.displayName}</p>
+          <p className="mt-0.5 text-muted" title={summary.priceSource.technicalName}>
+            {summary.priceSource.technicalName}
+            {summary.priceSource.upstreamSourceLabel ? ` · ${summary.priceSource.upstreamSourceLabel}` : ""}
+            {!summary.priceSource.isRealMarketData ? " · Gerçek piyasa verisi değil" : ""}
+          </p>
+          <p className="tabular mt-0.5 text-subtle">
+            {summary.priceSource.lastQuoteAt
+              ? `Son güncelleme: ${formatDateTime(summary.priceSource.lastQuoteAt)}`
+              : "Son güncelleme: —"}
+            {" · Durum: "}
+            {summary.priceSource.status === "ok"
+              ? "Güncel"
+              : summary.priceSource.status === "stale"
+                ? "Bayat (yeni fiyat alınamadı)"
+                : summary.priceSource.status === "unavailable"
+                  ? PRICE_UNAVAILABLE
+                  : "Kaynak seçilmedi"}
+            {" · "}
+            {isOpen
+              ? partial
+                ? `${PARTIAL_VALUATION_LABEL} (${summary.pricedPositionCount}/${summary.positionCount})`
+                : noPrices
+                  ? "Değerleme yapılamadı"
+                  : "Tam değerleme"
+              : "Açık pozisyon yok"}
+          </p>
+          <Link className="mt-1 inline-block text-accent underline" href="/fiyat-kaynagi">
+            Fiyat kaynağını görüntüle veya değiştir
+          </Link>
+        </div>
+      ) : null}
+
       <PriceSourceLine
         snapshot={snapshot}
         dataStatusLabel={repository.label}

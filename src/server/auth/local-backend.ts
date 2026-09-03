@@ -27,6 +27,19 @@ import {
 } from "@/domain/accounting";
 import { getProduct } from "@/domain/catalog";
 import type { PortfolioMeta } from "@/domain/types";
+import {
+  ProviderNotSelectableError,
+  type IngestionPayload,
+  type IngestionResult,
+  type PricePreferenceResult,
+  type PricePreferenceRow,
+  type PriceSourceEventRow,
+  type ProviderQuotesRow,
+  type ProviderStateRow,
+  type ProviderSyncInput,
+  type StoredQuoteRow,
+} from "@/server/prices/types";
+import type { MfaCredentialRecord } from "./backend";
 import type { DataScope } from "./actor";
 import {
   IdempotencyConflictError,
@@ -94,6 +107,8 @@ interface StoredSession {
   rotatedAt: string;
   /** Etkin bitiş: kalıcıda kaydırmalı, kalıcı olmayanda mutlak. */
   expiresAt: string;
+  /** Bu oturumda ikinci faktörün doğrulandığı an. */
+  mfaVerifiedAt?: string | null;
   /** Kalıcı olmayan oturumda hareketsizlik bitişi. */
   idleExpiresAt: string | null;
   absoluteExpiresAt: string;
@@ -128,6 +143,72 @@ interface StoreShape {
   snapshots: StoredSnapshot[];
   /** Deterministik sıralama için artan defter sırası. */
   ledgerSequence: number;
+  /** Fiyat kaynakları (Sprint 3). Supabase tarafındaki tabloların ikizi. */
+  priceProviders: StoredPriceProvider[];
+  priceQuotes: StoredPriceQuote[];
+  priceRuns: StoredPriceRun[];
+  pricePreferences: StoredPricePreference[];
+  priceSourceEvents: StoredPriceSourceEvent[];
+  /** Yönetici ikinci faktörü (Sprint 3). Secret ŞİFRELİ; kurtarma kodları özet. */
+  mfaCredentials: StoredMfaCredential[];
+  mfaRecoveryCodes: StoredRecoveryCode[];
+}
+
+interface StoredMfaCredential {
+  userId: string;
+  secretCiphertext: string;
+  secretNonce: string;
+  confirmedAt: string | null;
+  lastVerifiedAt: string | null;
+  failedAttempts: number;
+  lockedUntil: string | null;
+}
+
+interface StoredRecoveryCode {
+  userId: string;
+  codeHash: string;
+  usedAt: string | null;
+}
+
+interface StoredPriceProvider extends ProviderSyncInput {
+  enabled: boolean;
+  userSelectable: boolean;
+  mappingVersion: string;
+  mappingCount: number;
+  health: ProviderStateRow["health"];
+}
+
+interface StoredPriceQuote extends StoredQuoteRow {
+  providerCode: string;
+  rawPayloadHash: string | null;
+  ingestionRunId: string | null;
+}
+
+interface StoredPriceRun {
+  id: string;
+  providerCode: string;
+  runKey: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  quoteCount: number;
+  rejectedCount: number;
+  latencyMs: number | null;
+  safeErrorCode: string | null;
+}
+
+interface StoredPricePreference {
+  userId: string;
+  portfolioId: string;
+  providerCode: string;
+  marketId: string;
+  selectedAt: string;
+  selectedBy: string | null;
+}
+
+interface StoredPriceSourceEvent extends PriceSourceEventRow {
+  userId: string;
+  portfolioId: string;
 }
 
 const STORE_VERSION = 5;
@@ -142,6 +223,13 @@ function emptyStore(): StoreShape {
     ledger: [],
     snapshots: [],
     ledgerSequence: 0,
+    priceProviders: [],
+    priceQuotes: [],
+    priceRuns: [],
+    pricePreferences: [],
+    priceSourceEvents: [],
+    mfaCredentials: [],
+    mfaRecoveryCodes: [],
   };
 }
 
@@ -466,6 +554,7 @@ export class LocalAuthBackend implements AuthBackend {
       expiresAt: session.expiresAt,
       idleExpiresAt: session.idleExpiresAt,
       absoluteExpiresAt: session.absoluteExpiresAt,
+      mfaVerifiedAt: session.mfaVerifiedAt ?? null,
       persistent: session.persistent,
       lastSeenAt: session.lastSeenAt,
       renewedAt: session.renewedAt,
@@ -1020,6 +1109,414 @@ export class LocalAuthBackend implements AuthBackend {
     // Yerel arka uçta pozisyon her zaman defterden türetilir; ayrı projeksiyon yoktur.
     const positions = replayLedger(this.userLedger(scope.userId));
     return { checked: positions.size, mismatches: [] };
+  }
+
+  // --- Fiyat kaynakları (Sprint 3) ---
+  // Supabase RPC'leriyle AYNI kuralları uygular: lisanssız kaynak etkinleştirilemez,
+  // kullanıcı yalnızca allowlist'teki kaynağı seçebilir, kaynak değişimi olay üretir,
+  // aynı koşum anahtarı iki kez uygulanmaz.
+
+  private providerRow(code: string): StoredPriceProvider | undefined {
+    return this.store.priceProviders.find((provider) => provider.code === code);
+  }
+
+  private toProviderState(provider: StoredPriceProvider): ProviderStateRow {
+    const runs = this.store.priceRuns
+      .filter((run) => run.providerCode === provider.code)
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+    const lastRun = runs[0];
+    return {
+      code: provider.code,
+      displayName: provider.displayName,
+      technicalName: provider.technicalName,
+      marketId: provider.marketId,
+      marketDisplayName: provider.marketDisplayName,
+      providerType: provider.providerType,
+      enabled: provider.enabled,
+      userSelectable: provider.userSelectable,
+      licenseStatus: provider.licenseStatus,
+      licenseReference: provider.licenseReference,
+      redistributionAllowed: provider.redistributionAllowed,
+      capabilities: [...provider.capabilities],
+      attribution: provider.attribution,
+      referenceUrl: provider.referenceUrl,
+      coverage: this.store.priceQuotes.filter((quote) => quote.providerCode === provider.code).length,
+      mappingCount: provider.mappingCount,
+      health: provider.health,
+      lastRun: lastRun
+        ? {
+            status: lastRun.status,
+            startedAt: lastRun.startedAt,
+            completedAt: lastRun.completedAt,
+            quoteCount: lastRun.quoteCount,
+            rejectedCount: lastRun.rejectedCount,
+            latencyMs: lastRun.latencyMs,
+            safeErrorCode: lastRun.safeErrorCode,
+          }
+        : null,
+    };
+  }
+
+  async syncPriceProviders(providers: readonly ProviderSyncInput[]): Promise<number> {
+    this.refresh();
+    for (const input of providers) {
+      const existing = this.providerRow(input.code);
+      const licensed = input.licenseStatus === "LICENSED" || input.licenseStatus === "DEV_ONLY";
+      if (existing) {
+        Object.assign(existing, input);
+        // Lisans kaybedilirse kaynak otomatik olarak kapanır (fail closed).
+        existing.enabled = existing.enabled && licensed;
+        existing.userSelectable = existing.userSelectable && existing.enabled;
+      } else {
+        this.store.priceProviders.push({
+          ...input,
+          enabled: false,
+          userSelectable: false,
+          mappingVersion: "none",
+          mappingCount: 0,
+          health: null,
+        });
+      }
+    }
+    this.write();
+    return providers.length;
+  }
+
+  async syncPriceMappings(code: string, mappingVersion: string, mapping: Record<string, string>): Promise<number> {
+    this.refresh();
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+    provider.mappingVersion = mappingVersion;
+    provider.mappingCount = Object.keys(mapping).length;
+    this.write();
+    return provider.mappingCount;
+  }
+
+  async listPriceProviders(): Promise<ProviderStateRow[]> {
+    this.refresh();
+    return this.store.priceProviders
+      .map((provider) => this.toProviderState(provider))
+      .sort((a, b) => (a.marketId === b.marketId ? a.code.localeCompare(b.code) : a.marketId.localeCompare(b.marketId)));
+  }
+
+  async setPriceProviderFlags(code: string, enabled: boolean, userSelectable: boolean): Promise<ProviderStateRow> {
+    this.refresh();
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+    if (enabled && provider.licenseStatus !== "LICENSED" && provider.licenseStatus !== "DEV_ONLY") {
+      throw new ProviderNotSelectableError(code, "Bu kaynak lisans/izin olmadan etkinleştirilemez.");
+    }
+    if (enabled && provider.licenseStatus === "LICENSED" && !provider.redistributionAllowed) {
+      throw new ProviderNotSelectableError(code, "Bu kaynak için yeniden gösterim izni işaretlenmemiş.");
+    }
+    if (userSelectable && !enabled) {
+      throw new ProviderNotSelectableError(code, "Kapalı bir kaynak kullanıcıya sunulamaz.");
+    }
+    provider.enabled = enabled;
+    provider.userSelectable = userSelectable;
+    this.write();
+    return this.toProviderState(provider);
+  }
+
+  async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {
+    this.refresh();
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+
+    const existing = this.store.priceRuns.find((run) => run.runKey === runKey);
+    if (existing) {
+      return {
+        runId: existing.id,
+        status: existing.status,
+        skipped: true,
+        quoteCount: existing.quoteCount,
+        rejectedCount: existing.rejectedCount,
+        replayed: true,
+      };
+    }
+
+    const runId = randomUUID();
+    const startedAt = this.nowISO();
+    let staleCount = 0;
+    for (const quote of payload.quotes) {
+      const row: StoredPriceQuote = {
+        providerCode: code,
+        canonicalProductId: quote.canonicalProductId,
+        marketId: provider.marketId,
+        liquidationPrice: quote.liquidationPrice,
+        replacementPrice: quote.replacementPrice,
+        currency: "TRY",
+        upstreamSourceId: quote.upstreamSourceId,
+        providerTimestamp: quote.providerTimestamp,
+        fetchedAt: quote.fetchedAt,
+        status: quote.status,
+        mappingVersion: quote.mappingVersion,
+        rawPayloadHash: quote.rawPayloadHash,
+        ingestionRunId: runId,
+      };
+      if (quote.status === "stale") staleCount += 1;
+      const index = this.store.priceQuotes.findIndex(
+        (candidate) => candidate.providerCode === code && candidate.canonicalProductId === quote.canonicalProductId,
+      );
+      if (index >= 0) this.store.priceQuotes[index] = row;
+      else this.store.priceQuotes.push(row);
+    }
+
+    const rejected = payload.quarantined.length;
+    const status =
+      payload.status === "unavailable" || payload.quotes.length === 0
+        ? "FAILED"
+        : payload.status === "partial" || rejected > 0
+          ? "PARTIAL"
+          : "SUCCESS";
+    this.store.priceRuns.push({
+      id: runId,
+      providerCode: code,
+      runKey,
+      status,
+      startedAt,
+      completedAt: this.nowISO(),
+      quoteCount: payload.quotes.length,
+      rejectedCount: rejected,
+      latencyMs: payload.latencyMs,
+      safeErrorCode: payload.safeErrorCode,
+    });
+    provider.health = {
+      status: payload.quotes.length > 0 && rejected === 0 ? "ok" : payload.quotes.length > 0 ? "degraded" : "unavailable",
+      lastSuccessAt: payload.quotes.length > 0 ? this.nowISO() : (provider.health?.lastSuccessAt ?? null),
+      lastErrorAt:
+        payload.quotes.length === 0 || rejected > 0 ? this.nowISO() : (provider.health?.lastErrorAt ?? null),
+      coverageCount: payload.quotes.length,
+      staleCount,
+      quarantinedCount: rejected,
+      latencyMs: payload.latencyMs,
+      safeErrorCode: payload.safeErrorCode,
+    };
+    this.write();
+    return {
+      runId,
+      status,
+      skipped: false,
+      quoteCount: payload.quotes.length,
+      rejectedCount: rejected,
+      replayed: false,
+    };
+  }
+
+  async currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null> {
+    this.refresh();
+    const provider = this.providerRow(code);
+    if (!provider) return null;
+    return {
+      providerCode: provider.code,
+      marketId: provider.marketId,
+      displayName: provider.displayName,
+      technicalName: provider.technicalName,
+      marketDisplayName: provider.marketDisplayName,
+      licenseStatus: provider.licenseStatus,
+      enabled: provider.enabled,
+      userSelectable: provider.userSelectable,
+      attribution: provider.attribution,
+      health: provider.health,
+      quotes: this.store.priceQuotes
+        .filter((quote) => quote.providerCode === code && quote.status === "ok")
+        .map(({ providerCode: _code, rawPayloadHash: _hash, ingestionRunId: _run, ...quote }) => quote)
+        .sort((a, b) => a.canonicalProductId.localeCompare(b.canonicalProductId)),
+    };
+  }
+
+  async comparePriceQuotes(codes: readonly string[]): Promise<ProviderQuotesRow[]> {
+    const rows: ProviderQuotesRow[] = [];
+    for (const code of codes) {
+      const row = await this.currentPriceQuotes(code);
+      if (row) rows.push(row);
+    }
+    return rows;
+  }
+
+  async getPricePreference(scope: DataScope): Promise<PricePreferenceRow> {
+    this.refresh();
+    const preference = this.store.pricePreferences.find((row) => row.userId === scope.userId);
+    if (!preference) {
+      const portfolio = this.store.portfolios.find((row) => row.userId === scope.userId);
+      return {
+        portfolioId: portfolio?.id ?? null,
+        providerCode: null,
+        marketId: null,
+        selectedAt: null,
+        selectedBy: null,
+      };
+    }
+    return {
+      portfolioId: preference.portfolioId,
+      providerCode: preference.providerCode,
+      marketId: preference.marketId,
+      selectedAt: preference.selectedAt,
+      selectedBy: preference.selectedBy,
+    };
+  }
+
+  async setPricePreference(
+    scope: DataScope,
+    code: string,
+    actorId: string,
+    role: "user" | "admin",
+    reason: string,
+  ): Promise<PricePreferenceResult> {
+    this.refresh();
+    const portfolio = this.store.portfolios.find((row) => row.userId === scope.userId);
+    if (!portfolio) throw new PortfolioNotProvisionedError(scope.userId);
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+    if (!provider.enabled) {
+      throw new ProviderNotSelectableError(code, "Bu kaynak kullanıma kapalı.");
+    }
+    if (role === "user" && !provider.userSelectable) {
+      throw new ProviderNotSelectableError(code, "Bu kaynak kullanıcı seçimine kapalı.");
+    }
+    if (provider.capabilities.includes("REFERENCE_ONLY")) {
+      throw new ProviderNotSelectableError(code, "Referans kaynağı değerleme için seçilemez.");
+    }
+
+    const existing = this.store.pricePreferences.find((row) => row.userId === scope.userId);
+    const previousCode = existing?.providerCode ?? null;
+    const previousMarket = existing?.marketId ?? null;
+    const timestamp = this.nowISO();
+    if (existing) {
+      existing.providerCode = provider.code;
+      existing.marketId = provider.marketId;
+      existing.selectedAt = timestamp;
+      existing.selectedBy = actorId;
+    } else {
+      this.store.pricePreferences.push({
+        userId: scope.userId,
+        portfolioId: portfolio.id,
+        providerCode: provider.code,
+        marketId: provider.marketId,
+        selectedAt: timestamp,
+        selectedBy: actorId,
+      });
+    }
+
+    const changed = previousCode !== provider.code;
+    if (changed) {
+      this.store.priceSourceEvents.push({
+        userId: scope.userId,
+        portfolioId: portfolio.id,
+        changedAt: timestamp,
+        previousProviderCode: previousCode,
+        newProviderCode: provider.code,
+        previousMarketId: previousMarket,
+        newMarketId: provider.marketId,
+        changedByRole: role,
+        reason: reason.slice(0, 200),
+      });
+    }
+    this.write();
+    return {
+      portfolioId: portfolio.id,
+      providerCode: provider.code,
+      marketId: provider.marketId,
+      previousProviderCode: previousCode,
+      changed,
+    };
+  }
+
+  async listPriceSourceEvents(scope: DataScope, limit = 50): Promise<PriceSourceEventRow[]> {
+    this.refresh();
+    return this.store.priceSourceEvents
+      .filter((event) => event.userId === scope.userId)
+      .sort((a, b) => (a.changedAt < b.changedAt ? 1 : -1))
+      .slice(0, Math.max(limit, 1))
+      .map(({ userId: _user, portfolioId: _portfolio, ...event }) => event);
+  }
+
+  // --- Yönetici ikinci faktörü (Sprint 3) ---
+
+  async getMfaCredential(userId: string): Promise<MfaCredentialRecord | null> {
+    this.refresh();
+    const row = this.store.mfaCredentials.find((credential) => credential.userId === userId);
+    return row ? { ...row } : null;
+  }
+
+  async saveMfaCredential(userId: string, secret: { ciphertext: string; nonce: string }): Promise<void> {
+    this.refresh();
+    const existing = this.store.mfaCredentials.find((credential) => credential.userId === userId);
+    const record: StoredMfaCredential = {
+      userId,
+      secretCiphertext: secret.ciphertext,
+      secretNonce: secret.nonce,
+      confirmedAt: null,
+      lastVerifiedAt: null,
+      failedAttempts: 0,
+      lockedUntil: null,
+    };
+    if (existing) Object.assign(existing, record);
+    else this.store.mfaCredentials.push(record);
+    this.write();
+  }
+
+  async confirmMfaCredential(userId: string, at: string): Promise<void> {
+    this.refresh();
+    const row = this.store.mfaCredentials.find((credential) => credential.userId === userId);
+    if (!row) return;
+    row.confirmedAt = at;
+    row.lastVerifiedAt = at;
+    row.failedAttempts = 0;
+    row.lockedUntil = null;
+    this.write();
+  }
+
+  async deleteMfaCredential(userId: string): Promise<void> {
+    this.refresh();
+    this.store.mfaCredentials = this.store.mfaCredentials.filter((row) => row.userId !== userId);
+    this.store.mfaRecoveryCodes = this.store.mfaRecoveryCodes.filter((row) => row.userId !== userId);
+    this.write();
+  }
+
+  async recordMfaAttempt(userId: string, success: boolean, at: string): Promise<MfaCredentialRecord | null> {
+    this.refresh();
+    const row = this.store.mfaCredentials.find((credential) => credential.userId === userId);
+    if (!row) return null;
+    row.failedAttempts = success ? 0 : row.failedAttempts + 1;
+    // Art arda 5 hatalı denemede 15 dakika kilit.
+    row.lockedUntil = !success && row.failedAttempts >= 5 ? new Date(Date.parse(at) + 15 * 60_000).toISOString() : null;
+    if (success) row.lastVerifiedAt = at;
+    this.write();
+    return { ...row };
+  }
+
+  async replaceRecoveryCodes(userId: string, hashes: readonly string[]): Promise<void> {
+    this.refresh();
+    this.store.mfaRecoveryCodes = this.store.mfaRecoveryCodes.filter((row) => row.userId !== userId);
+    for (const hash of hashes) {
+      this.store.mfaRecoveryCodes.push({ userId, codeHash: hash, usedAt: null });
+    }
+    this.write();
+  }
+
+  async consumeRecoveryCode(userId: string, hash: string, at: string): Promise<boolean> {
+    this.refresh();
+    const row = this.store.mfaRecoveryCodes.find(
+      (candidate) => candidate.userId === userId && candidate.codeHash === hash && candidate.usedAt === null,
+    );
+    if (!row) return false;
+    row.usedAt = at;
+    this.write();
+    return true;
+  }
+
+  async countRecoveryCodes(userId: string): Promise<number> {
+    this.refresh();
+    return this.store.mfaRecoveryCodes.filter((row) => row.userId === userId && row.usedAt === null).length;
+  }
+
+  async markSessionMfaVerified(sessionId: string, at: string): Promise<void> {
+    this.refresh();
+    const session = this.store.sessions.find((row) => row.id === sessionId);
+    if (!session) return;
+    session.mfaVerifiedAt = at;
+    this.write();
   }
 }
 

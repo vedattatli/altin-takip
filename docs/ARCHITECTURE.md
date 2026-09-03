@@ -279,6 +279,22 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | GET / DELETE | `/api/admin/users/[id]/sessions` | Yönetici |
 | DELETE | `/api/admin/users/[id]/sessions/[sessionId]` | Yönetici |
 | GET | `/api/admin/audit` | Yönetici |
+| GET | `/api/price-sources` | Kullanılabilir oturum — seçilebilir kaynaklar + aktif kaynak |
+| POST | `/api/price-sources` | Kullanılabilir oturum — kaynak seç (açık onay, denetim kaydı) |
+| GET | `/api/price-sources/compare` | Kullanılabilir oturum — kaynak karşılaştırma (değerlemeyi değiştirmez) |
+| GET | `/api/admin/price-sources` | Yönetici — sağlayıcı durumu, sağlık, son koşum |
+| PATCH | `/api/admin/price-sources/[code]` | Yönetici — etkinleştir / kullanıcıya aç (lisanssızsa 409) |
+| POST | `/api/admin/price-sources/[code]/refresh` | Yönetici — şimdi güncelle |
+| POST | `/api/admin/price-sources/[code]/test` | Yönetici — bağlantı testi (secret döndürmez) |
+| POST | `/api/cron/price-ingestion` | `PRICE_CRON_SECRET` (oturum yok; secret tanımsızsa 403) |
+| GET | `/api/health` | Herkese açık (yalın durum). `PRICE_CRON_SECRET` ile sağlayıcı sağlık özeti eklenir |
+| GET | `/api/auth/mfa` | Oturum — ikinci faktör durumu |
+| POST | `/api/auth/mfa/enroll` | Yönetici (kurulum guard'ı) — secret üret |
+| POST | `/api/auth/mfa/confirm` | Yönetici (kurulum guard'ı) — kodu doğrula, kurtarma kodlarını ver |
+| POST | `/api/auth/mfa/verify` | Yönetici (kurulum guard'ı) — oturumu MFA ile işaretle |
+| POST | `/api/admin/users/[id]/mfa` | Yönetici — başka yöneticinin MFA'sını sıfırla |
+| GET | `/api/portfolio/export` | Kullanılabilir oturum — kendi verisi CSV (işlem / pozisyon) |
+| POST | `/api/account/deletion-request` | Kullanılabilir oturum — silme talebi (denetim kaydı) |
 
 **Kayıt (register/signup) ucu bilinçli olarak yoktur** ve varlığı testle engellenir.
 
@@ -305,20 +321,48 @@ interface PortfolioRepository {
 
 Arayüz bileşenleri yalnızca bu sözleşmeyi bilir; depolama değiştiğinde bileşenler değişmez.
 
-## 7. Fiyat sağlayıcı soyutlaması
+## 7. Fiyat sağlayıcı soyutlaması (Sprint 3)
+
+Kanonik sözleşme `src/prices/contract.ts` içindedir:
 
 ```ts
-interface PriceProvider {
-  meta: PriceProviderMeta;   // id, label, market, isRealMarketData, disclaimer, staleAfterMs
-  getQuotes(productIds): Promise<PriceSnapshot>;
+interface CanonicalPriceProvider {
+  descriptor: ProviderDescriptor;                 // kod, görünen ad, teknik ad, piyasa, atıf
+  licenseStatus(): LicenseStatus;                 // DEV_ONLY | NOT_CONFIGURED | LICENSE_REQUIRED | LICENSED
+  licenseReference(): string | null;
+  getCapabilities(): ProviderCapabilities;        // REST | WEBSOCKET | REFERENCE_ONLY | MULTI_SOURCE ...
+  validateConfiguration(): ProviderConfigValidation;
+  listSupportedProducts(): string[];
+  healthCheck(): Promise<ProviderHealth>;
+  fetchSnapshot(productIds): Promise<ProviderSnapshot>;
+  normalizeQuote(raw): NormalizedQuote | null;    // ham yanıt → kanonik quote
 }
 ```
 
-- `MockPriceProvider` — test verisi üretir, dış servise bağlanmaz.
-- `LicensedPriceProvider` — ileride, lisanslı sağlayıcı sözleşmesiyle eklenecek.
+`NormalizedQuote` her zaman şunları taşır: kanonik ürün kimliği, sağlayıcı kimliği, üst kaynak
+kimliği, piyasa kimliği, `liquidationPrice` / `replacementPrice`, para birimi, sağlayıcı zamanı,
+çekilme zamanı, durum, tazelik sınırı, ham yanıt özeti, eşleme sürümü, lisans referansı ve
+alım koşumu kimliği.
 
-Sağlayıcı başarısız olduğunda `status: "unavailable"` döner; **başka piyasaya geçilmez**.
-`isRealMarketData: false` olan kaynak arayüzde her zaman "Test Verisi" olarak etiketlenir.
+**Lisans kapısı fail closed'dır:** gerekli ortam değişkenlerinden biri eksikse
+`NOT_CONFIGURED`, yeniden gösterim izni açıkça `true` değilse `LICENSE_REQUIRED` döner.
+Lisanssız sağlayıcı veri çekmez, etkinleştirilemez, kullanıcıya sunulmaz.
+
+Akış:
+
+```
+Sağlayıcı API → BaseProvider.httpJson (8 sn zaman aşımı, güvenli hata kodu)
+             → normalizeQuote (sembol eşlemesi + mappingVersion)
+             → evaluateSnapshot (kalite kapısı; şüpheli quote karantinaya)
+             → price_ingestion_apply RPC (advisory lock + idempotent run key)
+             → current_price_quotes (upsert) + price_quote_history (append-only)
+             → PriceSourceService.activeSnapshot (portföyün seçtiği tek kaynak)
+```
+
+Sağlayıcı başarısız olduğunda `status: "unavailable"` döner; **başka piyasaya veya başka
+sağlayıcıya geçilmez**. `isRealMarketData: false` olan kaynak arayüzde her zaman
+"Gerçek piyasa verisi değil" etiketiyle gösterilir. Ayrıntı:
+[PRICE_PROVIDERS.md](PRICE_PROVIDERS.md).
 
 ## 8. PWA
 

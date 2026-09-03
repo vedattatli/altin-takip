@@ -2,12 +2,12 @@ import { expect, test } from "@playwright/test";
 
 import { ADMIN } from "./global-setup";
 import {
+  loginAsAdmin,
   ageSessionsOnServer,
   browserApi,
   createReadyUser,
   expectNoHorizontalOverflow,
   gotoReady,
-  login,
   loginAsUser,
   readSessionExpiries,
   scopedUsername,
@@ -66,7 +66,7 @@ test.describe("kalıcı oturum çerezi", () => {
   });
 
   test("yönetici oturumu işaretli olsa bile kalıcı olmaz", async ({ page, context }) => {
-    await login(page, ADMIN.username, ADMIN.password, { keepSignedIn: true });
+    await loginAsAdmin(page, ADMIN.username, ADMIN.password, { keepSignedIn: true });
     await page.waitForURL("**/panel");
     const cookie = await sessionCookie(context);
     expect(cookie?.expires).toBe(-1);
@@ -228,7 +228,7 @@ test.describe("güvenlik olayları bütün cihazları kapatır", () => {
     const device = await deviceContext.newPage();
     await loginAsUser(device, username);
 
-    await login(page, ADMIN.username, ADMIN.password);
+    await loginAsAdmin(page, ADMIN.username, ADMIN.password);
     await page.waitForURL("**/panel");
     const reset = await browserApi(page, "POST", `/api/admin/users/${user.id}/password`, {
       temporaryPassword: "GeciciParola7Kasa",
@@ -247,7 +247,7 @@ test.describe("güvenlik olayları bütün cihazları kapatır", () => {
     const device = await deviceContext.newPage();
     await loginAsUser(device, username);
 
-    await login(page, ADMIN.username, ADMIN.password);
+    await loginAsAdmin(page, ADMIN.username, ADMIN.password);
     await page.waitForURL("**/panel");
     const patched = await browserApi(page, "PATCH", `/api/admin/users/${user.id}`, {
       status: "inactive",
@@ -266,7 +266,7 @@ test.describe("güvenlik olayları bütün cihazları kapatır", () => {
     const device = await deviceContext.newPage();
     await loginAsUser(device, username);
 
-    await login(page, ADMIN.username, ADMIN.password);
+    await loginAsAdmin(page, ADMIN.username, ADMIN.password);
     await page.waitForURL("**/panel");
     await gotoReady(page, `/yonetim/${user.id}`);
 

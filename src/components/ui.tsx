@@ -46,12 +46,20 @@ export function Card({
   children,
   className,
   as: Tag = "div",
+  // JSX'te data-* nitelikleri fazlalık özellik denetiminden muaftır; açıkça
+  // karşılamazsak sessizce DÜŞER ve test kancası DOM'a hiç ulaşmaz.
+  "data-testid": testId,
 }: {
   children: ReactNode;
   className?: string;
   as?: "div" | "section" | "article" | "li";
+  "data-testid"?: string;
 }) {
-  return <Tag className={cx("card", className)}>{children}</Tag>;
+  return (
+    <Tag className={cx("card", className)} data-testid={testId}>
+      {children}
+    </Tag>
+  );
 }
 
 export function SectionTitle({

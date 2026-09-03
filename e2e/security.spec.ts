@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { ADMIN } from "./global-setup";
 import {
+  loginAsAdmin,
   browserApi,
   createPendingUser,
   createReadyUser,
@@ -330,7 +331,7 @@ test.describe("güvenlik başlıkları", () => {
 
 test.describe("yönetim akışı CSRF ile çalışır", () => {
   test("yönetici kullanıcı oluşturabilir", async ({ page }) => {
-    await login(page, ADMIN.username, ADMIN.password);
+    await loginAsAdmin(page, ADMIN.username, ADMIN.password);
     await page.waitForURL("**/panel");
     await gotoReady(page, "/yonetim");
 

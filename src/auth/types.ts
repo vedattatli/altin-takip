@@ -120,7 +120,17 @@ export type AdminAction =
   | "user.sessions_view"
   | "user.sessions_revoke"
   | "user.delete_attempt"
-  | "user.delete";
+  | "user.delete"
+  // Sprint 3: ikinci faktör, fiyat kaynağı ve veri hakları eylemleri.
+  | "mfa.enroll"
+  | "mfa.verify"
+  | "mfa.reset"
+  | "mfa.recovery_used"
+  | "price.provider_update"
+  | "price.source_change"
+  | "price.refresh"
+  | "data.export"
+  | "data.deletion_request";
 
 export interface AdminAuditLog {
   id: string;

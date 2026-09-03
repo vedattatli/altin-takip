@@ -28,6 +28,8 @@
     "staging:cleanup": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/staging-cleanup.ts",
     "staging:admin": "node scripts/staging-admin.mjs",
     "test:staging": "playwright test -c playwright.staging.config.ts",
+    "price:contract": "node scripts/price-contract-test.mjs",
+    "price:smoke": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/price-ingestion-smoke.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle"
   },
   "dependencies": {

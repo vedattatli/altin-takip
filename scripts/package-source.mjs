@@ -92,10 +92,17 @@ export const REQUIRED = [
   "supabase/migrations/0001_init.sql",
   "supabase/migrations/0005_security_hardening.sql",
   "supabase/migrations/0006_database_boundary.sql",
+  "supabase/migrations/0013_price_providers.sql",
+  "supabase/migrations/0014_price_rpc.sql",
+  "supabase/migrations/0015_admin_mfa.sql",
   "supabase/setup/maintenance-cron.sql",
   "supabase/tests/rls.test.sql",
+  "src/prices/contract.ts",
+  "src/prices/descriptors.ts",
   "docs/SECURITY.md",
   "docs/ARCHITECTURE.md",
+  "docs/PRICE_PROVIDERS.md",
+  "docs/RUNBOOKS.md",
 ];
 
 /** Pakette bulunmaMASI gereken desenler. */
@@ -115,7 +122,7 @@ export const FORBIDDEN_PATH_PATTERNS = [
 
 /** Değeri DOLU olan ortam değişkeni satırı arar. Boş anahtar (KEY=) normaldir. */
 function hasFilledEnvVar(content, name) {
-  const matcher = new RegExp(`^\\s*${name}\\s*=\\s*\\S`);
+  const matcher = new RegExp(`^\\s*(?:${name})\\s*=\\s*\\S`);
   return content.split("\n").some((line) => matcher.test(line.trimEnd()));
 }
 
@@ -128,6 +135,14 @@ export const SECRET_PATTERNS = [
   { label: "Dolu NEXT_PUBLIC_SUPABASE_ANON_KEY", test: (c) => hasFilledEnvVar(c, "NEXT_PUBLIC_SUPABASE_ANON_KEY") },
   { label: "Dolu RATE_LIMIT_PEPPER", test: (c) => hasFilledEnvVar(c, "RATE_LIMIT_PEPPER") },
   { label: "Dolu AUTH_CSRF_SECRET", test: (c) => hasFilledEnvVar(c, "AUTH_CSRF_SECRET") },
+  { label: "Dolu SUPABASE_STAGING_JWT_SECRET", test: (c) => hasFilledEnvVar(c, "SUPABASE_STAGING_JWT_SECRET") },
+  // Sprint 3: fiyat sağlayıcı ve yönetici MFA secretları
+  { label: "Dolu PRICE_CRON_SECRET", test: (c) => hasFilledEnvVar(c, "PRICE_CRON_SECRET") },
+  { label: "Dolu AUTH_MFA_ENCRYPTION_KEY", test: (c) => hasFilledEnvVar(c, "AUTH_MFA_ENCRYPTION_KEY") },
+  {
+    label: "Dolu sağlayıcı anahtarı (*_API_KEY / *_API_SECRET / *_LICENSE_REFERENCE)",
+    test: (c) => hasFilledEnvVar(c, "[A-Z0-9_]*_API_KEY|[A-Z0-9_]*_API_SECRET|[A-Z0-9_]*_LICENSE_REFERENCE"),
+  },
   { label: "Özel anahtar bloğu", test: (c) => /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(c) },
 ];
 

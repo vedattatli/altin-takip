@@ -434,3 +434,59 @@ Grant: authenticated ve service_role yalnızca SELECT — yazma yalnızca SECURI
 | `ledger_replay_product` | Birikimli miktar/maliyet/gerçekleşmiş K/Z de 12 basamağı geçemez → P0004 (projeksiyon taşmaz) |
 | `ledger_append` | `baseline_snapshot.stale_after_ms` ile 15 dk'nın küçüğü; provider_timestamp da tazelik sınırına tabi; fetched_at provider'dan (toleransın ötesinde) önce olamaz |
 | `ledger_replace` | Replay yanıtı ilk yanıtla aynı biçimde `[eski ürün, (farklıysa) yeni ürün]` pozisyonları |
+
+## 21. Fiyat sağlayıcıları (`0013_price_providers.sql`)
+
+| Tablo | İçerik |
+| --- | --- |
+| `price_providers` | Sağlayıcı kataloğu: `code`, görünen ad, teknik ad, `market_id`, tür, `enabled`, `user_selectable`, `license_status`, `license_reference`, `redistribution_allowed`, yetenekler, atıf metni. **Anahtar veya secret saklanmaz.** |
+| `price_product_mappings` | Kanonik ürün ↔ sağlayıcı sembolü eşlemesi + `mapping_version`. Eşlenmemiş sembol veri üretmez |
+| `current_price_quotes` | Sağlayıcı × ürün için güncel quote (upsert). `liquidation_price`, `replacement_price`, `currency`, `provider_timestamp`, `fetched_at`, `status`, `upstream_source_id`, `mapping_version` |
+| `price_quote_history` | Aynı quote'un append-only tarihçesi; UPDATE/DELETE tetikleyiciyle reddedilir |
+| `price_ingestion_runs` | Her alım koşumu: `run_key` (idempotency), durum, süre, kabul/ret sayısı, güvenli hata kodu |
+| `portfolio_price_preferences` | Portföy başına **tek** aktif sağlayıcı/piyasa; `selected_at`, `selected_by` |
+| `price_source_change_events` | Kaynak değişim geçmişi (append-only): önceki/yeni sağlayıcı ve piyasa, değiştiren rol, sebep |
+| `provider_health_snapshots` | Sağlık: son başarı/hata, kapsam, bayat ve karantina sayısı, gecikme, güvenli hata kodu |
+
+**Yetkiler:** fiyat tablolarına `anon` ve `authenticated` hiçbir yazma izni almaz; `service_role`
+yalnızca `select` alır. Bütün yazma yolları RPC üzerinden gider. `portfolio_price_preferences` ve
+`price_source_change_events` için RLS "yalnızca kendi kaydını gör" politikası vardır.
+
+**Kısıtlar:**
+
+| Kısıt | Kural |
+| --- | --- |
+| `price_providers_enabled_requires_license` | `enabled = true` yalnızca `license_status = 'LICENSED'` iken |
+| `current_price_quotes_spread` | `replacement_price >= liquidation_price` ve ikisi de `> 0` |
+| `reject_price_history_mutation` | `price_quote_history` UPDATE/DELETE → 42501 |
+| `reject_price_source_event_mutation` | `price_source_change_events` UPDATE/DELETE → 42501 |
+
+## 22. Fiyat RPC'leri (`0014_price_rpc.sql`)
+
+| Fonksiyon | Görev |
+| --- | --- |
+| `price_providers_sync` | Katalog eşitleme; lisans düşerse kaynağı otomatik kapatır (fail closed) |
+| `price_mappings_sync` | Sembol eşlemesi eşitleme (`mapping_version` ile) |
+| `price_provider_set_flags` | Etkinleştir / kullanıcıya aç. Lisans yoksa `P0006 ALTIN_PROVIDER_LICENSE_REQUIRED` |
+| `price_ingestion_apply` | `pg_try_advisory_xact_lock` ile tekilleştirir, `run_key` ile idempotenttir, güncel quote'ları upsert eder ve tarihçeye ekler |
+| `price_quotes_current` / `price_quote_json` | Sağlayıcı bazlı güncel quote okuması |
+| `price_providers_state` | Yönetim ekranı: durum + sağlık + son koşum |
+| `price_quotes_compare` | Karşılaştırma ekranı verisi (değerlemeyi etkilemez) |
+| `price_preference_get` / `price_preference_set` | Portföyün aktif kaynağı. Seçilemez kaynak → `P0006 ALTIN_PROVIDER_NOT_SELECTABLE`; değişim olay kaydı üretir |
+| `price_source_events` | Kaynak değişim geçmişi |
+
+Tamamı `security definer`'dır; `public`, `anon` ve `authenticated` rollerinden `revoke all`,
+yalnızca `service_role`'e `grant execute`.
+
+## 23. Yönetici ikinci faktörü (`0015_admin_mfa.sql`)
+
+| Tablo / alan | İçerik |
+| --- | --- |
+| `admin_mfa_credentials` | `secret_ciphertext` + `secret_nonce` (AES-256-GCM). **Açık secret sütunu yoktur.** `confirmed_at`, `failed_attempts`, `locked_until` |
+| `admin_mfa_recovery_codes` | Yalnızca `code_hash` (SHA-256) ve `used_at`. Kod tek kullanımlıktır |
+| `app_sessions.mfa_verified_at` | Oturumun ikinci faktörü karşıladığı an; yönetim guard'ı bunu kontrol eder |
+| `admin_audit_logs_action_check` | `mfa.*`, `price.*`, `data.*` eylemleri ve eksik olan `user.sessions_view` / `user.sessions_revoke` eklendi |
+
+Her iki tablo da `anon`, `authenticated` ve `service_role` yazımına kapalıdır; erişim yalnızca
+sunucu servisleri üzerindendir. Şifreleme anahtarı (`AUTH_MFA_ENCRYPTION_KEY`) veritabanında
+saklanmaz.

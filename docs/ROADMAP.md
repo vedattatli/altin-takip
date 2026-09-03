@@ -115,13 +115,43 @@
   YAPILMADI. Kod, migration'lar ve araçlar hazır; yalnızca kullanıcı girişi bekleniyor.
   Devam listesi: [STAGING.md → "Beklemede"](STAGING.md#5-beklemede-dış-hesap-girişi-gerektiren-adımlar).
 
-## Sprint 3 — Supabase ile gerçek ortam doğrulaması (önerilen sonraki adım)
+## Tamamlanan — Sprint 3 (çoklu fiyat kaynağı ve kaynak seçimi)
+
+- **Kanonik sağlayıcı sözleşmesi:** `src/prices/contract.ts` — lisans durumu, yetenekler,
+  yapılandırma doğrulama, sağlık kontrolü, ham yanıt → `NormalizedQuote` normalizasyonu.
+- **Sağlayıcı kataloğu (7):** test verisi, Kayseri yerel piyasa (Sarraf Pro / KAYSARDER),
+  AltinAPI, Hasfiyat, Altınkaynak (doğrudan), Harem (doğrudan), BIST referans.
+  Gerçek kaynakların tamamı `NOT_CONFIGURED` / `LICENSE_REQUIRED`; lisans olmadan
+  etkinleştirilemez (fail closed).
+- **Veri modeli (0013–0015):** `price_providers`, `price_product_mappings`,
+  `current_price_quotes`, `price_quote_history` (append-only), `price_ingestion_runs`,
+  `portfolio_price_preferences`, `price_source_change_events`, `provider_health_snapshots`,
+  `admin_mfa_credentials`, `admin_mfa_recovery_codes`.
+- **Merkezî alım:** sunucu tarafı, varsayılan 60 sn (15 sn – 5 dk), advisory lock ile tekilleştirme,
+  koşum anahtarıyla idempotent, secret korumalı `POST /api/cron/price-ingestion`.
+- **Kalite kapısı ve devre kesici:** ters makas, aşırı sıçrama, bayat/gelecek zaman, bilinmeyen
+  sembol ve para birimi denetimi. Şüpheli quote karantinaya alınır, değerlemeye girmez.
+- **Kaynak seçimi:** portföy başına tek aktif kaynak, açık onay metni, denetim kaydı ve
+  `price_source_change_events` geçmişi. **Sessiz fallback yoktur.**
+- **Karşılaştırma ekranı:** kaynaklar yan yana; gösterim değerlemeyi değiştirmez.
+- **Muhasebe bütünlüğü:** kaynak değişimi BUY/SELL tutarlarını, `MARKET_BASELINE` snapshot'larını
+  ve gerçekleşmiş K/Z'yi değiştirmez (birim + E2E testleriyle doğrulandı).
+- **Yönetici ikinci faktörü (TOTP):** AES-256-GCM ile şifreli secret, SHA-256 kurtarma kodu
+  özetleri, 5 denemede kilit, yönetici sıfırlaması (kullanıcı adı onayı + oturum iptali).
+- **Kullanıcı veri hakları:** işlem/pozisyon CSV dışa aktarma (formül enjeksiyonuna karşı
+  korumalı), hesap silme talebi, gizlilik sayfası, runbook'lar ve `GET /api/health` ucu.
+- **Doğrulama:** 497 birim testi (29 dosya), 220 pgTAP, gerçek JWT sondası (46), sağlayıcı sözleşme
+  testleri (54), fiyat alımı duman testi, Playwright (279 geçti, 3 atlandı).
+- **BEKLEMEDE (dış lisans gerekiyor):** hiçbir gerçek sağlayıcıya bağlanılmadı. Canlı sağlayıcı
+  testleri NOT_RUN'dır; eksik ayarlar yalnızca değişken adıyla raporlanır.
+
+## Uzak ortam doğrulaması (dış hesap girişi bekliyor)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
 kapatmaktır.
 
-1. Uzak Supabase projesi aç, `0001` → `0012` migration'larını sırayla uygula (`npm run staging:migrate`).
+1. Uzak Supabase projesi aç, `0001` → `0015` migration'larını sırayla uygula (`npm run staging:migrate`).
 2. Aynı projeye karşı `npm run test:db` mantığını (pgTAP) ve `npm run test:data-api`
    sondasını çalıştır (sonda için proje URL / anahtar / JWT secret ortam değişkenleri).
 3. `npm run admin:create` ile gerçek yönetici hesabını oluştur; gerekirse `npm run admin:repair`.
@@ -139,25 +169,26 @@ kapatmaktır.
 - Başarısız giriş denemeleri için ayrı güvenlik olay kaydı (audit'ten bağımsız).
 - Kullanıcı için oturum listesi ekranı (cihaz etiketi/tarih) — yönetici tarafı ve
   "tüm cihazlardan çıkış" 0.6'da tamamlandı; `AuthService.listOwnSessions` hazır.
-- Yönetici için ikinci faktör (TOTP).
 - Denetim kaydı için dışa aktarma ve saklama politikası.
 
-## Sprint 3 — Gerçek fiyat entegrasyonu
+## Sprint 3.1 — Gerçek sağlayıcı aktivasyonu (lisans bekliyor)
 
-**Ön koşul: lisans veya yazılı izin.** İzinsiz scraping yapılmayacak.
+**Ön koşul: lisans veya yazılı izin.** İzinsiz scraping yapılmayacak. Kod tarafı hazırdır;
+kalan işler tamamen dış sözleşmeye bağlıdır.
 
-- Lisanslı sağlayıcı sözleşmesi ve teknik dokümantasyon.
-- `LicensedPriceProvider` uygulaması (`PriceProvider` sözleşmesine uyumlu).
-- `current_prices` tablosunu besleyen sunucu tarafı yenileme görevi.
-- Sağlayıcı hatasında **fallback yapılmadan** "fiyat alınamadı" durumunun uçtan uca doğrulanması.
-- Fiyat kaynağı ve tazelik bilgisinin arayüzde sağlayıcı adıyla gösterilmesi.
-- Birden fazla sağlayıcı desteklenirse: piyasa karıştırmayan, kullanıcı tarafından seçilebilir kaynak.
+- Sarraf Pro / KAYSARDER ile yetkili API veya XML sözleşmesi; alan adları ve sembol listesi.
+- AltinAPI ve Hasfiyat için ticari abonelik, anahtar ve yeniden gösterim izni.
+- Altınkaynak ve Harem için resmî API sözleşmesi (yoksa adapter kapalı kalır).
+- BIST referans verisi için lisans; yalnızca anomali kontrolünde kullanılır.
+- Sözleşme geldiğinde: `*_API_URL`, `*_API_KEY`, `*_LICENSE_REFERENCE` ve
+  `*_REDISTRIBUTION_ALLOWED=true` sunucu ortamına yazılır, sembol eşlemesi doğrulanır,
+  `npm run price:contract` canlı bölümü çalıştırılır, yönetim ekranından kaynak açılır.
+- Kalıcı WebSocket akışı gerektiren sağlayıcı için ayrı worker çalışma zamanı.
 
 ## Sprint 4 — Ürün derinleştirme
 
 - Portföy geçmişi ve zaman içinde değer grafiği.
 - Ürün bazlı detay ekranı ve işlem geçmişi filtreleri.
-- CSV/Excel dışa aktarma (kullanıcının kendi verisi).
 - Birden fazla portföy (örn. "Birikim", "Çeyrekler").
 - Muhasebe genişletmeleri: `TRANSFER_IN` / `TRANSFER_OUT` / `ADJUSTMENT` işlem türleri
   (tasarım hazır, bu sprintte eklenmedi). FIFO/XIRR/TWR/vergi muhasebesi bilinçli olarak yok.
@@ -168,8 +199,8 @@ kapatmaktır.
 
 - Production deployment ve alan adı (bu turda kapsam dışıydı).
 - İzleme, hata takibi ve yedekleme politikası.
-- Veri saklama ve silme politikası (KVKK uyumu).
-- Kullanıcı için hesap verisi dışa aktarma ve silme talebi akışı.
+- Veri saklama süresi politikasının otomatik uygulanması (KVKK sayfası ve silme talebi akışı
+  Sprint 3'te eklendi).
 
 ---
 

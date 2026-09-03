@@ -2,8 +2,9 @@
 
 Bu belge, uygulamanın **production olmayan** bir staging ortamına (ayrı Supabase projesi +
 ayrı Vercel projesi) nasıl kurulacağını ve doğrulanacağını anlatır. Staging'de yalnızca
-**test verisi** kullanılır; fiyatlar MockPriceProvider'dan gelir ve arayüz "Gerçek piyasa
-verisi değil" uyarısını her zaman gösterir.
+**test verisi** kullanılır; fiyatlar test sağlayıcısından gelir ve arayüz "Gerçek piyasa
+verisi değil" uyarısını her zaman gösterir. Gerçek fiyat sağlayıcıları lisans olmadan
+staging'de de açılmaz (bkz. [PRICE_PROVIDERS.md](PRICE_PROVIDERS.md)).
 
 ## 1. Kurallar
 
@@ -45,8 +46,13 @@ verisi değil" uyarısını her zaman gösterir.
    değerleri yalnızca doğru scope'larda (`SUPABASE_SECRET_KEY` hiçbir `NEXT_PUBLIC_` değişkene
    girmez), `TRUSTED_PROXY_PROVIDER=vercel`, demo modu kapalı. Uygulama zaten
    `robots: noindex, nofollow` ve güvenlik başlıklarını gönderir; `/api/*` yanıtları `no-store`.
-7. `STAGING_ADMIN_PASSWORD=<...> npm run test:staging`.
-8. İş bitince `npm run staging:cleanup`.
+7. Sprint 3 değişkenleri: `AUTH_MFA_ENCRYPTION_KEY` (32 bayt, yönetim uçları bunsuz açılmaz) ve
+   `PRICE_CRON_SECRET` (boşsa alım ucu kapalıdır). Zamanlanmış alımı Vercel Cron veya harici
+   zamanlayıcıyla `POST /api/cron/price-ingestion` + `X-Cron-Secret` başlığına bağlayın.
+8. İlk yönetici girişinde ikinci faktör kurulumu zorunludur; kurtarma kodlarını güvenli bir
+   yerde saklayın (bkz. [RUNBOOKS.md](RUNBOOKS.md) §4).
+9. `STAGING_ADMIN_PASSWORD=<...> npm run test:staging`.
+10. İş bitince `npm run staging:cleanup`.
 
 ## 4. Telefon–PC senkronizasyonu
 
