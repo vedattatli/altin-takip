@@ -1,20 +1,13 @@
 -- =============================================================================
--- 0019 — UYGULAMA YEDEĞİ İÇİN GÜVENLİ DIŞA AKTARIM
+-- 0020 — YEDEK DIŞA AKTARIMI: TABLO ADI DÜZELTMESİ
 --
--- Supabase Free planında fiziksel PITR yoktur. Bu fonksiyon, pilot verilerini
--- geri kazanmaya yetecek UYGULAMA DÜZEYİNDE bir dışa aktarım sağlar.
+-- 0019'da iki tablo adı yanlış varsayılmıştı:
+--   price_source_events  →  price_source_change_events (gerçek ad)
+-- Ayrıca admin_audit_logs yedeğe eklendi: denetim üst verisi sır içermez ve
+-- olay geçmişi kaybolursa geri getirilemez.
 --
--- EN ÖNEMLİ KARAR: hangi sütunların dışarı çıkacağına ÇAĞIRAN DEĞİL, bu
--- fonksiyon karar verir. Kimlik doğrulama sırları burada, veritabanı
--- katmanında elenir; uygulama koduna güvenilmez.
---
--- Dışarı ÇIKMAYANLAR:
---   profiles.password_hash, must_change_password akışına ait sırlar
---   admin_mfa_credentials (tablo tamamen hariç)
---   app_sessions, CSRF token'ları (tablo tamamen hariç)
---   price_providers içindeki kimlik/anahtar alanları
---
--- Bu eleme olmasaydı yedek dosyası tek başına hesapları ele geçirmeye yeterdi.
+-- Hata canlıda yakalandı: yedek ucu 500 döndü ve log ilgili tablonun
+-- bulunmadığını söyledi. Fonksiyon CREATE OR REPLACE ile yenilenir.
 -- =============================================================================
 
 create or replace function public.backup_export_table(p_table text)
