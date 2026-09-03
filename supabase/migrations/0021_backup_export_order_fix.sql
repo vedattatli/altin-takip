@@ -1,13 +1,13 @@
 -- =============================================================================
--- 0020 — YEDEK DIŞA AKTARIMI: TABLO ADI DÜZELTMESİ
+-- 0021 — YEDEK DIŞA AKTARIMI: SIRALAMA SÜTUNU DÜZELTMESİ
 --
--- 0019'da iki tablo adı yanlış varsayılmıştı:
---   price_source_events  →  price_source_change_events (gerçek ad)
--- Ayrıca admin_audit_logs yedeğe eklendi: denetim üst verisi sır içermez ve
--- olay geçmişi kaybolursa geri getirilemez.
+-- price_source_change_events tablosunda zaman sütununun adı `changed_at`;
+-- `created_at` DEĞİL. 0020 bu tabloyu created_at ile sıralamaya çalışıyordu ve
+-- yedek ucu 500 döndürüyordu.
 --
--- Hata canlıda yakalandı: yedek ucu 500 döndü ve log ilgili tablonun
--- bulunmadığını söyledi. Fonksiyon CREATE OR REPLACE ile yenilenir.
+-- Ders: sütun adları varsayılmadı, şemadan doğrulandı. Diğer tabloların
+-- sıralama sütunları (profiles, portfolios, transactions, admin_audit_logs)
+-- gerçekten created_at'tir ve değiştirilmedi.
 -- =============================================================================
 
 create or replace function public.backup_export_table(p_table text)

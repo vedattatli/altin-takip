@@ -62,7 +62,7 @@ begin
 
     when 'price_source_change_events' then
       select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) into result
-      from (select * from public.price_source_change_events order by created_at) t;
+      from (select * from public.price_source_change_events order by changed_at) t;
 
     when 'admin_audit_logs' then
       -- Denetim üst verisi: kim ne zaman ne yaptı. Sır içermez.
