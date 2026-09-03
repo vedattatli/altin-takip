@@ -95,6 +95,8 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/mfa/verify/route.ts": "admin-mfa-setup",
   // Zamanlanmış alım: oturum değil, paylaşılan secret ile korunur.
   "cron/price-ingestion/route.ts": "cron",
+  // Günlük uygulama yedeği: aynı makine ucu modeli; secret yoksa KAPALI.
+  "cron/backup/route.ts": "cron",
   // Sağlık kontrolü: kimliksiz yanıt yalındır; ayrıntı yalnızca cron secret'ıyla açılır.
   "health/route.ts": "public-health",
   // Kalıcı tarayıcı worker'ı: oturum değil, HMAC imzası + nonce + kira jetonu.

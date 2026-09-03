@@ -70,6 +70,8 @@ const testEnv = {
   AUTH_INTERNAL_EMAIL_DOMAIN: "e2e.invalid",
   PRICE_EXPERIMENTAL_SARRAF_SCREEN: "false",
   PRICE_EXPERIMENTAL_PRIVATE_PILOT: "false",
+  BACKUP_ENCRYPTION_KEY: "",
+  BACKUP_CRON_SECRET: "",
   NEXT_PUBLIC_ENABLE_DEMO_MODE: "false",
   // Bu değişkenler E2E'de KULLANILMAZ; boş bırakılır ki canlı bir
   // sağlayıcıya veya gerçek bir yapılandırmaya düşülmesin.
