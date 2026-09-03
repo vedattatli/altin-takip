@@ -23,6 +23,7 @@ export interface ScreenRow {
   confidence: string | null;
   usedInValuation: boolean;
   reason: string | null;
+  observedValues?: string[] | null;
 }
 
 export interface KayseriSnapshot {
@@ -191,11 +192,17 @@ export function KayseriPricesView({ snapshot }: { snapshot: KayseriSnapshot }) {
                     <tr key={row.rawLabel} className="border-t border-hairline">
                       <td className="py-1.5 pr-3 font-medium text-ink">{row.rawLabel}</td>
                       <td className="tabular py-1.5 pr-3 text-right">
-                        {row.single !== null
-                          ? money(row.single)
-                          : row.buy !== null || row.sell !== null
-                            ? `${money(row.buy)} / ${money(row.sell)}`
-                            : "—"}
+                        {row.single !== null ? (
+                          <>
+                            {money(row.single)}
+                            <span className="ml-1 text-[10px] font-normal text-subtle">tek yönlü</span>
+                          </>
+                        ) : row.observedValues && row.observedValues.length > 0 ? (
+                          // Yön ATFEDİLMEZ: rakamlar ekrandaki sırayla, etiketsiz.
+                          row.observedValues.map(money).join(" · ")
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td className="py-1.5 pr-3 text-muted">{reasonText(row.reason)}</td>
                     </tr>

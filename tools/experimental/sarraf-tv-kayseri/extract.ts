@@ -39,6 +39,14 @@ export interface ExtractedQuote {
 export interface UnresolvedRow {
   rawProductName: string;
   reason: string;
+  /**
+   * Satırda okunan ham değerler (ondalık metin).
+   *
+   * Bunlar DEĞERLEMEDE KULLANILMAZ; yalnız "Kayseri Fiyatları" ekranında
+   * referans olarak gösterilir. Yön kanıtlanmadığı için hangi rakamın alış
+   * hangisinin satış olduğu İDDİA EDİLMEZ: değerler sırasıyla listelenir.
+   */
+  observedValues?: string[];
 }
 
 const BUY_HEADERS = ["alış", "alis", "alış fiyatı", "alım"];
@@ -113,6 +121,22 @@ export function parseScreenNumber(input: string, format: NumberFormat): string |
   return normalized;
 }
 
+
+/**
+ * Bir satırdaki okunabilir sayıları sırasıyla döndürür.
+ *
+ * Yön ATFEDİLMEZ: yalnız ekranda görünen rakamlar, göründükleri sırayla.
+ * Tek rakam varsa tek elemanlı dizi döner ve bu "tek yönlü referans" demektir.
+ */
+function observedValues(row: RawScreenRow, format: NumberFormat): string[] {
+  const values: string[] = [];
+  for (const raw of Object.values(row.cells)) {
+    const parsed = parseScreenNumber(raw, format);
+    if (parsed !== null) values.push(parsed);
+  }
+  return values;
+}
+
 export interface ExtractionResult {
   quotes: ExtractedQuote[];
   unresolved: UnresolvedRow[];
@@ -146,18 +170,19 @@ export function extractQuotes(
       unresolved.push({
         rawProductName: row.label,
         reason: unmappedReason(row.label) ?? "ÜRÜN_EŞLENEMEDİ",
+        observedValues: observedValues(row, numberFormat),
       });
       continue;
     }
     if (seen.has(mapped.productId)) {
-      unresolved.push({ rawProductName: row.label, reason: "AYNI_ÜRÜN_İKİ_KEZ" });
+      unresolved.push({ rawProductName: row.label, reason: "AYNI_ÜRÜN_İKİ_KEZ", observedValues: observedValues(row, numberFormat) });
       continue;
     }
 
     // Okuyucu yönü geometriyle doğrulamadıysa satır atlanır: sıraya bakarak
     // "ilki alış, ikincisi satış" varsayımı yapılmaz.
     if (row.directionResolved === false) {
-      unresolved.push({ rawProductName: row.label, reason: "YÖN_DOĞRULANAMADI" });
+      unresolved.push({ rawProductName: row.label, reason: "YÖN_DOĞRULANAMADI", observedValues: observedValues(row, numberFormat) });
       continue;
     }
 
@@ -169,19 +194,19 @@ export function extractQuotes(
       if (kind === "sell" && sellHeader === null) sellHeader = header;
     }
     if (buyHeader === null || sellHeader === null) {
-      unresolved.push({ rawProductName: row.label, reason: "ALIŞ_SATIŞ_BAŞLIĞI_YOK" });
+      unresolved.push({ rawProductName: row.label, reason: "ALIŞ_SATIŞ_BAŞLIĞI_YOK", observedValues: observedValues(row, numberFormat) });
       continue;
     }
 
     const liquidationPrice = parseScreenNumber(row.cells[buyHeader] ?? "", numberFormat);
     const replacementPrice = parseScreenNumber(row.cells[sellHeader] ?? "", numberFormat);
     if (!liquidationPrice || !replacementPrice) {
-      unresolved.push({ rawProductName: row.label, reason: "SAYI_OKUNAMADI" });
+      unresolved.push({ rawProductName: row.label, reason: "SAYI_OKUNAMADI", observedValues: observedValues(row, numberFormat) });
       continue;
     }
     if (Number(replacementPrice) < Number(liquidationPrice)) {
       // Ekranda satış < alış görünüyorsa sütunlar ters olabilir: DÜZELTİLMEZ, atlanır.
-      unresolved.push({ rawProductName: row.label, reason: "MAKAS_TERS" });
+      unresolved.push({ rawProductName: row.label, reason: "MAKAS_TERS", observedValues: observedValues(row, numberFormat) });
       continue;
     }
 

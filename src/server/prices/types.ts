@@ -179,7 +179,11 @@ export interface ScreenWorkerPayload {
   observedAt: string;
   captchaSeen: boolean;
   observations: ScreenObservationInput[];
-  unresolved: { rawProductName: string; reason: string }[];
+  /**
+   * Çözülemeyen satırlar. `observedValues` yalnız GÖSTERİM içindir; yön
+   * kanıtlanmadığı için değerleme yapılmaz.
+   */
+  unresolved: { rawProductName: string; reason: string; observedValues?: string[] }[];
   restartCount: number;
 }
 
@@ -286,6 +290,11 @@ export interface ScreenRawRow {
   usedInValuation: boolean;
   /** Değerlemeye girmiyorsa sebebi. */
   reason: string | null;
+  /**
+   * Yön atfedilemeyen ama ekranda görünen birden fazla rakam. Hiçbiri alış
+   * veya satış diye etiketlenmez; kaynak bu ayrımı yayımlamıyor.
+   */
+  observedValues?: string[] | null;
 }
 
 /** Saklanan son ham satır kümesi. */

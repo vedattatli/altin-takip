@@ -246,15 +246,20 @@ export class ScreenWorkerService {
     // Çözülemeyen ham satırlar da gösterilir: kullanıcı ekranda ne olduğunu
     // görür, ama bunlar hesaba KATILMAZ.
     for (const entry of payload.unresolved) {
+      // Ekranda okunan rakamlar gösterilir ama YÖN ATFEDİLMEZ.
+      // Tek rakam varsa "tek yönlü referans"; birden fazlaysa hiçbiri alış
+      // veya satış diye etiketlenmez, çünkü kaynak bunu yayımlamıyor.
+      const values = entry.observedValues ?? [];
       rows.push({
         rawLabel: entry.rawProductName,
         buy: null,
         sell: null,
-        single: null,
+        single: values.length === 1 ? values[0] : null,
         canonicalProductId: null,
         confidence: null,
         usedInValuation: false,
         reason: entry.reason,
+        observedValues: values.length > 1 ? values : null,
       });
     }
 
