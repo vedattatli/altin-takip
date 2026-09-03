@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-09-03T22:20:00.984Z",
+  "observedAt": "2026-09-03T22:30:56.801Z",
   "mode": "headless",
   "sourceUrl": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
   "signature": "headers:buy,sell|rows:12|directional:8",
@@ -13,7 +13,7 @@
     {
       "label": "HAS",
       "cells": {
-        "TEK_SUTUN": "6.956"
+        "TEK_SUTUN": "6.955"
       },
       "directionResolved": false,
       "top": 226,
@@ -100,7 +100,7 @@
       "label": "ATA - REŞAT BEŞLİ",
       "cells": {
         "ALIŞ": "226.900",
-        "SATIŞ": "243.500"
+        "SATIŞ": "243.450"
       },
       "directionResolved": true,
       "top": 545,
@@ -119,8 +119,8 @@
     {
       "label": "KÜLÇE GÜMÜŞ",
       "cells": {
-        "ALIŞ": "97.108",
-        "SATIŞ": "106.997"
+        "ALIŞ": "97.148",
+        "SATIŞ": "107.018"
       },
       "directionResolved": true,
       "top": 640,
@@ -211,7 +211,7 @@
       "extractionMethod": "network"
     }
   ],
-  "networkObservedAt": "2026-09-03T22:09:49.766Z",
+  "networkObservedAt": "2026-09-03T22:20:45.364Z",
   "unresolved": [
     {
       "rawProductName": "ATA - REŞAT LİRA",
@@ -226,7 +226,7 @@
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
         "226900",
-        "243500"
+        "243450"
       ]
     },
     {
@@ -241,8 +241,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97108",
-        "106997"
+        "97148",
+        "107018"
       ]
     },
     {
@@ -267,7 +267,7 @@
       "rawProductName": "HAS",
       "reason": "YÖN_DOĞRULANAMADI",
       "observedValues": [
-        "6956"
+        "6955"
       ]
     },
     {
@@ -304,7 +304,7 @@
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
         "226900",
-        "243500"
+        "243450"
       ]
     },
     {
@@ -319,8 +319,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97108",
-        "106997"
+        "97148",
+        "107018"
       ]
     }
   ],

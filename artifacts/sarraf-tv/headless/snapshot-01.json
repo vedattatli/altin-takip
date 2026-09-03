@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-09-03T22:09:57.234Z",
+  "observedAt": "2026-09-03T22:20:53.110Z",
   "mode": "headless",
   "sourceUrl": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
   "signature": "headers:buy,sell|rows:12|directional:8",
@@ -119,8 +119,8 @@
     {
       "label": "KÜLÇE GÜMÜŞ",
       "cells": {
-        "ALIŞ": "97.140",
-        "SATIŞ": "107.022"
+        "ALIŞ": "97.096",
+        "SATIŞ": "106.977"
       },
       "directionResolved": true,
       "top": 640,
@@ -211,7 +211,7 @@
       "extractionMethod": "network"
     }
   ],
-  "networkObservedAt": "2026-09-03T22:09:49.766Z",
+  "networkObservedAt": "2026-09-03T22:20:45.364Z",
   "unresolved": [
     {
       "rawProductName": "ATA - REŞAT LİRA",
@@ -241,8 +241,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97140",
-        "107022"
+        "97096",
+        "106977"
       ]
     },
     {
@@ -319,8 +319,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97140",
-        "107022"
+        "97096",
+        "106977"
       ]
     }
   ],

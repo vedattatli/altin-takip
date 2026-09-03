@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-09-03T22:14:59.096Z",
+  "observedAt": "2026-09-03T22:25:55.012Z",
   "mode": "headless",
   "sourceUrl": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
   "signature": "headers:buy,sell|rows:12|directional:8",
@@ -13,7 +13,7 @@
     {
       "label": "HAS",
       "cells": {
-        "TEK_SUTUN": "6.958"
+        "TEK_SUTUN": "6.954"
       },
       "directionResolved": false,
       "top": 226,
@@ -22,7 +22,7 @@
     {
       "label": "22 AYAR",
       "cells": {
-        "TEK_SUTUN": "6.685"
+        "TEK_SUTUN": "6.680"
       },
       "directionResolved": false,
       "top": 226,
@@ -31,7 +31,7 @@
     {
       "label": "14 AYAR",
       "cells": {
-        "TEK_SUTUN": "4.770"
+        "TEK_SUTUN": "4.765"
       },
       "directionResolved": false,
       "top": 226,
@@ -50,7 +50,7 @@
       "label": "ÇEYREK",
       "cells": {
         "ALIŞ": "11.000",
-        "SATIŞ": "11.600"
+        "SATIŞ": "11.550"
       },
       "directionResolved": true,
       "top": 307,
@@ -60,7 +60,7 @@
       "label": "YARIM",
       "cells": {
         "ALIŞ": "22.000",
-        "SATIŞ": "23.200"
+        "SATIŞ": "23.100"
       },
       "directionResolved": true,
       "top": 355,
@@ -70,7 +70,7 @@
       "label": "TAM ALTIN",
       "cells": {
         "ALIŞ": "44.000",
-        "SATIŞ": "46.400"
+        "SATIŞ": "46.200"
       },
       "directionResolved": true,
       "top": 402,
@@ -80,7 +80,7 @@
       "label": "GREMSE",
       "cells": {
         "ALIŞ": "110.000",
-        "SATIŞ": "116.000"
+        "SATIŞ": "115.500"
       },
       "directionResolved": true,
       "top": 450,
@@ -89,8 +89,8 @@
     {
       "label": "ATA - REŞAT LİRA",
       "cells": {
-        "ALIŞ": "45.450",
-        "SATIŞ": "47.700"
+        "ALIŞ": "45.400",
+        "SATIŞ": "47.650"
       },
       "directionResolved": true,
       "top": 497,
@@ -99,8 +99,8 @@
     {
       "label": "ATA - REŞAT BEŞLİ",
       "cells": {
-        "ALIŞ": "226.950",
-        "SATIŞ": "243.550"
+        "ALIŞ": "226.850",
+        "SATIŞ": "243.400"
       },
       "directionResolved": true,
       "top": 545,
@@ -109,7 +109,7 @@
     {
       "label": "24 AYAR PAKETLİ",
       "cells": {
-        "ALIŞ": "6.870",
+        "ALIŞ": "6.860",
         "SATIŞ": "7.050"
       },
       "directionResolved": true,
@@ -119,8 +119,8 @@
     {
       "label": "KÜLÇE GÜMÜŞ",
       "cells": {
-        "ALIŞ": "97.166",
-        "SATIŞ": "107.049"
+        "ALIŞ": "97.081",
+        "SATIŞ": "106.963"
       },
       "directionResolved": true,
       "top": 640,
@@ -135,7 +135,7 @@
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
       "liquidationPrice": "11000",
-      "replacementPrice": "11600",
+      "replacementPrice": "11550",
       "extractionMethod": "dom"
     },
     {
@@ -145,7 +145,7 @@
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
       "liquidationPrice": "22000",
-      "replacementPrice": "23200",
+      "replacementPrice": "23100",
       "extractionMethod": "dom"
     },
     {
@@ -155,7 +155,7 @@
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
       "liquidationPrice": "44000",
-      "replacementPrice": "46400",
+      "replacementPrice": "46200",
       "extractionMethod": "dom"
     },
     {
@@ -165,7 +165,7 @@
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
       "liquidationPrice": "110000",
-      "replacementPrice": "116000",
+      "replacementPrice": "115500",
       "extractionMethod": "dom"
     }
   ],
@@ -211,29 +211,29 @@
       "extractionMethod": "network"
     }
   ],
-  "networkObservedAt": "2026-09-03T22:09:49.766Z",
+  "networkObservedAt": "2026-09-03T22:20:45.364Z",
   "unresolved": [
     {
       "rawProductName": "ATA - REŞAT LİRA",
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
-        "45450",
-        "47700"
+        "45400",
+        "47650"
       ]
     },
     {
       "rawProductName": "ATA - REŞAT BEŞLİ",
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
-        "226950",
-        "243550"
+        "226850",
+        "243400"
       ]
     },
     {
       "rawProductName": "24 AYAR PAKETLİ",
       "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
       "observedValues": [
-        "6870",
+        "6860",
         "7050"
       ]
     },
@@ -241,8 +241,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97166",
-        "107049"
+        "97081",
+        "106963"
       ]
     },
     {
@@ -267,21 +267,21 @@
       "rawProductName": "HAS",
       "reason": "YÖN_DOĞRULANAMADI",
       "observedValues": [
-        "6958"
+        "6954"
       ]
     },
     {
       "rawProductName": "22 AYAR",
       "reason": "YÖN_DOĞRULANAMADI",
       "observedValues": [
-        "6685"
+        "6680"
       ]
     },
     {
       "rawProductName": "14 AYAR",
       "reason": "YÖN_DOĞRULANAMADI",
       "observedValues": [
-        "4770"
+        "4765"
       ]
     },
     {
@@ -295,23 +295,23 @@
       "rawProductName": "ATA - REŞAT LİRA",
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
-        "45450",
-        "47700"
+        "45400",
+        "47650"
       ]
     },
     {
       "rawProductName": "ATA - REŞAT BEŞLİ",
       "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
       "observedValues": [
-        "226950",
-        "243550"
+        "226850",
+        "243400"
       ]
     },
     {
       "rawProductName": "24 AYAR PAKETLİ",
       "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
       "observedValues": [
-        "6870",
+        "6860",
         "7050"
       ]
     },
@@ -319,8 +319,8 @@
       "rawProductName": "KÜLÇE GÜMÜŞ",
       "reason": "ALTIN_DEĞİL",
       "observedValues": [
-        "97166",
-        "107049"
+        "97081",
+        "106963"
       ]
     }
   ],
