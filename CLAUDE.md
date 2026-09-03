@@ -347,6 +347,20 @@ Arayüz yönlendirmesine tek başına güvenme.
   `services/sarraf-screen-worker/src/policy.ts` içindedir. Birini değiştirirsen
   diğerini de değiştir — uyum testle denetlenir.
 
+## Özel pilot kapısı (ihlal edilemez)
+
+- Deneysel ekran kaynağı ÜÇ anahtarın hepsini ister:
+  `APP_DEPLOYMENT_ENV=private-pilot`, `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true`,
+  `PRICE_EXPERIMENTAL_PRIVATE_PILOT=true`. Biri eksikse kapalıdır.
+- `APP_DEPLOYMENT_ENV` tanımsız, tanınmayan, `production` veya
+  `public-production` ise **fail closed**. Yazım hatası kaynağı açmaz.
+- `VERCEL_ENV=production` TEK BAŞINA engellemez: barındırma hedefi ile ürün
+  ortamı ayrı kavramlardır. Ayrım açıkça beyan edilen ortama dayanır.
+- Test verisi sağlayıcısının kapısı AYRIDIR ve üretim dağıtımında koşulsuz
+  kapalıdır. Deneysel kaynağı açmak mock'u açmaz.
+- Bu kapı erişim izni değildir: hangi portföyün kullanacağı izin listesiyle,
+  hangi ürünün değerleneceği eşleme güveniyle ayrıca belirlenir.
+
 ## E2E koşum bütünlüğü (ihlal edilemez)
 
 - `playwright.config.ts` içinde `reuseExistingServer` **`false` kalır**. `true`

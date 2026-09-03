@@ -1,18 +1,389 @@
 {
-  "generatedAt": "2026-09-03T14:14:34.482Z",
+  "generatedAt": "2026-09-03T19:36:42.833Z",
   "mode": "headless",
   "note": "Yalnızca GÖZLEM. Bu uçlar tarayıcı dışında çağrılmadı, tekrar oynatılmadı. Değerler varsayılan olarak yazılmaz; hassas alanlar REDACTED işaretlidir.",
   "priceListPath": "interactive.sarraf.pro/price/list",
-  "priceRowCount": 0,
+  "priceRowCount": 15,
   "answers": {
-    "feedsPriceTable": null,
-    "hasProductTitle": false,
-    "hasSeparateBuySell": false,
+    "feedsPriceTable": "interactive.sarraf.pro/price/list",
+    "hasProductTitle": true,
+    "hasSeparateBuySell": true,
     "hasNewOldDistinction": false,
     "ataResatSeparated": false,
     "singlePriceDirectionKnown": false,
-    "hasUpstreamTimestamp": false,
+    "hasUpstreamTimestamp": true,
     "currencyExplicit": false
   },
-  "contract": []
+  "contract": [
+    {
+      "path": "interactive.sarraf.pro/pricetv",
+      "schema": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "result",
+            "type": "object"
+          },
+          {
+            "name": "status",
+            "type": "boolean",
+            "sample": true
+          }
+        ],
+        "item": {
+          "type": "object",
+          "fields": [
+            {
+              "name": "customerInfo",
+              "type": "object"
+            },
+            {
+              "name": "slug",
+              "type": "string",
+              "sample": "kayseri"
+            },
+            {
+              "name": "token",
+              "type": "string",
+              "redacted": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "interactive.sarraf.pro/price",
+      "schema": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "result",
+            "type": "object"
+          },
+          {
+            "name": "status",
+            "type": "boolean",
+            "sample": true
+          }
+        ],
+        "item": {
+          "type": "object",
+          "fields": [
+            {
+              "name": "design",
+              "type": "object",
+              "redacted": true
+            },
+            {
+              "name": "isManual",
+              "type": "boolean",
+              "sample": false
+            },
+            {
+              "name": "isPassword",
+              "type": "boolean",
+              "redacted": true
+            },
+            {
+              "name": "logo",
+              "type": "string",
+              "redacted": true
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "sample": "kayseri dernek"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "interactive.sarraf.pro/price/list",
+      "schema": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "result",
+            "type": "array"
+          },
+          {
+            "name": "status",
+            "type": "boolean",
+            "sample": true
+          }
+        ],
+        "item": {
+          "type": "array",
+          "length": 15,
+          "item": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "buying",
+                "type": "number",
+                "sample": 6931
+              },
+              {
+                "name": "buyingLabor",
+                "type": "number"
+              },
+              {
+                "name": "buyingMarj",
+                "type": "number"
+              },
+              {
+                "name": "buyingMilyem",
+                "type": "number"
+              },
+              {
+                "name": "buyingStep",
+                "type": "number"
+              },
+              {
+                "name": "code",
+                "type": "string",
+                "sample": "HAS"
+              },
+              {
+                "name": "companiesId",
+                "type": "string",
+                "redacted": true
+              },
+              {
+                "name": "createdAt",
+                "type": "string"
+              },
+              {
+                "name": "id",
+                "type": "string",
+                "redacted": true
+              },
+              {
+                "name": "isFavorite",
+                "type": "boolean",
+                "sample": true
+              },
+              {
+                "name": "isFooter",
+                "type": "boolean",
+                "sample": false
+              },
+              {
+                "name": "isManual",
+                "type": "boolean",
+                "sample": false
+              },
+              {
+                "name": "key",
+                "type": "string",
+                "redacted": true
+              },
+              {
+                "name": "milyem",
+                "type": "number",
+                "sample": 1000
+              },
+              {
+                "name": "minMarj",
+                "type": "number"
+              },
+              {
+                "name": "noDecimal",
+                "type": "boolean",
+                "sample": true
+              },
+              {
+                "name": "onlyBuying",
+                "type": "boolean",
+                "sample": false
+              },
+              {
+                "name": "onlySalable",
+                "type": "boolean",
+                "sample": true
+              },
+              {
+                "name": "order",
+                "type": "number",
+                "sample": 1
+              },
+              {
+                "name": "priceListId",
+                "type": "string",
+                "redacted": true
+              },
+              {
+                "name": "quantity",
+                "type": "number",
+                "sample": 1
+              },
+              {
+                "name": "sales",
+                "type": "number",
+                "sample": 6931
+              },
+              {
+                "name": "salesLabor",
+                "type": "number"
+              },
+              {
+                "name": "salesMarj",
+                "type": "number"
+              },
+              {
+                "name": "salesMilyem",
+                "type": "number"
+              },
+              {
+                "name": "salesStep",
+                "type": "number"
+              },
+              {
+                "name": "status",
+                "type": "boolean",
+                "sample": true
+              },
+              {
+                "name": "title",
+                "type": "string",
+                "sample": "HAS"
+              },
+              {
+                "name": "unitName",
+                "type": "string",
+                "sample": "Gram"
+              },
+              {
+                "name": "updatedAt",
+                "type": "string",
+                "sample": "2026-09-03T19:26:31.480Z"
+              },
+              {
+                "name": "userId",
+                "type": "string",
+                "redacted": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "api.sarraf.ai/markets/rates",
+      "schema": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "result",
+            "type": "array"
+          },
+          {
+            "name": "status",
+            "type": "boolean",
+            "sample": true
+          }
+        ],
+        "item": {
+          "type": "array",
+          "length": 35,
+          "item": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "buying",
+                "type": "number",
+                "sample": 6862.18
+              },
+              {
+                "name": "buyings",
+                "type": "array"
+              },
+              {
+                "name": "category",
+                "type": "string",
+                "sample": "sarraf"
+              },
+              {
+                "name": "changeBuying",
+                "type": "number"
+              },
+              {
+                "name": "changeSelling",
+                "type": "number"
+              },
+              {
+                "name": "channel",
+                "type": "string",
+                "sample": "piyasa"
+              },
+              {
+                "name": "code",
+                "type": "string",
+                "sample": "GRAM"
+              },
+              {
+                "name": "dateDay",
+                "type": "string",
+                "sample": "2026-09-03"
+              },
+              {
+                "name": "isPopular",
+                "type": "boolean"
+              },
+              {
+                "name": "isUserSelected",
+                "type": "boolean"
+              },
+              {
+                "name": "openBuying",
+                "type": "number"
+              },
+              {
+                "name": "openSelling",
+                "type": "number"
+              },
+              {
+                "name": "selling",
+                "type": "number",
+                "sample": 6945.34
+              },
+              {
+                "name": "sellings",
+                "type": "array"
+              },
+              {
+                "name": "short",
+                "type": "string",
+                "sample": "GRAM"
+              },
+              {
+                "name": "tickChangeBuying",
+                "type": "number"
+              },
+              {
+                "name": "tickChangeSelling",
+                "type": "number"
+              },
+              {
+                "name": "title",
+                "type": "string",
+                "sample": "GRAM ALTIN"
+              },
+              {
+                "name": "unit",
+                "type": "string",
+                "sample": "GRM"
+              },
+              {
+                "name": "updatedAt",
+                "type": "string",
+                "sample": "2026-09-03T19:26:31.116Z"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
 }

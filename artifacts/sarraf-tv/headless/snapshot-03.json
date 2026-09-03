@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-09-03T12:05:48.273Z",
+  "observedAt": "2026-09-03T19:36:42.652Z",
   "mode": "headless",
   "sourceUrl": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
   "signature": "headers:buy,sell|rows:12|directional:8",
@@ -13,7 +13,7 @@
     {
       "label": "HAS",
       "cells": {
-        "TEK_SUTUN": "6.893"
+        "TEK_SUTUN": "6.932"
       },
       "directionResolved": false,
       "top": 226,
@@ -22,7 +22,7 @@
     {
       "label": "22 AYAR",
       "cells": {
-        "TEK_SUTUN": "6.620"
+        "TEK_SUTUN": "6.660"
       },
       "directionResolved": false,
       "top": 226,
@@ -31,7 +31,7 @@
     {
       "label": "14 AYAR",
       "cells": {
-        "TEK_SUTUN": "4.725"
+        "TEK_SUTUN": "4.750"
       },
       "directionResolved": false,
       "top": 226,
@@ -40,7 +40,7 @@
     {
       "label": "8 AYAR",
       "cells": {
-        "TEK_SUTUN": "2.965"
+        "TEK_SUTUN": "2.985"
       },
       "directionResolved": false,
       "top": 226,
@@ -49,8 +49,8 @@
     {
       "label": "ÇEYREK",
       "cells": {
-        "ALIŞ": "10.900",
-        "SATIŞ": "11.450"
+        "ALIŞ": "10.950",
+        "SATIŞ": "11.550"
       },
       "directionResolved": true,
       "top": 307,
@@ -59,8 +59,8 @@
     {
       "label": "YARIM",
       "cells": {
-        "ALIŞ": "21.800",
-        "SATIŞ": "22.900"
+        "ALIŞ": "21.900",
+        "SATIŞ": "23.100"
       },
       "directionResolved": true,
       "top": 355,
@@ -69,8 +69,8 @@
     {
       "label": "TAM ALTIN",
       "cells": {
-        "ALIŞ": "43.600",
-        "SATIŞ": "45.800"
+        "ALIŞ": "43.800",
+        "SATIŞ": "46.200"
       },
       "directionResolved": true,
       "top": 402,
@@ -79,8 +79,8 @@
     {
       "label": "GREMSE",
       "cells": {
-        "ALIŞ": "109.000",
-        "SATIŞ": "114.500"
+        "ALIŞ": "109.500",
+        "SATIŞ": "115.500"
       },
       "directionResolved": true,
       "top": 450,
@@ -89,8 +89,8 @@
     {
       "label": "ATA - REŞAT LİRA",
       "cells": {
-        "ALIŞ": "45.050",
-        "SATIŞ": "47.250"
+        "ALIŞ": "45.300",
+        "SATIŞ": "47.500"
       },
       "directionResolved": true,
       "top": 497,
@@ -99,8 +99,8 @@
     {
       "label": "ATA - REŞAT BEŞLİ",
       "cells": {
-        "ALIŞ": "225.050",
-        "SATIŞ": "241.300"
+        "ALIŞ": "226.200",
+        "SATIŞ": "242.650"
       },
       "directionResolved": true,
       "top": 545,
@@ -109,8 +109,8 @@
     {
       "label": "24 AYAR PAKETLİ",
       "cells": {
-        "ALIŞ": "6.810",
-        "SATIŞ": "6.990"
+        "ALIŞ": "6.840",
+        "SATIŞ": "7.030"
       },
       "directionResolved": true,
       "top": 592,
@@ -119,8 +119,8 @@
     {
       "label": "KÜLÇE GÜMÜŞ",
       "cells": {
-        "ALIŞ": "95.197",
-        "SATIŞ": "104.879"
+        "ALIŞ": "96.810",
+        "SATIŞ": "106.600"
       },
       "directionResolved": true,
       "top": 640,
@@ -134,8 +134,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "10900",
-      "replacementPrice": "11450",
+      "liquidationPrice": "10950",
+      "replacementPrice": "11550",
       "extractionMethod": "dom"
     },
     {
@@ -144,8 +144,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "21800",
-      "replacementPrice": "22900",
+      "liquidationPrice": "21900",
+      "replacementPrice": "23100",
       "extractionMethod": "dom"
     },
     {
@@ -154,8 +154,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "43600",
-      "replacementPrice": "45800",
+      "liquidationPrice": "43800",
+      "replacementPrice": "46200",
       "extractionMethod": "dom"
     },
     {
@@ -164,8 +164,8 @@
       "mappingConfidence": "NETWORK_VERIFIED",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "109000",
-      "replacementPrice": "114500",
+      "liquidationPrice": "109500",
+      "replacementPrice": "115500",
       "extractionMethod": "dom"
     }
   ],
@@ -176,8 +176,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "10900",
-      "replacementPrice": "11450",
+      "liquidationPrice": "10950",
+      "replacementPrice": "11550",
       "extractionMethod": "network"
     },
     {
@@ -186,8 +186,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "21800",
-      "replacementPrice": "22900",
+      "liquidationPrice": "21900",
+      "replacementPrice": "23100",
       "extractionMethod": "network"
     },
     {
@@ -196,8 +196,8 @@
       "mappingConfidence": "CONVENTION",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "43600",
-      "replacementPrice": "45800",
+      "liquidationPrice": "43800",
+      "replacementPrice": "46200",
       "extractionMethod": "network"
     },
     {
@@ -206,12 +206,12 @@
       "mappingConfidence": "NETWORK_VERIFIED",
       "rawBuyLabel": "ALIŞ",
       "rawSellLabel": "SATIŞ",
-      "liquidationPrice": "109000",
-      "replacementPrice": "114500",
+      "liquidationPrice": "109500",
+      "replacementPrice": "115500",
       "extractionMethod": "network"
     }
   ],
-  "networkObservedAt": "2026-09-03T12:03:37.817Z",
+  "networkObservedAt": "2026-09-03T19:26:31.596Z",
   "unresolved": [
     {
       "rawProductName": "ATA - REŞAT LİRA",

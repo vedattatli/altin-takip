@@ -845,3 +845,46 @@ davrandığı testle doğrulanır.
 
 `tests/env-parsing.test.ts` ham `Number(process.env...)` kalıbının `src/` ve
 `services/` altına geri gelmesini engeller.
+
+## 36. Özel pilot ortam kapısı
+
+Ürün kararı: deneysel Sarraf TV ekran kaynağı **herkese açık üretimde asla**
+çalışmaz, ama ayrı bir "özel pilot" ortamında açıkça etkinleştirilebilir.
+
+Kapı üç anahtarın hepsini ister (`src/prices/dev-gate.ts`):
+
+| Değişken | Gerekli değer |
+| --- | --- |
+| `APP_DEPLOYMENT_ENV` | `private-pilot` |
+| `PRICE_EXPERIMENTAL_SARRAF_SCREEN` | `true` |
+| `PRICE_EXPERIMENTAL_PRIVATE_PILOT` | `true` |
+
+Fail closed durumları:
+
+| `APP_DEPLOYMENT_ENV` | Sonuç |
+| --- | --- |
+| tanımsız | Kapalı |
+| tanınmayan değer (örn. `private_pilot`) | Kapalı |
+| `production` | Kapalı |
+| `public-production` | Kapalı |
+| `private-pilot` + iki bayrak | **Açık** |
+
+`VERCEL_ENV=production` tek başına engellemez. Bu bilinçlidir: barındırma
+hedefi ile ürün ortamı farklı kavramlardır ve özel pilot Vercel'in production
+hedefinde barınabilir. Ayrım açıkça beyan edilen `APP_DEPLOYMENT_ENV`
+değerine dayanır.
+
+**Test verisi kapısı ayrıdır ve değişmedi.** `devOnlyProviderBlocked()` üretim
+dağıtımında (`VERCEL_ENV=production` veya `APP_DEPLOYMENT_ENV` production
+ailesi) koşulsuz kapalıdır. Deneysel kaynağı açmak mock'u açmaz; özel pilotta
+bile mock kapalı kalır ve bu testle denetlenir.
+
+Bu kapı **erişim izni değildir**. Kaynak açık olsa bile:
+
+- veritabanı kısıtı kaynağın genel kullanıcı listesine çıkmasını engeller
+  (`price_providers_experimental_not_public`),
+- hangi portföyün kullanabileceği yöneticinin izin listesinden gelir
+  (`experimental_access_allowed`, hem uygulama hem SQL katmanında),
+- hangi ürünün değerleneceği eşleme güveniyle belirlenir
+  (`VALUATION_READY_CONFIDENCE`),
+- gözlem 120 sn'den eskiyse fiyat reddedilir.

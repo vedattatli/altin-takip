@@ -33,6 +33,7 @@ const ENV_KEYS = [
   "VERCEL_ENV",
   "APP_DEPLOYMENT_ENV",
   "PRICE_EXPERIMENTAL_SARRAF_SCREEN",
+  "PRICE_EXPERIMENTAL_PRIVATE_PILOT",
   "PRICE_SCREEN_WORKER_SECRET",
   "PRICE_ALLOW_MOCK_PROVIDER",
 ] as const;
@@ -47,7 +48,9 @@ let backend: LocalAuthBackend;
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
   for (const key of ENV_KEYS) delete process.env[key];
+  process.env.APP_DEPLOYMENT_ENV = "private-pilot";
   process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
   process.env.PRICE_SCREEN_WORKER_SECRET = SECRET;
   backend = new LocalAuthBackend({ inMemory: true });
 });
@@ -344,10 +347,22 @@ describe("5. sağlayıcı kimliği ve güvenlik yüzeyi", () => {
     expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
   });
 
-  it("üretim dağıtımında deneysel kaynak açılamaz", () => {
+  it("herkese açık üretimde deneysel kaynak açılamaz", () => {
+    const env = process.env as Record<string, string | undefined>;
+    env.APP_DEPLOYMENT_ENV = "public-production";
+    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("NOT_CONFIGURED");
+  });
+
+  it("ortam beyan edilmezse deneysel kaynak açılamaz (fail closed)", () => {
+    delete (process.env as Record<string, string | undefined>).APP_DEPLOYMENT_ENV;
+    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("NOT_CONFIGURED");
+  });
+
+  it("özel pilotta VERCEL_ENV=production kaynağı engellemez", () => {
     const env = process.env as Record<string, string | undefined>;
     env.VERCEL_ENV = "production";
-    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("NOT_CONFIGURED");
+    env.APP_DEPLOYMENT_ENV = "private-pilot";
+    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
   });
 
   it("deneysel kaynak global varsayılan yapılamaz", async () => {
