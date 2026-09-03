@@ -5,8 +5,8 @@
 > delinmez, hiçbir uç tarayıcı dışında çağrılmaz.
 
 - **Tarayıcı modu:** `headless`
-- **Başlangıç:** 2026-09-03T19:26:28.562Z
-- **Bitiş:** 2026-09-03T19:36:42.832Z (614 sn)
+- **Başlangıç:** 2026-09-03T22:09:44.266Z
+- **Bitiş:** 2026-09-03T22:20:01.183Z (617 sn)
 - **Chromium:** 151.0.7922.34
 - **Hedef:** `https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri`
 - **Sonuç:** `PARTIAL_OK`
@@ -21,7 +21,7 @@
 | Alan | Değer |
 | --- | --- |
 | Chromium açıldı mı? | Evet |
-| İlk fiyatın gelme süresi | 3034 ms |
+| İlk fiyatın gelme süresi | 5500 ms |
 | Ekran satırı | 12 |
 | Çözülen satır | 4 |
 | Çözülemeyen satır | 8 |
@@ -30,7 +30,7 @@
 | CAPTCHA script'i yüklendi mi? | Google reCAPTCHA, Google reCAPTCHA (kaynak) |
 | Gerçek kullanıcı etkileşimi gerekti mi? | hayır |
 | Kapanma nedeni | normal |
-| Otomatik güncelleme (gözlem süresince) | 0 |
+| Otomatik güncelleme (gözlem süresince) | 4 |
 
 ## Zaman damgası
 
@@ -41,9 +41,9 @@ gösteren herhangi bir metin bu kalıba uyabilir.
 | --- | --- |
 | Sağlayıcının fiyat zamanı kanıtlandı mı? | Evet |
 | Kanıt kaynağı | interactive.sarraf.pro/price/list → updatedAt |
-| Örnek | 2026-09-03T19:26:31.480Z |
+| Örnek | 2026-09-03T22:09:48.783Z |
 | Bizim gözlem zamanımız biliniyor mu? | Evet |
-| Açılışta yön doğrulaması | 2026-09-03T19:26:38.929Z |
+| Açılışta yön doğrulaması | 2026-09-03T22:09:57.234Z |
 | Yönü doğrulanan başlıklar | ÇEYREK, YARIM, TAM ALTIN, GREMSE |
 
 ## Doğal tarayıcı oturumundaki fiyat sözleşmesi
@@ -71,14 +71,14 @@ gösteren herhangi bir metin bu kalıba uyabilir.
 
 ## Okunan ürünler
 
-### Gözlem 1 — 2026-09-03T19:26:38.929Z
+### Gözlem 1 — 2026-09-03T22:09:57.234Z
 
 | Ekran başlığı | Kanonik ürün | Eşleme güveni | Alış sütunu | Satış sütunu | Bozdurma | Yeniden alım |
 | --- | --- | --- | --- | --- | --- | --- |
-| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 10950 | 11550 |
-| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 21900 | 23100 |
-| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 43800 | 46200 |
-| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 109500 | 115500 |
+| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 11000 | 11550 |
+| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 22000 | 23100 |
+| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 44000 | 46200 |
+| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 110000 | 115500 |
 
 Çözülemeyen satırlar (tahmin YAPILMADI):
 - ATA - REŞAT LİRA — TEK_SATIRDA_İKİ_ÜRÜN
@@ -90,14 +90,14 @@ gösteren herhangi bir metin bu kalıba uyabilir.
 - 14 AYAR — TEK_YÖNLÜ_REFERANS_FİYAT
 - 8 AYAR — TEK_YÖNLÜ_REFERANS_FİYAT
 
-### Gözlem 2 — 2026-09-03T19:31:40.796Z
+### Gözlem 2 — 2026-09-03T22:14:59.096Z
 
 | Ekran başlığı | Kanonik ürün | Eşleme güveni | Alış sütunu | Satış sütunu | Bozdurma | Yeniden alım |
 | --- | --- | --- | --- | --- | --- | --- |
-| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 10950 | 11550 |
-| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 21900 | 23100 |
-| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 43800 | 46200 |
-| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 109500 | 115500 |
+| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 11000 | 11600 |
+| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 22000 | 23200 |
+| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 44000 | 46400 |
+| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 110000 | 116000 |
 
 Çözülemeyen satırlar (tahmin YAPILMADI):
 - ATA - REŞAT LİRA — TEK_SATIRDA_İKİ_ÜRÜN
@@ -109,14 +109,14 @@ gösteren herhangi bir metin bu kalıba uyabilir.
 - 14 AYAR — TEK_YÖNLÜ_REFERANS_FİYAT
 - 8 AYAR — TEK_YÖNLÜ_REFERANS_FİYAT
 
-### Gözlem 3 — 2026-09-03T19:36:42.652Z
+### Gözlem 3 — 2026-09-03T22:20:00.984Z
 
 | Ekran başlığı | Kanonik ürün | Eşleme güveni | Alış sütunu | Satış sütunu | Bozdurma | Yeniden alım |
 | --- | --- | --- | --- | --- | --- | --- |
-| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 10950 | 11550 |
-| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 21900 | 23100 |
-| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 43800 | 46200 |
-| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 109500 | 115500 |
+| ÇEYREK | yeni-ceyrek | CONVENTION | ALIŞ | SATIŞ | 11000 | 11550 |
+| YARIM | yeni-yarim | CONVENTION | ALIŞ | SATIŞ | 22000 | 23100 |
+| TAM ALTIN | yeni-tam | CONVENTION | ALIŞ | SATIŞ | 44000 | 46200 |
+| GREMSE | gremse-altin | NETWORK_VERIFIED | ALIŞ | SATIŞ | 110000 | 115500 |
 
 Çözülemeyen satırlar (tahmin YAPILMADI):
 - ATA - REŞAT LİRA — TEK_SATIRDA_İKİ_ÜRÜN
@@ -130,12 +130,12 @@ gösteren herhangi bir metin bu kalıba uyabilir.
 
 ## Gözlem karşılaştırması
 
-- Gözlem 1-2: 0 fark
-- Gözlem 2-3: 0 fark
+- Gözlem 1-2: 4 fark
+- Gözlem 2-3: 4 fark
 
 ## Dayanıklılık (10 dk)
 
-- Gözlenen güncelleme sayısı: 0
+- Gözlenen güncelleme sayısı: 4
 - Her sorguda yeni tarayıcı AÇILMADI; tek oturum açık tutuldu.
 
 ## Notlar
