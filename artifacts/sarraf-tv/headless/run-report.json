@@ -1,0 +1,139 @@
+{
+  "mode": "headless",
+  "outcome": "PARTIAL_OK",
+  "reason": "4 ürün okundu ve doğrulandı; 8 satır bilerek çözülmedi.",
+  "startedAt": "2026-09-03T14:05:14.982Z",
+  "finishedAt": "2026-09-03T14:14:34.480Z",
+  "durationSeconds": 559,
+  "browserVersion": "151.0.7922.34",
+  "launchOk": true,
+  "launchError": null,
+  "firstPriceMs": 5950,
+  "closeReason": "error",
+  "closeError": "Error: page.waitForTimeout: Page crashed",
+  "captchaInteractionRequired": false,
+  "botProtectionScripts": [
+    "Google reCAPTCHA",
+    "Google reCAPTCHA (kaynak)"
+  ],
+  "screen": {
+    "rowCount": 12,
+    "resolvedCount": 4,
+    "unresolvedCount": 8,
+    "insideIframe": false,
+    "canvasOnly": false,
+    "hiddenMoneyCount": 0,
+    "signature": "headers:buy,sell|rows:12|directional:8",
+    "autoUpdates": 2
+  },
+  "timestamp": {
+    "providerTimestampProven": false,
+    "providerTimestampSource": null,
+    "providerTimestampSample": null,
+    "observedAtKnown": true
+  },
+  "bootstrapCheckedAt": "2026-09-03T14:05:28.099Z",
+  "bootstrapVerifiedLabels": [
+    "ÇEYREK",
+    "YARIM",
+    "TAM ALTIN",
+    "GREMSE"
+  ],
+  "confidence": {
+    "CONVENTION": 3,
+    "NETWORK_VERIFIED": 1
+  },
+  "comparison": [
+    {
+      "pair": "1-2",
+      "differences": 0,
+      "detail": []
+    }
+  ],
+  "snapshots": [
+    {
+      "at": "2026-09-03T14:05:28.099Z",
+      "signature": "headers:buy,sell|rows:12|directional:8",
+      "domQuoteCount": 4,
+      "networkQuoteCount": 4,
+      "unresolved": [
+        {
+          "rawProductName": "ATA - REŞAT LİRA",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "ATA - REŞAT BEŞLİ",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "24 AYAR PAKETLİ",
+          "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+        },
+        {
+          "rawProductName": "KÜLÇE GÜMÜŞ",
+          "reason": "ALTIN_DEĞİL"
+        },
+        {
+          "rawProductName": "HAS",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "22 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "14 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "8 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        }
+      ],
+      "screenMismatches": [],
+      "networkDomMismatches": []
+    },
+    {
+      "at": "2026-09-03T14:10:29.946Z",
+      "signature": "headers:buy,sell|rows:12|directional:8",
+      "domQuoteCount": 4,
+      "networkQuoteCount": 4,
+      "unresolved": [
+        {
+          "rawProductName": "ATA - REŞAT LİRA",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "ATA - REŞAT BEŞLİ",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "24 AYAR PAKETLİ",
+          "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+        },
+        {
+          "rawProductName": "KÜLÇE GÜMÜŞ",
+          "reason": "ALTIN_DEĞİL"
+        },
+        {
+          "rawProductName": "HAS",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "22 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "14 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        },
+        {
+          "rawProductName": "8 AYAR",
+          "reason": "TEK_YÖNLÜ_REFERANS_FİYAT"
+        }
+      ],
+      "screenMismatches": [],
+      "networkDomMismatches": []
+    }
+  ]
+}

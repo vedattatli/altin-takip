@@ -43,7 +43,15 @@ function readCode(file: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-type Guard = "public" | "public-health" | "authenticated" | "usable" | "admin" | "admin-mfa-setup" | "cron";
+type Guard =
+  | "public"
+  | "public-health"
+  | "authenticated"
+  | "usable"
+  | "admin"
+  | "admin-mfa-setup"
+  | "cron"
+  | "worker-hmac";
 
 /** Her uç için BEKLENEN guard. Yeni uç eklenince bu tablo da güncellenmelidir. */
 const EXPECTED_GUARDS: Record<string, Guard> = {
@@ -76,6 +84,8 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/price-sources/[code]/test/route.ts": "admin",
   "admin/price-sources/quarantine/route.ts": "admin",
   "admin/price-sources/default/route.ts": "admin",
+  "admin/price-sources/experimental/route.ts": "admin",
+  "admin/price-sources/mappings/route.ts": "admin",
   "admin/users/[id]/mfa/route.ts": "admin",
   // İkinci faktör durumunu geçici parolalı yönetici de sorgulayabilmelidir.
   "auth/mfa/route.ts": "authenticated",
@@ -87,6 +97,9 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "cron/price-ingestion/route.ts": "cron",
   // Sağlık kontrolü: kimliksiz yanıt yalındır; ayrıntı yalnızca cron secret'ıyla açılır.
   "health/route.ts": "public-health",
+  // Kalıcı tarayıcı worker'ı: oturum değil, HMAC imzası + nonce + kira jetonu.
+  "internal/price-worker/sarraf-screen/route.ts": "worker-hmac",
+  "internal/price-worker/lease/route.ts": "worker-hmac",
 };
 
 function routeKey(file: string): string {
@@ -94,6 +107,8 @@ function routeKey(file: string): string {
 }
 
 function detectGuard(source: string): Guard {
+  // Worker uçları tarayıcı oturumu yerine HMAC imzasıyla korunur.
+  if (source.includes("verifyWorkerSignature")) return "worker-hmac";
   // Sağlık ucu secret'ı YALNIZCA ayrıntı seviyesini açar; erişimi kısıtlamaz.
   if (source.includes("detailAuthorized")) return "public-health";
   // Makine uçları tarayıcı oturumu yerine paylaşılan secret ile korunur.
@@ -125,12 +140,17 @@ describe("API yetkilendirme matrisi", () => {
       const source = readFileSync(file, "utf8");
       // Tarayıcı uçları apiRoute, makine (cron) uçları machineRoute kullanır.
       // İkisi de merkezîdir; ham handler export edilmesi yasaktır.
-      const wrapped = source.includes("apiRoute") || source.includes("machineRoute");
+      // Worker uçları kendi imza doğrulamasını yapar; merkezî sarmalayıcı yerine
+      // `verifyWorkerSignature` + nonce + kira jetonu zinciri kullanılır.
+      const wrapped =
+        source.includes("apiRoute") ||
+        source.includes("machineRoute") ||
+        source.includes("verifyWorkerSignature");
       expect(wrapped, `${routeKey(file)} merkezi sarmalayıcı kullanmalı`).toBe(true);
-      // Ham export edilmiş handler kalmamalı; hepsi sarmalayıcıdan geçmeli.
-      expect(source, routeKey(file)).not.toMatch(
-        /export async function (GET|POST|PUT|PATCH|DELETE)/,
-      );
+      // Ham export edilmiş handler yalnızca imzalı worker uçlarında olabilir.
+      if (!source.includes("verifyWorkerSignature")) {
+        expect(source, routeKey(file)).not.toMatch(/export async function (GET|POST|PUT|PATCH|DELETE)/);
+      }
     }
   });
 

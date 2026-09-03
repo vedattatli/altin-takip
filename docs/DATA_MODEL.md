@@ -507,3 +507,34 @@ saklanmaz.
 
 **"Son kayıt kazanır" davranışı yoktur:** aynı kanonik ürün bir koşumda iki kez gelirse ilk
 kayıt korunur, ikincisi karantinaya yazılır ve koşum `PARTIAL` olur.
+
+## 25. Sarraf TV özel pilotu (`0017_sarraf_private_pilot.sql`)
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| `price_providers_license_check` | `EXPERIMENTAL_PRIVATE` lisans durumu eklendi. Bu durum "lisanslı" **değildir**; yalnızca özel pilotta, izin listesiyle kullanılabileceği anlamına gelir |
+| `price_providers_type_check` | `SCREEN` sağlayıcı türü eklendi. Ekran gözlemi bir REST sözleşmesi değildir ve öyle etiketlenmez |
+| `price_providers_experimental_not_public` | `EXPERIMENTAL_PRIVATE` kaynak `user_selectable` olamaz. Genel kullanıcı listesine çıkması veritabanı düzeyinde imkânsızdır |
+| `experimental_price_access` | Portföy bazlı izin listesi: kim, hangi kaynağı, ne zamana kadar, hangi gerekçeyle kullanabilir. `(portfolio_id, provider_id)` tekil |
+| `price_mapping_approvals` | Yönetici onaylı ekran→ürün eşlemeleri. Onay anındaki kanıt (bozdurma/yeniden alım fiyatı, gözlem zamanı) saklanır; **ham payload saklanmaz**. Güven yalnızca `OPERATOR_VERIFIED` veya `GROUPED_EXPLICIT` olabilir. `(provider_id, raw_label, mapping_version)` tekil — eşleme sürümü değişince onaylar taşınmaz |
+| `price_worker_nonces` | Worker isteklerinin tek kullanımlık nonce kaydı. Aynı nonce ikinci kez kabul edilmez (replay engeli) |
+| `price_worker_leases` | Sağlayıcı başına tek yazar kirası. TTL dolmadan ikinci worker yazamaz |
+| `price_worker_nonce_claim(text, text)` | Nonce'u atomik olarak sahiplenir; ilk çağrı `true`, sonrakiler `false` |
+| `price_worker_lease_acquire(text, text, integer)` | Kirayı alır veya süresi dolmuşsa devralır (`takeover`) |
+| `price_worker_lease_state(text)` | Kirayı kimin tuttuğu, son heartbeat ve etkinlik durumu |
+| `experimental_access_set/allowed/list` | İzin listesini yazar, sorgular ve yönetim ekranına döker. Süresi dolan izin erişim sayılmaz |
+| `price_mapping_approve(...)` | Onay yazar veya geri alır (`revoked_at`) |
+| `price_mapping_approvals_list(text)` | Yönetim ekranı için onay listesi |
+| `price_provider_set_default(text)` (yeniden) | `EXPERIMENTAL_PRIVATE` kaynak global varsayılan yapılamaz → `P0006` |
+| `price_provider_set_flags(...)` (yeniden) | Deneysel kaynak etkinleştirilebilir ama `user_selectable` yapılamaz → `P0006` |
+| `price_preference_set(...)` (yeniden) | `user_selectable` olmayan kaynak, `EXPERIMENTAL_PRIVATE` ise **ve** kullanıcı izin listesindeyse seçilebilir. Diğer kurallar (etkin olma, `REFERENCE_ONLY` yasağı, denetim izi) aynen korunur |
+| `price_providers_sync(jsonb)` (yeniden) | Katalog eşitlemesi deneysel kaynağı otomatik kapatmaz; ama `user_selectable` kuralı olduğu gibi kalır — deneysel kaynak asla genel listeye giremez |
+| `price_ingestion_apply(...)` (yeniden) | `EXPERIMENTAL_PRIVATE` kaynak fiyat yazabilir; kalite kapısı kuralları değişmeden uygulanır |
+| `admin_audit_logs_action_check` | `price.experimental_access` ve `price.mapping_approve` eklendi (yönetici işlemleri). Kısıt ayrıca `price.worker_ingest` değerine izin verir ama kod bunu **yazmaz**: worker bir yönetici değildir; worker yazmalarının izi `price_ingestion_runs` tablosundadır (koşum anahtarı, durum, kabul/karantina sayıları) |
+
+Dört pilot tablosunun tamamı istemciye kapalıdır: `anon` ve `authenticated`
+okuyamaz, hiçbir rol doğrudan yazamaz. Erişim yalnızca `service_role`'un
+çağırdığı RPC'ler üzerindendir.
+
+**Not:** Varsayılan ACL birleşmesi bu tablolara `authenticated` için `SELECT`
+bırakmıştı; `0017` bunu açıkça geri alır. pgTAP bu durumu ayrıca denetler.

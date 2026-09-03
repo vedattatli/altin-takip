@@ -27,7 +27,22 @@ import { join, relative, sep } from "node:path";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 const OUT_DIR = "dist";
-const BASENAME = "Altin-Takip-Source";
+/**
+ * Paket adı `--name` ile değiştirilebilir; nihai teslimde
+ * `Altin-Takip-Final-Source` kullanılır. Ad yalnızca harf, rakam ve tire
+ * içerebilir — yol ayracı veya `..` kabul edilmez.
+ */
+function readBasename() {
+  const index = process.argv.indexOf("--name");
+  if (index === -1 || index + 1 >= process.argv.length) return "Altin-Takip-Source";
+  const value = process.argv[index + 1] ?? "";
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(value)) {
+    throw new Error(`Geçersiz paket adı: ${value}`);
+  }
+  return value;
+}
+
+const BASENAME = readBasename();
 const ZIP_PATH = join(OUT_DIR, `${BASENAME}.zip`);
 const SHA_PATH = `${ZIP_PATH}.sha256`;
 const MANIFEST_PATH = join(OUT_DIR, `${BASENAME}.manifest.txt`);
@@ -96,6 +111,7 @@ export const REQUIRED = [
   "supabase/migrations/0014_price_rpc.sql",
   "supabase/migrations/0015_admin_mfa.sql",
   "supabase/migrations/0016_price_runtime_integrity.sql",
+  "supabase/migrations/0017_sarraf_private_pilot.sql",
   "supabase/setup/maintenance-cron.sql",
   "supabase/tests/rls.test.sql",
   "src/prices/contract.ts",
@@ -108,6 +124,19 @@ export const REQUIRED = [
   "docs/PRICE_PROVIDERS.md",
   "docs/PRICE_RUNTIME_INTEGRITY.md",
   "docs/RUNBOOKS.md",
+  "docs/FINAL_DEPLOYMENT.md",
+  "docs/ADMIN_QUICK_START.md",
+  "docs/USER_QUICK_START.md",
+  "docs/PRICE_SOURCE_STATUS.md",
+  "docs/OPERATIONS_RUNBOOK.md",
+  "src/server/security/worker-signature.ts",
+  "src/server/prices/screen-worker-service.ts",
+  "src/prices/providers/sarraf-tv-screen-mapping.ts",
+  "src/prices/providers/sarraf-tv-screen-collector.ts",
+  "services/sarraf-screen-worker/Dockerfile",
+  "services/sarraf-screen-worker/src/index.ts",
+  "services/sarraf-screen-worker/src/policy.ts",
+  "services/sarraf-screen-worker/src/signing.ts",
 ];
 
 /** Pakette bulunmaMASI gereken desenler. */

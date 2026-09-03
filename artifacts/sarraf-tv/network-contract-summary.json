@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-09-03T14:14:34.482Z",
+  "mode": "headless",
+  "note": "Yalnızca GÖZLEM. Bu uçlar tarayıcı dışında çağrılmadı, tekrar oynatılmadı. Değerler varsayılan olarak yazılmaz; hassas alanlar REDACTED işaretlidir.",
+  "priceListPath": "interactive.sarraf.pro/price/list",
+  "priceRowCount": 0,
+  "answers": {
+    "feedsPriceTable": null,
+    "hasProductTitle": false,
+    "hasSeparateBuySell": false,
+    "hasNewOldDistinction": false,
+    "ataResatSeparated": false,
+    "singlePriceDirectionKnown": false,
+    "hasUpstreamTimestamp": false,
+    "currencyExplicit": false
+  },
+  "contract": []
+}

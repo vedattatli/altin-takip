@@ -21,6 +21,11 @@ import {
   SARRAFPRO_MAPPING_VERSION,
 } from "./mappings";
 import { PrototypeJsonProvider } from "./rest-provider";
+import {
+  SCREEN_OBSERVATION_MAX_AGE_MS,
+  screenCollectorEnabled,
+} from "./sarraf-tv-screen-collector";
+import { SARRAF_TV_SCREEN_MAPPING_VERSION } from "./sarraf-tv-screen-mapping";
 
 /**
  * SAĞLAYICI FABRİKASI
@@ -177,6 +182,68 @@ export function createHasfiyatProvider(): CanonicalPriceProvider {
   });
 }
 
+/**
+ * Sarraf TV Kayseri ekran gözlemi.
+ *
+ * KENDİ BAŞINA VERİ ÇEKMEZ: değerler kalıcı bir tarayıcı worker'ından imzalı
+ * makine ucuyla gelir. `fetchSnapshot` bilinçli olarak "unavailable" döner ki
+ * zamanlanmış alım bu kaynağı yanlışlıkla çekmeye çalışmasın.
+ */
+class ScreenObservationProvider extends BaseProvider {
+  constructor() {
+    super({
+      descriptor: requireProviderDescriptor("sarraf-tv-kayseri-screen"),
+      mapping: {},
+      mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
+      staleAfterMs: SCREEN_OBSERVATION_MAX_AGE_MS,
+    });
+  }
+
+  licenseStatus(): LicenseStatus {
+    // Lisanslı SAYILMAZ. Kapalıysa yapılandırılmamış kabul edilir.
+    return screenCollectorEnabled() ? "EXPERIMENTAL_PRIVATE" : "NOT_CONFIGURED";
+  }
+
+  validateConfiguration(): ProviderConfigValidation {
+    if (!screenCollectorEnabled()) {
+      return {
+        ok: false,
+        licenseStatus: "NOT_CONFIGURED",
+        issues: [
+          {
+            variable: "PRICE_EXPERIMENTAL_SARRAF_SCREEN",
+            message: "Deneysel ekran kaynağı bu ortamda kapalıdır (üretim dağıtımında zaten açılamaz).",
+          },
+        ],
+      };
+    }
+    const missing = this.missingEnv(["PRICE_SCREEN_WORKER_SECRET"]);
+    if (missing.length > 0) return { ok: false, licenseStatus: "NOT_CONFIGURED", issues: missing };
+    return { ok: true, licenseStatus: "EXPERIMENTAL_PRIVATE", issues: [] };
+  }
+
+  listSupportedProducts(): readonly string[] {
+    return [];
+  }
+
+  normalizeQuote(): NormalizedQuote | null {
+    // Normalizasyon worker gözlemi üzerinden `collectScreenQuotes` ile yapılır.
+    return null;
+  }
+
+  async fetchSnapshot(_productIds: readonly string[], options: FetchOptions = {}): Promise<ProviderSnapshot> {
+    return this.unavailableSnapshot(
+      "Bu kaynak sunucudan çekilmez; değerler kalıcı tarayıcı worker'ından imzalı uçla gelir.",
+      "EXTERNAL_WORKER_REQUIRED",
+      options,
+    );
+  }
+}
+
+export function createSarrafTvScreenProvider(): CanonicalPriceProvider {
+  return new ScreenObservationProvider();
+}
+
 /** Yalnızca metadata: resmî sözleşme ve izin gelene kadar kapalı. */
 export function createAltinkaynakDirectProvider(): CanonicalPriceProvider {
   return new DisabledProvider(requireProviderDescriptor("altinkaynak-direct"), "LICENSE_REQUIRED");
@@ -217,6 +284,8 @@ export function createProvider(providerId: string): CanonicalPriceProvider | nul
       return createHaremDirectProvider();
     case "bist-reference":
       return createBistReferenceProvider();
+    case "sarraf-tv-kayseri-screen":
+      return createSarrafTvScreenProvider();
     default:
       return null;
   }

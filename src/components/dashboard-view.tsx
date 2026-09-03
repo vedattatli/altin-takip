@@ -70,7 +70,7 @@ function CostQualityBadge({ holding }: { holding: HoldingView }) {
   );
 }
 
-function HoldingRow({ holding }: { holding: HoldingView }) {
+function HoldingRow({ holding, screenSource = false }: { holding: HoldingView; screenSource?: boolean }) {
   const { product, position, quote } = holding;
   const priced = holding.priceAvailable && holding.liquidationValue !== null;
 
@@ -119,7 +119,9 @@ function HoldingRow({ holding }: { holding: HoldingView }) {
         </p>
       ) : (
         <p className="mt-1.5 text-xs text-muted">
-          Bu ürün için kullanılabilir fiyat yok; değerleme ve gerçekleşmemiş K/Z hesaplanmadı.
+          {screenSource
+            ? "Bu ürün için güvenilir Kayseri fiyatı alınamıyor; değerleme ve gerçekleşmemiş K/Z hesaplanmadı."
+            : "Bu ürün için kullanılabilir fiyat yok; değerleme ve gerçekleşmemiş K/Z hesaplanmadı."}
         </p>
       )}
       {!dec(position.realizedPnl).isZero() ? (
@@ -362,7 +364,11 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               {summary.holdings
                 .filter((holding) => dec(holding.position.quantity).greaterThan(0))
                 .map((holding) => (
-                  <HoldingRow key={holding.product.id} holding={holding} />
+                  <HoldingRow
+                    key={holding.product.id}
+                    holding={holding}
+                    screenSource={summary.snapshot?.provider.id === "sarraf-tv-kayseri-screen"}
+                  />
                 ))}
             </ul>
           )}

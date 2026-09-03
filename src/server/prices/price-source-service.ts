@@ -1,3 +1,4 @@
+import { numberFromEnv } from "@/lib/env";
 import "server-only";
 
 import { MOCK_PROVIDER_META } from "@/prices/mock-provider";
@@ -22,9 +23,17 @@ import { ProviderNotSelectableError, type PriceSourceEventRow, type ProviderQuot
 
 const DEFAULT_STALE_AFTER_MS = 5 * 60_000;
 
+/**
+ * Deneysel ekran kaynağı.
+ *
+ * Bu kaynak genel "kullanıcıya açık" listesine GİREMEZ (veritabanı kısıtı da
+ * engeller). Erişim yalnızca yöneticinin portföy bazlı izin listesiyle verilir;
+ * kontrol her okumada sunucuda yapılır.
+ */
+const EXPERIMENTAL_SCREEN_CODE = "sarraf-tv-kayseri-screen";
+
 function staleAfterMs(): number {
-  const raw = Number(process.env.PRICE_STALE_AFTER_MS ?? DEFAULT_STALE_AFTER_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_STALE_AFTER_MS;
+  return numberFromEnv("PRICE_STALE_AFTER_MS", DEFAULT_STALE_AFTER_MS, { min: 1 });
 }
 
 export interface ActiveSourceView {
@@ -90,8 +99,19 @@ export class PriceSourceService {
       this.backend.listPriceProviders(),
       this.backend.getPricePreference(ownScope(actor)),
     ]);
+    // Deneysel kaynak yalnızca izin listesindeki kullanıcıya görünür.
+    const experimentalAllowed = await this.backend
+      .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
+      .catch(() => false);
+
     return providers
-      .filter((provider) => provider.enabled && provider.userSelectable)
+      .filter((provider) => {
+        if (!provider.enabled) return false;
+        if (provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
+          return provider.code === EXPERIMENTAL_SCREEN_CODE && experimentalAllowed;
+        }
+        return provider.userSelectable;
+      })
       .filter((provider) => !provider.capabilities.includes("REFERENCE_ONLY"))
       .map((provider) => ({
         providerCode: provider.code,
@@ -123,7 +143,15 @@ export class PriceSourceService {
   private async resolveProviderCodeForScope(scope: DataScope): Promise<string | null> {
     await this.ensureCatalog();
     const preference = await this.backend.getPricePreference(scope);
-    if (preference.providerCode) return preference.providerCode;
+    if (preference.providerCode) {
+      if (preference.providerCode !== EXPERIMENTAL_SCREEN_CODE) return preference.providerCode;
+      // İzin geri alındıysa deneysel kaynak kullanılmaz. BAŞKA KAYNAĞA DA
+      // GEÇİLMEZ: kaynak yok sayılır ve değerleme boş kalır.
+      const allowed = await this.backend
+        .experimentalAccessAllowed(scope.userId, EXPERIMENTAL_SCREEN_CODE)
+        .catch(() => false);
+      return allowed ? preference.providerCode : null;
+    }
 
     const explicitDefault = await this.backend.defaultPriceProvider();
     if (!explicitDefault) return null;
@@ -278,6 +306,14 @@ export class PriceSourceService {
     const view = describeProvider(providerCode);
     if (!view) throw notFound("Fiyat kaynağı bulunamadı.");
     await this.ensureCatalog();
+    if (providerCode === EXPERIMENTAL_SCREEN_CODE) {
+      const allowed = await this.backend
+        .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
+        .catch(() => false);
+      if (!allowed) {
+        throw conflict("Bu deneysel kaynak sizin için açık değil. Yönetici izin vermelidir.");
+      }
+    }
     try {
       const result = await this.backend.setPricePreference(
         ownScope(actor),

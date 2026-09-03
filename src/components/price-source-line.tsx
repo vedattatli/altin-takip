@@ -75,6 +75,9 @@ export function PriceSourceLine({
   const now = useClientClock(30_000);
   const stale = snapshot && now !== null ? isSnapshotStale(snapshot, now) : false;
   const unavailable = !snapshot || snapshot.status === "unavailable";
+  // Ekran gözlemi kaynağı kendi fiyat zamanını YAYIMLAMIYOR; elimizde yalnızca
+  // gözlem anımız var. Bunu "kaynak zamanı" gibi göstermek yanıltıcı olurdu.
+  const observedOnly = snapshot?.provider.id === "sarraf-tv-kayseri-screen";
 
   return (
     <div data-testid="price-source" className="border-t border-line pt-3">
@@ -93,9 +96,15 @@ export function PriceSourceLine({
         <Dot />
         <span
           className={cx(stale && "text-[var(--notice)]")}
-          title={snapshot ? formatDateTime(snapshot.fetchedAt) : undefined}
+          title={
+            snapshot
+              ? observedOnly
+                ? `${formatDateTime(snapshot.fetchedAt)} — kaynak ayrı bir fiyat zaman damgası yayımlamadığı için tarayıcıda gözlendiği zaman gösterilir.`
+                : formatDateTime(snapshot.fetchedAt)
+              : undefined
+          }
         >
-          Son fiyat:{" "}
+          {observedOnly ? "Son ekran gözlemi" : "Son fiyat"}:{" "}
           {snapshot && now !== null
             ? `${formatRelativeTime(snapshot.fetchedAt, now)}${stale ? " (bayat)" : ""}`
             : "—"}

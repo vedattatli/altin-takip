@@ -149,6 +149,33 @@ const MOCK: ProviderDescriptor = {
   devOnly: true,
 };
 
+/**
+ * Sarraf TV Kayseri EKRAN GÖZLEMİ — deneysel, özel pilot.
+ *
+ * `sarraf-pro-kayseri` ile AYRI bir kimliktir. Biri ileride gelebilecek yetkili
+ * API sözleşmesi, diğeri tarayıcıda gözlenen ekrandır. Aynı kimlik altında
+ * tutulsalardı gözlem verisi lisanslı veri gibi görünürdü.
+ *
+ * `REDISTRIBUTION_LICENSED` yeteneği BİLEREK YOKTUR ve lisans durumu asla
+ * LICENSED olmaz.
+ */
+const SARRAF_TV_SCREEN: ProviderDescriptor = {
+  providerId: "sarraf-tv-kayseri-screen",
+  displayName: MARKET_DISPLAY_NAMES.kayseri,
+  technicalName: "Sarraf TV Kayseri ekran gözlemi",
+  marketId: "kayseri",
+  marketDisplayName: MARKET_DISPLAY_NAMES.kayseri,
+  providerType: "SCREEN",
+  capabilities: ["PRODUCT_LEVEL", "LOCAL_MARKET", "EXPERIMENTAL_SCREEN"],
+  referenceUrl: "https://kaysarder.org.tr/altin-fiyatlari",
+  attribution:
+    "Kayseri Sarraflar ve Kuyumcular Derneği fiyat sayfasından açılan Sarraf TV Kayseri ekranının " +
+    "normal tarayıcı oturumundaki gözlemidir. RESMÎ API DEĞİLDİR, lisanslı veri değildir; " +
+    "yalnızca yöneticinin izin verdiği portföylerde ve özel pilotta kullanılır.",
+  requiredEnv: ["PRICE_EXPERIMENTAL_SARRAF_SCREEN", "PRICE_SCREEN_WORKER_SECRET"],
+  devOnly: false,
+};
+
 export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   MOCK,
   SARRAF_PRO,
@@ -157,6 +184,7 @@ export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   ALTINKAYNAK_DIRECT,
   HAREM_DIRECT,
   BIST_REFERENCE,
+  SARRAF_TV_SCREEN,
 ];
 
 const BY_ID = new Map(PROVIDER_DESCRIPTORS.map((descriptor) => [descriptor.providerId, descriptor]));

@@ -493,3 +493,102 @@ Cihaz B (görünür + çevrimiçi) ── ~9 sn ──▶ GET /api/portfolio/ver
   için gerçekten kullanılabilir quote kapsamından hesaplanır; `portfolioState`
   (`NEVER_USED` / `CLOSED` / `OPEN`) defter etkinliğinden. Arayüz kararlarını bu iki alan verir;
   sağlayıcı meta durumu (`priceStatus`) yalnızca bilgi amaçlıdır.
+
+## 14. Ekran gözlemi worker'ı (Sprint 3.2 — özel pilot)
+
+Kayseri ekran kaynağı bir REST API değildir: nihai bayi fiyatları tarayıcıda
+hesaplanır, ağ yanıtında bulunmaz. Bu yüzden **canlı değerin tek kanalı DOM**,
+ağ yanıtı ise yalnızca açılışta sözleşme ve yön doğrulama kanalıdır.
+
+Kalıcı bir tarayıcı gerektiği için toplayıcı uygulamanın içinde çalışamaz
+(Vercel fonksiyonu kalıcı Chromium barındıramaz). Ayrı bir servis vardır:
+`services/sarraf-screen-worker/`.
+
+```
+worker container (Railway/Render)
+  ├── kalıcı Chromium (playwright-core, resmî Playwright imajı)
+  ├── açılışta yön doğrulaması (network ↔ DOM), sonra yalnızca DOM
+  ├── her gözlemde ekran imzası: headers:...|rows:N|directional:M
+  └── HMAC imzalı POST
+        ↓
+uygulama (Vercel)
+  ├── machineRoute: oturum yok, çerez yok, yalnızca imza
+  ├── HMAC-SHA256(timestamp \n nonce \n bodySha256 \n workerId), 60 sn tolerans
+  ├── nonce tek kullanımlık (price_worker_nonces)
+  ├── kira jetonu kontrolü (price_worker_leases) — eski jeton reddedilir
+  ├── collectScreenQuotes: yalnızca değerlemeye hazır güvendeki satırlar
+  ├── merkezî kalite kapısı (evaluateQuote) — bütün kaynaklarla AYNI kapı
+  └── price_ingestion_apply (append-only)
+```
+
+### Neden worker'da Supabase anahtarı yok
+
+Worker güvenilmeyen bir ağ ortamında, üçüncü taraf bir sayfayı açarak çalışır.
+Elinde yalnızca tek bir yeteneğe izin veren bir HMAC sırrı vardır: imzalı fiyat
+gözlemi göndermek. Veritabanını okuyamaz, defteri göremez, kullanıcı verisine
+erişemez. Ele geçirilse bile yapabileceği en kötü şey, kalite kapısından geçmesi
+gereken bir fiyat önermektir.
+
+### Fail-closed noktaları
+
+| Durum | Sonuç |
+| --- | --- |
+| Sayfa çöktü (renderer) | Oturum ölü işaretlenir, tarayıcı yeniden açılır |
+| Değerlendirme dondu | Zaman aşımı çökme sayılır, tarayıcı yeniden açılır |
+| Ekran imzası değişti | Gözlem yok, fiyat yok |
+| CAPTCHA / etkileşim istendi | Gözlem yok; **çözme denenmez** |
+| Satır okunamadı | Gözlem yok |
+| Kirayı tutmuyor | Yazma reddedilir |
+| Eski kira jetonu | Yazma reddedilir (`LEASE_TOKEN_STALE`) |
+| Nonce tekrarı | Yazma reddedilir |
+| Gözlem 120 sn'den eski | Kalite kapısı reddeder (`OBSERVATION_STALE`) |
+| Eşleme güveni yetersiz | Ürün değerlemeye girmez |
+
+Hiçbirinde eski fiyat "idare etsin" diye kullanılmaz.
+
+### Zaman damgası kökeni
+
+`timestampProvenance` üç değer alır: `UPSTREAM`, `OBSERVED`, `UNKNOWN`.
+Ekran kaynağı `providerTimestamp: null` + `OBSERVED` üretir — kaynağın kendi
+fiyat saati bilinmez, yalnızca gözlem anı bilinir. `UNKNOWN` her koşulda
+reddedilir (`TIMESTAMP_PROVENANCE_UNKNOWN`).
+
+### Dayanıklılık
+
+Worker tarayıcıyı şu durumlarda yeniden başlatır: ilk açılış, bağlantı kopması,
+6 saatlik planlı yenileme, bellek sınırı, üst üste hata (üstel geri çekilme +
+jitter, 60 sn tavan). Karar tek bir saf fonksiyondadır
+(`services/sarraf-screen-worker/src/policy.ts` → `restartReason`), böylece
+tarayıcı olmadan test edilebilir. Sıra kasıtlıdır: ölü bir tarayıcıda "planlı
+yenileme" demek yanlış teşhistir.
+
+`/healthz` **"süreç yaşıyor mu"yu değil "gözlem üretiyor mu"yu** ölçer
+(`healthyForPlatform`). Son 3 aralık (en az 3 dakika) içinde başarılı gözlem
+yoksa `503` döner ve platform container'ı yeniden başlatır. Tek istisna, kirayı
+başka bir worker'ın tuttuğu **yedek** örnektir: o sağlıklıdır ve yeniden
+başlatılmamalıdır. Bu ayrım `lastErrorCode` ile yapılır — `LEASE_NOT_HELD`
+yedeklik, `APP_UNREACHABLE` ise sağlıksızlıktır.
+
+`SIGTERM`/`SIGINT` alındığında tarayıcı düzgün kapatılır. Yeniden başlatma
+sayacı yalnızca GERÇEK yeniden başlatmayı sayar; ilk açılış `browser_start`
+olarak ayrı loglanır ki tek bir kurtarma yönetim ekranında iki restart gibi
+görünmesin.
+
+### Renderer çökmesi neden özel ele alınır
+
+Ölçüm sonucu: hedef sayfa uzun koşumlarda Chromium'u çökertiyor. Çökme
+**sessizdir** — sayfa kapanmaz, tarayıcı bağlantısı kopmaz. Bu yüzden
+`ScreenSession.alive` ayrı bir `crashed` bayrağı taşır ve bayrak üç bağımsız
+işaretten herhangi biriyle kalkar:
+
+1. `page.on("crash")` olayı,
+2. `evaluate` hatasında çökme imzası (`Target crashed` / `Page crashed`),
+3. değerlendirme zaman aşımı — **donma da çökme sayılır**.
+
+Üçüncüsü zorunludur: çökmüş sayfada `evaluate` her ortamda hata atmıyor.
+Worker imajındaki Chromium sürümünde donuyor. Zaman aşımı olmadan worker ölü
+sayfada sonsuza kadar askıda kalır ve hiç log üretmez.
+
+Fizibilite aracı worker ile **aynı** launch argümanlarını kullanır
+(`--no-sandbox`, `--disable-dev-shm-usage`). Aksi hâlde araç, pilotun gerçekte
+çalıştırdığı yapılandırmayı değil başka bir yapılandırmayı ölçmüş olurdu.

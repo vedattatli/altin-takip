@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-09-03T14:14:34.482Z",
+  "mode": "headless",
+  "snapshots": [
+    {
+      "at": "2026-09-03T14:05:28.099Z",
+      "networkQuoteCount": 4,
+      "domQuoteCount": 4,
+      "mismatches": []
+    },
+    {
+      "at": "2026-09-03T14:10:29.946Z",
+      "networkQuoteCount": 4,
+      "domQuoteCount": 4,
+      "mismatches": []
+    }
+  ]
+}

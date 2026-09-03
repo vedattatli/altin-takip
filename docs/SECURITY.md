@@ -748,3 +748,100 @@ olarak kapalıdır. Yalnızca `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` iken ve ü
 DIŞINDA çalışır. Veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir; `LICENSED`, `OFFICIAL_API` veya
 `SARRAF_PRO_API` olarak etiketlenmez. CAPTCHA/etkileşim istenirse `BLOCKED` döner ve aşma
 denenmez; ekran imzası değişirse fail closed olur ve hiç fiyat üretilmez.
+
+## 33. Worker makine ucu (Sprint 3.2)
+
+`/api/internal/price-worker/sarraf-screen` ve `.../lease` uçları tarayıcı için
+değildir. Oturum çerezi kabul etmez, CSRF çerezi üretmez (`MACHINE_PATHS`),
+kimlik yalnızca imzadan gelir.
+
+### İmza formatı
+
+```
+HMAC-SHA256( timestamp \n nonce \n bodySha256 \n workerId )
+```
+
+| Kontrol | Reddetme kodu |
+| --- | --- |
+| Secret tanımsız | `MISSING_SECRET` (uç kapalıdır) |
+| İmza uyuşmuyor | `SIGNATURE_MISMATCH` |
+| Gövde hash'i uyuşmuyor | `BODY_HASH_MISMATCH` |
+| Zaman damgası ±60 sn dışında | `TIMESTAMP_OUT_OF_RANGE` |
+| Nonce daha önce kullanılmış | `NONCE_REPLAY` |
+| Kirayı tutmuyor | `LEASE_NOT_HELD` |
+| Eski kira jetonu | `LEASE_TOKEN_STALE` |
+
+İmza karşılaştırması sabit zamanlıdır. Gövde hash'i imzaya dâhildir, yani
+imzalı bir isteğin gövdesi değiştirilemez.
+
+İmza üretimi iki ayrı dosyadadır (worker `server-only` içe aktaramaz):
+`services/sarraf-screen-worker/src/signing.ts` ve
+`src/server/security/worker-signature.ts`. `tests/private-pilot.test.ts` ikisinin
+birebir uyumlu kaldığını doğrular; biri değişip diğeri unutulursa test kırılır.
+
+### Worker'ın yetki sınırı
+
+Worker'a **Supabase anahtarı verilmez**. Ortam değişkenleri arasında
+`SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` veya `service_role` bulunmaz.
+Bu bir konvansiyon değil, testle denetlenen bir kuraldır: worker kaynak
+dosyaları (yorumlar ayıklanarak) bu adlara karşı taranır.
+
+Worker'ın tek yeteneği imzalı fiyat gözlemi göndermektir. Gönderdiği fiyat
+diğer bütün kaynaklarla **aynı** kalite kapısından geçer; ayrıcalığı yoktur.
+
+### Tek yazar garantisi
+
+Kira (lease) sağlayıcı başına tek yazar sağlar. Kira jetonu kiranın alınma
+zamanından türetilir; eski jetonla gelen yazma reddedilir. Böylece ağ gecikmesi
+nedeniyle geciken eski bir gözlem, yeni gözlemin üzerine yazamaz.
+
+## 34. Deneysel kaynak erişimi çift katmanlıdır
+
+`EXPERIMENTAL_PRIVATE` kaynak genel kullanıcı listesine **çıkamaz**; kısıt
+veritabanındadır (`price_providers_experimental_not_public`).
+
+Erişim iki yerde birden doğrulanır:
+
+1. Uygulama katmanı: `PriceSourceService` izin listesini sorgular.
+2. Veritabanı: `price_preference_set` RPC'si `experimental_access_allowed`
+   çağırır ve izinsiz seçimi `P0006` ile reddeder.
+
+Arayüzün kaynağı göstermesi tek başına yetki sayılmaz. İzin geri alındığında
+veya süresi dolduğunda kullanıcı başka bir kaynağa **sessizce düşürülmez** —
+fiyat gösterilmez ve nedeni yazılır.
+
+### Ne saklanmaz
+
+Fizibilite ve pilot çalışmaları sırasında şunlar **hiçbir yerde saklanmaz**:
+sayfanın JWT'si, `screenPass` değeri, çerezler, `Authorization` başlıkları,
+reCAPTCHA token'ları, sorgu içindeki anahtarlar. Ağ özetleri deny-by-default
+şema özeti olarak çıkarılır; `token|key|password|id|url` kalıbına uyan alan
+adları redakte edilir (`tools/experimental/sarraf-tv-kayseri/network-contract.ts`).
+
+## 35. Ortam değişkeni okuma: sessiz sıfıra düşme yasağı
+
+`Number(process.env.X ?? "0.15")` kalıbı sessiz bir arıza üretir. `??` yalnızca
+`undefined` ve `null` için devreye girer; değişken **tanımlı ama boş** ise
+(`PRICE_MAX_TRY=`) varsayılan atlanır ve `Number("")` **0** döner.
+
+Bu, projedeki "sessiz fallback yasağı" ilkesinin ihlalidir ve gerçek bir
+güvenlik etkisi vardır:
+
+| Değişken boş bırakılırsa | Eski davranış | Sonuç |
+| --- | --- | --- |
+| `PRICE_MAX_TRY=` | Üst sınır 0 | Bütün fiyatlar reddedilir |
+| `PRICE_MIN_TRY=` | Alt sınır 0 | Sıfıra yakın saçma fiyatlar kabul edilir |
+| `PRICE_MAX_CHANGE_RATIO=` | Eşik 0 | Devre kesici anlamını yitirir |
+| `WORKER_ID=` | Kimlik boş metin | Kira boş kimliğe yazılır; iki worker "sahip" görünebilir |
+
+Hiçbiri log üretmez ve dağıtım başarılı görünür.
+
+**Kural:** sayısal ve metinsel ayarlar `src/lib/env.ts` üzerinden okunur
+(`numberFromEnv`, `stringFromEnv`, `flagFromEnv`). Boş/boşluk değer
+"ayarlanmamış" sayılır; geçersiz veya sınır dışı değer varsayılana düşer.
+Worker `@/` alias'ını kullanamadığı için aynı kuralın kopyası
+`services/sarraf-screen-worker/src/policy.ts` içindedir ve iki kopyanın aynı
+davrandığı testle doğrulanır.
+
+`tests/env-parsing.test.ts` ham `Number(process.env...)` kalıbının `src/` ve
+`services/` altına geri gelmesini engeller.

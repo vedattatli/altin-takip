@@ -9,7 +9,9 @@ geliştirilen responsive web uygulaması ve PWA.
 - Excel, Python veya yönetici izni gerekmez.
 - Hesaplar **yalnızca yönetici tarafından** oluşturulur; herkese açık kayıt yoktur.
 - Giriş **kullanıcı adı + parola** iledir. E-posta, telefon, OTP veya sihirli bağlantı kullanılmaz.
-- Fiyatlar bu sürümde **test verisidir**; gerçek piyasa verisi değildir.
+- Fiyatlar için lisanslı bir kaynak **yoktur**. Özel pilotta yalnızca Kayseri ekran
+  gözlemi ve sınırlı sayıda ürün canlıdır; desteklenmeyen üründe fiyat **uydurulmaz**,
+  açık uyarı gösterilir. Ayrıntı: [docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md).
 
 Ürün adı tek bir yerden yönetilir: [`src/config/app.config.ts`](src/config/app.config.ts).
 
@@ -169,7 +171,8 @@ durumundadır ve veri çekmez.
 
 | Kaynak | Piyasa | Durum |
 | --- | --- | --- |
-| Test Verisi | Test | Yalnızca geliştirme; üretimde kapalı |
+| Test Verisi (MARKET_BASELINE) | Test | Yalnızca geliştirme; üretimde kapalı |
+| Sarraf TV Kayseri (ekran gözlemi) | Kayseri | **Özel pilot** — `EXPERIMENTAL_PRIVATE`, lisanssız, izin listesiyle, sınırlı ürün |
 | Kayseri Yerel Piyasa (Sarraf Pro — KAYSARDER ekranı) | Kayseri | Yetkili API/XML sözleşmesi bekleniyor |
 | AltinAPI — bağımsız veri sağlayıcısı | Genel Türkiye | Anahtar ve lisans bekleniyor |
 | Hasfiyat — çoklu kaynak | Çoklu Kaynak | Anahtar ve lisans bekleniyor |
@@ -179,13 +182,17 @@ durumundadır ve veri çekmez.
 - Alış ve satış fiyatları birbirine çevrilmez; ayrı alanlardır.
 - Bir sağlayıcı çalışmadığında başka bir piyasanın fiyatına **sessizce geçilmez**.
 - Bayat veri "güncel" diye sunulmaz; son fiyat zamanı her zaman görünür.
-- Hiçbir siteden izinsiz veri çekilmez, CAPTCHA aşılmaz, gizli WebSocket reverse engineer edilmez.
+- CAPTCHA aşılmaz, bot koruması atlatılmaz, gizli WebSocket reverse engineer edilmez.
+  Ekran gözlemi kaynağı normal tarayıcı oturumunda görünen değerleri okur; ticari yayın
+  hakkı vermez ve "resmî API" olarak etiketlenmez.
 - Fiyatlar merkezî sunucu alımıyla toplanır (varsayılan 60 sn); tarayıcı sağlayıcıya bağlanmaz.
 - API anahtarları yalnızca sunucudadır; istemci paketine veya veritabanına girmez.
 - Kaynak değişimi geçmiş işlem maliyetlerini, `MARKET_BASELINE` snapshot'larını ve gerçekleşmiş
   kâr/zararı değiştirmez; yalnızca güncel değerlemeyi etkiler ve açık onay ister.
 
 Ayrıntı, katalog ve bir kaynağı üretimde açma adımları: [docs/PRICE_PROVIDERS.md](docs/PRICE_PROVIDERS.md).
+Pilotta hangi ürünün gerçekten çalıştığı ve neyin çalışmadığı:
+[docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md).
 
 ---
 
@@ -304,5 +311,10 @@ senkronize olmaz.
 | [docs/SARRAF_TV_FEASIBILITY.md](docs/SARRAF_TV_FEASIBILITY.md) | Sarraf TV Kayseri ekran fizibilitesi (araç tarafından otomatik üretilir) |
 | [docs/RUNBOOKS.md](docs/RUNBOOKS.md) | Sağlayıcı kesintisi, karantina, yedekleme/geri yükleme, MFA kurtarma, sağlık kontrolü |
 | [docs/STAGING.md](docs/STAGING.md) | Staging kurulumu, araçlar, telefon–PC senkronizasyonu |
+| [docs/FINAL_DEPLOYMENT.md](docs/FINAL_DEPLOYMENT.md) | Özel pilotu sıfırdan ayağa kaldırma adımları |
+| [docs/ADMIN_QUICK_START.md](docs/ADMIN_QUICK_START.md) | Yönetici: hesap açma, MFA, izin listesi, eşleme onayı |
+| [docs/USER_QUICK_START.md](docs/USER_QUICK_START.md) | Kullanıcı: giriş, işlem girme, K/Z, fiyat uyarıları |
+| [docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md) | Fiyat kaynaklarının ölçülmüş durumu ve sınırları |
+| [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | Belirti → neden → yapılacak: worker, karantina, geri alma |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sonraki sprintler |
 | [CLAUDE.md](CLAUDE.md) | Bu depoda çalışan yapay zekâ ajanları için kurallar |

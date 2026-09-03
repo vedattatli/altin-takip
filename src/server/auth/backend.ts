@@ -18,6 +18,9 @@ import type {
   ProviderStateRow,
   ProviderSyncInput,
   QuarantineRow,
+  ExperimentalAccessRow,
+  MappingApprovalRow,
+  WorkerLeaseState,
 } from "@/server/prices/types";
 import type { DataScope } from "./actor";
 
@@ -335,6 +338,45 @@ export interface AuthBackend {
   setDefaultPriceProvider(code: string | null): Promise<string | null>;
   /** Açık global varsayılan kaynak (yoksa null). */
   defaultPriceProvider(): Promise<string | null>;
+
+  // --- Deneysel özel pilot (Sprint 3.2) ---
+  /** Yönetici, bir kullanıcının portföyüne deneysel kaynak erişimi verir/kaldırır. */
+  setExperimentalAccess(
+    userId: string,
+    code: string,
+    enabled: boolean,
+    adminId: string,
+    reason: string,
+    expiresAt: string | null,
+  ): Promise<void>;
+  /** Bu kullanıcının portföyü deneysel kaynağı kullanabilir mi? */
+  experimentalAccessAllowed(userId: string, code: string): Promise<boolean>;
+  /** İzin listesi (yalnızca yönetim). */
+  listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]>;
+  /** Yönetici ekran eşlemesini onaylar veya geri alır. */
+  approvePriceMapping(input: {
+    code: string;
+    rawLabel: string;
+    canonicalProductId: string;
+    mappingVersion: string;
+    adminId: string;
+    evidenceLiquidation: string | null;
+    evidenceReplacement: string | null;
+    evidenceObservedAt: string | null;
+    revoke: boolean;
+  }): Promise<void>;
+  /** Etkin eşleme onayları. */
+  listMappingApprovals(code: string): Promise<MappingApprovalRow[]>;
+  /** Worker nonce'unu tek kullanımlık talep eder; tekrar gönderilirse false. */
+  claimWorkerNonce(nonce: string, workerId: string): Promise<boolean>;
+  /** Aynı sağlayıcı için tek worker garantisi. */
+  acquireWorkerLease(
+    code: string,
+    workerId: string,
+    ttlSeconds: number,
+  ): Promise<{ held: boolean; workerId: string; takeover: boolean }>;
+  /** Kira durumu (yönetim ekranı). */
+  workerLeaseState(code: string): Promise<WorkerLeaseState | null>;
   listPriceSourceEvents(scope: DataScope, limit?: number): Promise<PriceSourceEventRow[]>;
 
   // --- Yönetici ikinci faktörü (Sprint 3) ---

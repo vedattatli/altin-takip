@@ -6,7 +6,7 @@ import {
   type ProviderId,
 } from "./contract";
 import { PROVIDER_DESCRIPTORS } from "./descriptors";
-import { DEV_ONLY_BLOCKED_MESSAGE, devOnlyProviderBlocked } from "./dev-gate";
+import { DEV_ONLY_BLOCKED_MESSAGE, devOnlyProviderBlocked, experimentalScreenAllowed } from "./dev-gate";
 import { createProvider } from "./providers";
 
 /**
@@ -74,6 +74,12 @@ function blockedReasonFor(provider: CanonicalPriceProvider, status: LicenseStatu
       return "Sağlayıcı yapılandırılmadı (API adresi/anahtarı eksik).";
     case "DEV_ONLY":
       return isProduction() ? DEV_ONLY_BLOCKED_MESSAGE : null;
+    case "EXPERIMENTAL_PRIVATE":
+      // Deneysel kaynak genel listede seçilebilir GÖRÜNMEZ. Erişim, yöneticinin
+      // portföy bazlı izin listesiyle ayrıca açılır; bu kontrol sunucudadır.
+      return experimentalScreenAllowed()
+        ? "Deneysel özel pilot kaynağı. Yalnızca yöneticinin izin verdiği portföylerde kullanılabilir."
+        : "Deneysel ekran kaynağı bu ortamda kapalıdır.";
   }
 }
 

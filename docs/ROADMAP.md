@@ -221,16 +221,32 @@ kalan işler tamamen dış sözleşmeye bağlıdır.
 - Sözleşme geldiğinde `src/prices/providers/contracts.ts` içine sağlayıcıya ÖZGÜ sürüm ve
   fixture eklenir; `*_CONTRACT_VERSION` ile beyan edilir. Taslak adapter tek başına yetmez.
 
-## Sarraf TV kapalı pilotu (fizibilite başarılı; karar bekliyor)
+## Sarraf TV özel pilotu (Sprint 3.2 — kuruldu, sınırlı kapsamda çalışıyor)
 
-Ekran normal tarayıcı oturumunda okunabildi ve değerler ekranla birebir doğrulandı.
-Kalan adımlar:
+Ekran normal tarayıcı oturumunda okunabildi; değerler ekranla birebir doğrulandı ve
+ölçüm sonucu `PARTIAL_OK` olarak raporlandı. Durum ve sınırlar:
+[PRICE_SOURCE_STATUS.md](PRICE_SOURCE_STATUS.md)
 
-- Yeni/eski ayrımı yazmayan satırların (ÇEYREK / YARIM / TAM ALTIN) teyidi.
+**Yapıldı**
+
+- Ayrı sağlayıcı kimliği `sarraf-tv-kayseri-screen`, lisans durumu `EXPERIMENTAL_PRIVATE`,
+  sağlayıcı türü `SCREEN`. "Resmî API" olarak etiketlenmez.
+- Eşleme güven modeli; yalnızca `NETWORK_VERIFIED` / `GROUPED_EXPLICIT` /
+  `OPERATOR_VERIFIED` değerlemeye girer.
+- `OBSERVED` zaman politikası: kaynağın kendi fiyat saati bilinmediği için
+  `providerTimestamp: null`; 120 sn'den eski gözlem reddedilir.
+- Kalıcı worker (`services/sarraf-screen-worker/`), Dockerfile, HMAC'li makine ucu,
+  tek yazar kirası ve fencing jetonu, tek kullanımlık nonce.
+- Portföy bazlı izin listesi ve yönetici eşleme onayları (`0017`).
+- Ağ/DOM çift doğrulaması (açılışta yön, sonra DOM), imza değişiminde fail-closed.
+
+**Kalan (pilot kararı gerektirir, kod işi değil)**
+
+- ÇEYREK / YARIM / TAM satırlarının yönetici onayı — teamül tahmini değerlemeye girmez.
 - Tek fiyatlı satırların (HAS, 22/14/8 AYAR) alış mı satış mı olduğunun teyidi.
-- Sayfanın yüklediği bot koruması altyapısının kalıcı toplayıcı için riski.
-- Yayın/lisans izni (ekran gözlemi ticari yayın hakkı vermez).
-- Kararlılık ölçümü: özel staging + KAYSARDER ekranıyla eşzamanlı karşılaştırma.
+- Uzun süreli dayanıklılık ölçümü (son koşumda fiyat değişimi gözlenmedi).
+- Yayın/lisans izni. Ekran gözlemi ticari yayın hakkı **vermez**; kalıcı çözüm
+  lisanslı bir veri sözleşmesidir.
 
 ## Sprint 4 — Ürün derinleştirme
 

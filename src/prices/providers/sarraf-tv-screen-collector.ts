@@ -1,27 +1,31 @@
 import type { MarketId, NormalizedQuote, TimestampProvenance } from "../contract";
-import { SARRAF_TV_SCREEN_MAPPING_VERSION, type MappingConfidence } from "./sarraf-tv-screen-mapping";
+import { experimentalScreenAllowed } from "../dev-gate";
+import {
+  isValuationReady,
+  SARRAF_TV_SCREEN_MAPPING_VERSION,
+  type MappingConfidence,
+} from "./sarraf-tv-screen-mapping";
 
 /**
- * SARRAF TV KAYSERİ EKRAN TOPLAYICISI — DENEYSEL
+ * SARRAF TV KAYSERİ EKRAN GÖZLEMİ — DENEYSEL, ÖZEL PİLOT
  *
- * Fizibilite testi (`npm run price:sarraf-feasibility`) başarılı olduğu için
- * eklendi. Ekran değerleri normal bir tarayıcı oturumunda okunabiliyor ve
- * çıkarılan JSON, ekranda görünen metinle birebir doğrulanıyor.
+ * Ölçülen gerçek: bayi fiyatları tarayıcıda HESAPLANIYOR. Kaynağın REST yanıtı
+ * yalnızca açılışta parametreleri ve başlangıç fiyatını verir; canlı WebSocket
+ * akışı yalnızca GENEL PİYASA kurunu taşır. Nihai Kayseri fiyatı sadece ekranda
+ * bulunur. Bu yüzden değer kanalı DOM'dur ve toplayıcı kalıcı bir tarayıcı
+ * worker'ından beslenir.
  *
  * NE DEĞİLDİR:
  *  - Resmî API değildir. `SARRAF_PRO_API` veya `OFFICIAL_API` diye anılmaz.
  *  - LICENSED değildir; veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir.
- *  - Üretim sağlayıcı kaydına (registry) OTOMATİK EKLENMEZ.
- *  - Kullanıcının tarayıcısında ÇALIŞMAZ; merkezî tek worker olarak tasarlanır.
+ *  - Kullanıcının tarayıcısında çalışmaz.
  *
  * ÇALIŞMA KOŞULLARI:
- *  - Yalnızca `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` iken etkinleşir.
- *  - Gerçek üretim dağıtımında (VERCEL_ENV=production) bu bayrak yok sayılır.
- *  - CAPTCHA veya etkileşim gerekirse UNAVAILABLE döner; aşma DENENMEZ.
- *  - Ekran yapısı beklenen imzaya uymazsa fail closed olur; yanlış fiyat
- *    üretmek yerine hiç fiyat üretmez.
- *
- * Bu sprintte üretime veya gerçek kullanıcı portföyüne BAĞLANMAMIŞTIR.
+ *  - `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` olmadan hiç çalışmaz.
+ *  - Gerçek üretim dağıtımında bayrak YOK SAYILIR.
+ *  - CAPTCHA/etkileşim gerekirse BLOCKED döner; aşma DENENMEZ.
+ *  - Ekran imzası beklenen biçimde değilse fail closed olur.
+ *  - Yalnızca değerlemeye HAZIR güven seviyesindeki eşlemeler quote üretir.
  */
 
 export const SARRAF_TV_DATA_KIND = "LIVE_SCREEN_EXPERIMENTAL" as const;
@@ -29,7 +33,9 @@ export const SARRAF_TV_DATA_KIND = "LIVE_SCREEN_EXPERIMENTAL" as const;
 export const SARRAF_TV_DISCLAIMER =
   "Sarraf TV Kayseri ekranından normal tarayıcı oturumuyla gözlenen deneysel fiyat verisidir. Resmî API değildir.";
 
-/** Toplayıcının çalışma durumu. */
+/** Gözlemin en fazla ne kadar eski olabileceği (deneysel gözlem politikası). */
+export const SCREEN_OBSERVATION_MAX_AGE_MS = 120_000;
+
 export type CollectorStatus = "DISABLED" | "OK" | "PARTIAL" | "UNAVAILABLE" | "BLOCKED";
 
 export interface CollectorObservation {
@@ -37,7 +43,7 @@ export interface CollectorObservation {
   mappingConfidence: MappingConfidence;
   liquidationPrice: string;
   replacementPrice: string;
-  /** Ekranda kaynak zaman damgası yoksa yalnızca gözlem anımız bilinir. */
+  /** Ekranın gözlendiği an. Kaynak kendi fiyat zamanını yayımlamıyor. */
   observedAt: string;
 }
 
@@ -45,23 +51,15 @@ export interface CollectorResult {
   status: CollectorStatus;
   dataKind: typeof SARRAF_TV_DATA_KIND;
   quotes: NormalizedQuote[];
-  /** Çözülemeyen satırlar; sessizce yutulmaz. */
+  /** Çözülemeyen veya onay bekleyen satırlar; sessizce yutulmaz. */
   unresolved: { rawProductName: string; reason: string }[];
   safeErrorCode: string | null;
   message: string;
 }
 
-/** Gerçek üretim dağıtımı mı? (Deneysel toplayıcı burada ASLA çalışmaz.) */
-function productionDeployment(): boolean {
-  const vercel = (process.env.VERCEL_ENV ?? "").trim().toLowerCase();
-  if (vercel === "production") return true;
-  return (process.env.APP_DEPLOYMENT_ENV ?? "").trim().toLowerCase() === "production";
-}
-
 /** Deneysel toplayıcı bu ortamda etkin mi? */
 export function screenCollectorEnabled(): boolean {
-  if (productionDeployment()) return false;
-  return (process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN ?? "").trim().toLowerCase() === "true";
+  return experimentalScreenAllowed();
 }
 
 /**
@@ -81,6 +79,9 @@ export interface CollectorInput {
   unresolved: readonly { rawProductName: string; reason: string }[];
   captchaSeen: boolean;
   ingestionRunId: string | null;
+  /** Yönetici tarafından onaylanmış eşlemeler (ürün → güven). */
+  approvedMappings?: ReadonlyMap<string, MappingConfidence>;
+  now?: () => number;
 }
 
 /**
@@ -91,6 +92,9 @@ export interface CollectorInput {
  * "sağlayıcı zamanı" gibi gösterilmez.
  */
 export function collectScreenQuotes(input: CollectorInput): CollectorResult {
+  const now = input.now?.() ?? Date.now();
+  const unresolved = [...input.unresolved];
+
   if (!screenCollectorEnabled()) {
     return {
       status: "DISABLED",
@@ -102,12 +106,11 @@ export function collectScreenQuotes(input: CollectorInput): CollectorResult {
     };
   }
   if (input.captchaSeen) {
-    // CAPTCHA aşılmaz; kaynak kullanılamaz sayılır.
     return {
       status: "BLOCKED",
       dataKind: SARRAF_TV_DATA_KIND,
       quotes: [],
-      unresolved: [...input.unresolved],
+      unresolved,
       safeErrorCode: "CAPTCHA_OR_INTERACTION_REQUIRED",
       message: "Ekran doğrulama istedi; aşma denenmedi ve fiyat alınmadı.",
     };
@@ -117,7 +120,7 @@ export function collectScreenQuotes(input: CollectorInput): CollectorResult {
       status: "UNAVAILABLE",
       dataKind: SARRAF_TV_DATA_KIND,
       quotes: [],
-      unresolved: [...input.unresolved],
+      unresolved,
       safeErrorCode: "SCREEN_SIGNATURE_MISMATCH",
       message: "Ekran yapısı beklenen imzaya uymadı; yanlış fiyat üretmemek için hiçbir değer alınmadı.",
     };
@@ -125,32 +128,68 @@ export function collectScreenQuotes(input: CollectorInput): CollectorResult {
 
   const marketId: MarketId = "kayseri";
   const provenance: TimestampProvenance = "OBSERVED";
-  const quotes: NormalizedQuote[] = input.observations.map((observation) => ({
-    canonicalProductId: observation.canonicalProductId,
-    providerId: "sarraf-pro-kayseri",
-    upstreamSourceId: "sarraf-tv-screen",
-    marketId,
-    liquidationPrice: observation.liquidationPrice,
-    replacementPrice: observation.replacementPrice,
-    currency: "TRY",
-    // Ekran kendi fiyat zamanını yayımlamıyor: sağlayıcı zamanı YOKTUR.
-    providerTimestamp: null,
-    timestampProvenance: provenance,
-    fetchedAt: observation.observedAt,
-    status: "ok",
-    staleAfterMs: 5 * 60_000,
-    rawPayloadHash: null,
-    mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
-    licenseReference: null,
-    ingestionRunId: input.ingestionRunId,
-  }));
+  const quotes: NormalizedQuote[] = [];
+
+  for (const observation of input.observations) {
+    // Yönetici onayı, CONVENTION eşlemesini OPERATOR_VERIFIED'a yükseltebilir.
+    const approved = input.approvedMappings?.get(observation.canonicalProductId);
+    const confidence: MappingConfidence = approved ?? observation.mappingConfidence;
+    if (!isValuationReady(confidence)) {
+      unresolved.push({
+        rawProductName: observation.canonicalProductId,
+        reason: `ONAY_BEKLIYOR_${confidence}`,
+      });
+      continue;
+    }
+
+    const observedAtMs = Date.parse(observation.observedAt);
+    if (!Number.isFinite(observedAtMs)) {
+      unresolved.push({ rawProductName: observation.canonicalProductId, reason: "GOZLEM_ZAMANI_GECERSIZ" });
+      continue;
+    }
+    if (now - observedAtMs > SCREEN_OBSERVATION_MAX_AGE_MS) {
+      unresolved.push({ rawProductName: observation.canonicalProductId, reason: "GOZLEM_BAYAT" });
+      continue;
+    }
+
+    quotes.push({
+      canonicalProductId: observation.canonicalProductId,
+      providerId: "sarraf-tv-kayseri-screen",
+      upstreamSourceId: "sarraf-tv-screen",
+      marketId,
+      liquidationPrice: observation.liquidationPrice,
+      replacementPrice: observation.replacementPrice,
+      currency: "TRY",
+      // Ekran kendi fiyat zamanını yayımlamıyor: sağlayıcı zamanı YOKTUR.
+      providerTimestamp: null,
+      timestampProvenance: provenance,
+      fetchedAt: observation.observedAt,
+      status: "ok",
+      staleAfterMs: SCREEN_OBSERVATION_MAX_AGE_MS,
+      rawPayloadHash: null,
+      mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
+      licenseReference: null,
+      ingestionRunId: input.ingestionRunId,
+    });
+  }
+
+  if (quotes.length === 0) {
+    return {
+      status: "UNAVAILABLE",
+      dataKind: SARRAF_TV_DATA_KIND,
+      quotes,
+      unresolved,
+      safeErrorCode: "NO_VALUATION_READY_QUOTE",
+      message: "Değerlemeye hazır (onaylı) eşleme bulunamadı; hiçbir fiyat alınmadı.",
+    };
+  }
 
   return {
-    status: input.unresolved.length > 0 ? "PARTIAL" : "OK",
+    status: unresolved.length > 0 ? "PARTIAL" : "OK",
     dataKind: SARRAF_TV_DATA_KIND,
     quotes,
-    unresolved: [...input.unresolved],
+    unresolved,
     safeErrorCode: null,
-    message: `${quotes.length} ürün ekrandan gözlendi, ${input.unresolved.length} satır çözülemedi.`,
+    message: `${quotes.length} ürün ekrandan gözlendi, ${unresolved.length} satır çözülemedi veya onay bekliyor.`,
   };
 }

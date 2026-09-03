@@ -1,3 +1,4 @@
+import { numberFromEnv } from "@/lib/env";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -29,8 +30,7 @@ export const DEFAULT_INGESTION_INTERVAL_MS = 60_000;
 
 /** Yapılandırılmış alım aralığı (15 sn – 5 dk arasına sıkıştırılır). */
 export function ingestionIntervalMs(): number {
-  const raw = Number(process.env.PRICE_INGESTION_INTERVAL_MS ?? DEFAULT_INGESTION_INTERVAL_MS);
-  if (!Number.isFinite(raw)) return DEFAULT_INGESTION_INTERVAL_MS;
+  const raw = numberFromEnv("PRICE_INGESTION_INTERVAL_MS", DEFAULT_INGESTION_INTERVAL_MS, { min: 1 });
   return Math.min(MAX_INGESTION_INTERVAL_MS, Math.max(MIN_INGESTION_INTERVAL_MS, Math.round(raw)));
 }
 

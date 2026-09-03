@@ -20,7 +20,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(242);
+select plan(272);
 
 -- -----------------------------------------------------------------------------
 -- Yardımcılar
@@ -2210,6 +2210,188 @@ select ok(
      and attname = 'last_used_counter') = 'bigint',
   'last_used_counter bigint türündedir'
 );
+
+-- =============================================================================
+-- 17. SARRAF TV ÖZEL PİLOTU (0017): deneysel kaynak, worker kirası, izin listesi
+-- =============================================================================
+
+-- Şema: pilot tabloları vardır ve istemciye tamamen kapalıdır.
+select ok(
+  (select bool_and(
+     not has_table_privilege('anon', t, 'SELECT')
+     and not has_table_privilege('authenticated', t, 'SELECT')
+     and not has_table_privilege('authenticated', t, 'INSERT')
+     and not has_table_privilege('service_role', t, 'INSERT')
+     and not has_table_privilege('service_role', t, 'UPDATE')
+     and not has_table_privilege('service_role', t, 'DELETE'))
+   from unnest(array[
+     'public.experimental_price_access', 'public.price_mapping_approvals',
+     'public.price_worker_nonces', 'public.price_worker_leases'
+   ]) as t),
+  'Pilot tabloları: istemci okuyamaz, hiçbir rol doğrudan yazamaz (yalnızca RPC)'
+);
+
+select ok(
+  (select bool_and(
+     has_function_privilege('service_role', f, 'execute')
+     and not has_function_privilege('anon', f, 'execute')
+     and not has_function_privilege('authenticated', f, 'execute'))
+   from unnest(array[
+     'public.price_worker_nonce_claim(text, text)',
+     'public.price_worker_lease_acquire(text, text, integer)',
+     'public.price_worker_lease_state(text)',
+     'public.experimental_access_set(uuid, text, boolean, uuid, text, timestamptz)',
+     'public.experimental_access_allowed(uuid, text)',
+     'public.experimental_access_list(text)',
+     'public.price_mapping_approve(text, text, text, text, uuid, numeric, numeric, timestamptz, boolean)',
+     'public.price_mapping_approvals_list(text)'
+   ]) as f),
+  'Pilot RPC''leri yalnızca service_role tarafından çağrılabilir'
+);
+
+-- Deneysel kaynak kataloğa girer.
+select is(
+  public.price_providers_sync(jsonb_build_array(
+    jsonb_build_object('code', 'test-deneysel', 'displayName', 'Test Deneysel', 'technicalName', 'Ekran',
+      'marketId', 'kayseri', 'marketDisplayName', 'Kayseri Yerel Piyasa', 'providerType', 'SCREEN',
+      'licenseStatus', 'EXPERIMENTAL_PRIVATE', 'licenseReference', null, 'redistributionAllowed', false,
+      'capabilities', '["EXPERIMENTAL_SCREEN","PRODUCT_LEVEL"]'::jsonb,
+      'attribution', 'Sarraf TV', 'referenceUrl', null)
+  )),
+  1, 'Deneysel kaynak kataloğa yazılır');
+
+select is(
+  (select license_status from public.price_providers where code = 'test-deneysel'),
+  'EXPERIMENTAL_PRIVATE', 'Lisans durumu EXPERIMENTAL_PRIVATE olarak saklanır');
+
+-- Etkinleştirilebilir ama genel listeye açılamaz.
+select lives_ok(
+  $q$select public.price_provider_set_flags('test-deneysel', true, false)$q$,
+  'Deneysel kaynak etkinleştirilebilir (kullanıcı seçimine kapalı)');
+
+select throws_ok(
+  $q$select public.price_provider_set_flags('test-deneysel', true, true)$q$,
+  'P0006', NULL,
+  'Deneysel kaynak genel kullanıcı listesine AÇILAMAZ');
+
+select throws_ok(
+  $q$select public.price_provider_set_default('test-deneysel')$q$,
+  'P0006', NULL,
+  'Deneysel kaynak global varsayılan yapılamaz');
+
+-- İzin listesi olmadan kullanıcı bu kaynağı seçemez.
+select is(
+  public.experimental_access_allowed('11111111-1111-1111-1111-111111111111', 'test-deneysel'),
+  false, 'İzin verilmeden erişim yoktur');
+
+select throws_ok(
+  $q$select public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-deneysel',
+      '11111111-1111-1111-1111-111111111111', 'user', 'izinsiz')$q$,
+  'P0006', NULL,
+  'İzin listesinde olmayan kullanıcı deneysel kaynağı seçemez');
+
+-- Yönetici izin verir.
+select lives_ok(
+  $q$select public.experimental_access_set('11111111-1111-1111-1111-111111111111', 'test-deneysel',
+      true, '22222222-2222-2222-2222-222222222222', 'pilot', null)$q$,
+  'Yönetici pilot erişimi verebilir');
+
+select is(
+  public.experimental_access_allowed('11111111-1111-1111-1111-111111111111', 'test-deneysel'),
+  true, 'İzin verilen kullanıcı için erişim açıktır');
+
+select is(
+  (public.price_preference_set('11111111-1111-1111-1111-111111111111', 'test-deneysel',
+     '11111111-1111-1111-1111-111111111111', 'user', 'pilot seçimi')->>'providerCode'),
+  'test-deneysel', 'İzinli kullanıcı deneysel kaynağı seçebilir');
+
+-- Süresi geçmiş izin erişim sayılmaz.
+select lives_ok(
+  $q$select public.experimental_access_set('11111111-1111-1111-1111-111111111111', 'test-deneysel',
+      true, '22222222-2222-2222-2222-222222222222', 'süresi doldu', now() - interval '1 hour')$q$,
+  'İzne bitiş zamanı verilebilir');
+
+select is(
+  public.experimental_access_allowed('11111111-1111-1111-1111-111111111111', 'test-deneysel'),
+  false, 'Süresi dolan izin erişim SAYILMAZ');
+
+select lives_ok(
+  $q$select public.experimental_access_set('11111111-1111-1111-1111-111111111111', 'test-deneysel',
+      false, '22222222-2222-2222-2222-222222222222', 'geri alındı', null)$q$,
+  'İzin geri alınabilir');
+
+select is(
+  public.experimental_access_allowed('11111111-1111-1111-1111-111111111111', 'test-deneysel'),
+  false, 'Geri alınan izin erişim sayılmaz');
+
+-- Nonce tek kullanımlıktır.
+select is(
+  public.price_worker_nonce_claim('pgtap-nonce-1', 'w-pgtap'),
+  true, 'Nonce ilk kez kabul edilir');
+
+select is(
+  public.price_worker_nonce_claim('pgtap-nonce-1', 'w-pgtap'),
+  false, 'Aynı nonce İKİNCİ kez kabul edilmez (replay engellenir)');
+
+-- Kira: tek worker tutar; devralma yalnızca süre dolunca olur.
+select is(
+  (public.price_worker_lease_acquire('test-deneysel', 'w-1', 180)->>'held'),
+  'true', 'İlk worker kirayı alır');
+
+select is(
+  (public.price_worker_lease_acquire('test-deneysel', 'w-2', 180)->>'held'),
+  'false', 'İkinci worker aynı anda kirayı ALAMAZ');
+
+select is(
+  (public.price_worker_lease_state('test-deneysel')->>'workerId'),
+  'w-1', 'Kira durumu kirayı tutan worker''ı bildirir');
+
+select is(
+  (public.price_worker_lease_acquire('test-deneysel', 'w-1', 180)->>'takeover'),
+  'false', 'Kirayı tutan worker yenilerken devralma SAYILMAZ');
+
+select is(
+  (public.price_worker_lease_state('test-deneysel')->>'active'),
+  'true', 'Süresi dolmamış kira etkin görünür');
+
+-- Eşleme onayı: onaysız eşleme değerlemeye giremez.
+select is(
+  (select count(*)::int from public.price_mapping_approvals), 0,
+  'Başlangıçta onaylı eşleme yoktur');
+
+select lives_ok(
+  $q$select public.price_mapping_approve('test-deneysel', 'gremse', 'gram-altin',
+      'pgtap-mapping-1', '22222222-2222-2222-2222-222222222222',
+      4100.00, 4200.00, now(), false)$q$,
+  'Yönetici ekran etiketini ürüne onaylayabilir');
+
+select is(
+  (select count(*)::int from public.price_mapping_approvals a
+   join public.price_providers p on p.id = a.provider_id
+   where p.code = 'test-deneysel' and a.revoked_at is null), 1,
+  'Onay kaydı yazılır');
+
+select is(
+  (public.price_mapping_approvals_list('test-deneysel')->0->>'canonicalProductId'),
+  'gram-altin', 'Onay listesi ürünü döndürür');
+
+select is(
+  (public.price_mapping_approvals_list('test-deneysel')->0->>'confidence'),
+  'OPERATOR_VERIFIED', 'Yönetici onayı OPERATOR_VERIFIED güveniyle kaydedilir');
+
+-- Deneysel kaynak fiyat yazabilir (ingestion kapısı EXPERIMENTAL_PRIVATE'a açıktır).
+select lives_ok(
+  $q$select public.price_ingestion_apply('test-deneysel', 'pgtap-run-deneysel', jsonb_build_object(
+     'fetchedAt', now()::text,
+     'quotes', jsonb_build_array()))$q$,
+  'Deneysel kaynak alım çalıştırması kabul edilir');
+
+-- Lisanssız kaynak hâlâ reddedilir (0017 kapıyı yalnızca deneysele açtı).
+select throws_ok(
+  $q$select public.price_provider_set_flags('test-lisanssiz', true, true)$q$,
+  'P0006', NULL,
+  'Lisanssız kaynak 0017''den sonra da etkinleştirilemez');
+
 
 select * from finish();
 

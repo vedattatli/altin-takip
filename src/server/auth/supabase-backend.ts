@@ -17,6 +17,9 @@ import {
   type ProviderStateRow,
   type ProviderSyncInput,
   type QuarantineRow,
+  type ExperimentalAccessRow,
+  type MappingApprovalRow,
+  type WorkerLeaseState,
 } from "@/server/prices/types";
 import type {
   LedgerAppendRequest,
@@ -887,6 +890,116 @@ export class SupabaseAuthBackend implements AuthBackend {
   async defaultPriceProvider(): Promise<string | null> {
     const providers = await this.listPriceProviders();
     return providers.find((provider) => provider.isDefault)?.code ?? null;
+  }
+
+  // --- Deneysel özel pilot (Sprint 3.2) ---
+
+  async setExperimentalAccess(
+    userId: string,
+    code: string,
+    enabled: boolean,
+    adminId: string,
+    reason: string,
+    expiresAt: string | null,
+  ): Promise<void> {
+    await this.priceRpc<unknown>(
+      "experimental_access_set",
+      {
+        p_user_id: userId,
+        p_code: code,
+        p_enabled: enabled,
+        p_admin: adminId,
+        p_reason: reason,
+        p_expires: expiresAt,
+      },
+      "Deneysel erişim güncellenemedi",
+    );
+  }
+
+  async experimentalAccessAllowed(userId: string, code: string): Promise<boolean> {
+    const allowed = await this.priceRpc<boolean | null>(
+      "experimental_access_allowed",
+      { p_user_id: userId, p_code: code },
+      "Deneysel erişim okunamadı",
+    );
+    return allowed === true;
+  }
+
+  async listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]> {
+    const rows = await this.priceRpc<ExperimentalAccessRow[] | null>(
+      "experimental_access_list",
+      { p_code: code },
+      "Deneysel erişim listesi okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async approvePriceMapping(input: {
+    code: string;
+    rawLabel: string;
+    canonicalProductId: string;
+    mappingVersion: string;
+    adminId: string;
+    evidenceLiquidation: string | null;
+    evidenceReplacement: string | null;
+    evidenceObservedAt: string | null;
+    revoke: boolean;
+  }): Promise<void> {
+    await this.priceRpc<unknown>(
+      "price_mapping_approve",
+      {
+        p_code: input.code,
+        p_label: input.rawLabel,
+        p_product: input.canonicalProductId,
+        p_version: input.mappingVersion,
+        p_admin: input.adminId,
+        p_liquidation: input.evidenceLiquidation,
+        p_replacement: input.evidenceReplacement,
+        p_observed: input.evidenceObservedAt,
+        p_revoke: input.revoke,
+      },
+      "Eşleme onayı kaydedilemedi",
+    );
+  }
+
+  async listMappingApprovals(code: string): Promise<MappingApprovalRow[]> {
+    const rows = await this.priceRpc<MappingApprovalRow[] | null>(
+      "price_mapping_approvals_list",
+      { p_code: code },
+      "Eşleme onayları okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async claimWorkerNonce(nonce: string, workerId: string): Promise<boolean> {
+    const claimed = await this.priceRpc<boolean | null>(
+      "price_worker_nonce_claim",
+      { p_nonce: nonce, p_worker_id: workerId },
+      "Worker nonce doğrulanamadı",
+    );
+    return claimed === true;
+  }
+
+  async acquireWorkerLease(
+    code: string,
+    workerId: string,
+    ttlSeconds: number,
+  ): Promise<{ held: boolean; workerId: string; takeover: boolean }> {
+    const row = await this.priceRpc<{ held: boolean; workerId: string; takeover: boolean }>(
+      "price_worker_lease_acquire",
+      { p_code: code, p_worker_id: workerId, p_ttl_seconds: ttlSeconds },
+      "Worker kirası alınamadı",
+    );
+    return row ?? { held: false, workerId, takeover: false };
+  }
+
+  async workerLeaseState(code: string): Promise<WorkerLeaseState | null> {
+    const row = await this.priceRpc<WorkerLeaseState | null>(
+      "price_worker_lease_state",
+      { p_code: code },
+      "Worker kirası okunamadı",
+    );
+    return row ?? null;
   }
 
   async listPriceSourceEvents(scope: DataScope, limit = 50): Promise<PriceSourceEventRow[]> {

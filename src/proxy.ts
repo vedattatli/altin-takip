@@ -26,7 +26,12 @@ import {
  * jetonları yoktur. Onlara çerez yazmak gereksizdir ve "makine yanıtı çerez
  * taşımaz" garantisini bozar.
  */
-const MACHINE_PATHS = ["/api/cron/"];
+/**
+ * Makine uçları: oturum yok, çerez yok, CSRF jetonu yok. Kimlik yalnızca
+ * paylaşılan sır (cron) veya HMAC imzasıdır (worker). Bu yollara çerez
+ * basmak, tarayıcı kimliğiyle makine kimliğini karıştırmak olurdu.
+ */
+const MACHINE_PATHS = ["/api/cron/", "/api/internal/price-worker/"];
 
 export async function proxy(request: NextRequest) {
   if (MACHINE_PATHS.some((prefix) => request.nextUrl.pathname.startsWith(prefix))) {

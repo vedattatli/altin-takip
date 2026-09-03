@@ -8,18 +8,21 @@ import {
  * EKRAN OKUMA (saf fonksiyonlar)
  *
  * Tarayıcıdan alınan ham satırları kanonik ürünlere çevirir. Kurallar:
- *  - Alış/satış yönü SÜTUN BAŞLIĞINDAN doğrulanır; sıra numarasına güvenilmez.
- *    Başlığı olmayan (tek fiyatlı) satır yön doğrulanamadığı için ATLANIR.
+ *  - Alış/satış yönü, okuyucunun BAŞLIK KONUMUNDAN doğruladığı satırlarda
+ *    kabul edilir (`directionResolved`). Sıraya, renge veya "ikinci sayı
+ *    satıştır" varsayımına güvenilmez.
+ *  - Yön doğrulanmamış satır ATLANIR.
  *  - Başlık eşlenemezse ürün ATLANIR (unresolved), tahmin yapılmaz.
- *  - Yeni/eski ayrımı yazmayan başlıklar ayrı "CONVENTION" güveniyle işaretlenir.
  *  - Sayı biçimi BELGE DÜZEYİNDE belirlenir; satır satır tahmin edilmez.
  */
 
 export interface RawScreenRow {
   /** Ekranda görünen ürün başlığı. */
   label: string;
-  /** Sütun başlığı → hücre metni. Tek fiyatlı satırlarda başlık bulunmaz. */
+  /** Sütun başlığı → hücre metni. Yön çözülemeyen satırlarda başlık bulunmaz. */
   cells: Record<string, string>;
+  /** Okuyucu, hücrelerin ALIŞ/SATIŞ sütunlarına düştüğünü geometriyle doğruladı mı? */
+  directionResolved?: boolean;
 }
 
 export interface ExtractedQuote {
@@ -73,7 +76,6 @@ export function detectNumberFormat(samples: readonly string[]): NumberFormat {
   const hasDot = values.some((value) => value.includes("."));
 
   if (hasComma && hasDot) {
-    // Karışık: "1.234,56" (tr) hepsinde aynı sırayla mı?
     const allTr = values
       .filter((value) => value.includes(",") && value.includes("."))
       .every((value) => value.lastIndexOf(",") > value.lastIndexOf("."));
@@ -81,7 +83,6 @@ export function detectNumberFormat(samples: readonly string[]): NumberFormat {
   }
   if (hasComma) return "tr";
   if (hasDot) {
-    // Yalnızca nokta var: her nokta tam üç basamak grubu ayırıyorsa binliktir.
     const allGrouped = values
       .filter((value) => value.includes("."))
       .every((value) => /^\d{1,3}(\.\d{3})+$/u.test(value));
@@ -118,8 +119,20 @@ export interface ExtractionResult {
   numberFormat: NumberFormat;
 }
 
+export interface ExtractOptions {
+  /**
+   * Yönü ağ yanıtında AYRI ALAN ADLARIYLA kanıtlanmış başlıklar (normalize
+   * edilmemiş hâlleriyle). Bu başlıklardaki EXACT eşleme NETWORK_VERIFIED olur.
+   */
+  networkVerifiedLabels?: ReadonlySet<string>;
+}
+
 /** Ham satırları kanonik quote'lara çevirir. */
-export function extractQuotes(rows: readonly RawScreenRow[], extractionMethod: string): ExtractionResult {
+export function extractQuotes(
+  rows: readonly RawScreenRow[],
+  extractionMethod: string,
+  options: ExtractOptions = {},
+): ExtractionResult {
   const samples = rows.flatMap((row) => Object.values(row.cells));
   const numberFormat = detectNumberFormat(samples);
   const quotes: ExtractedQuote[] = [];
@@ -127,7 +140,8 @@ export function extractQuotes(rows: readonly RawScreenRow[], extractionMethod: s
   const seen = new Set<string>();
 
   for (const row of rows) {
-    const mapped = screenLabelToProduct(row.label);
+    const networkVerified = options.networkVerifiedLabels?.has(row.label) === true;
+    const mapped = screenLabelToProduct(row.label, { networkVerifiedDirection: networkVerified });
     if (!mapped) {
       unresolved.push({
         rawProductName: row.label,
@@ -140,6 +154,13 @@ export function extractQuotes(rows: readonly RawScreenRow[], extractionMethod: s
       continue;
     }
 
+    // Okuyucu yönü geometriyle doğrulamadıysa satır atlanır: sıraya bakarak
+    // "ilki alış, ikincisi satış" varsayımı yapılmaz.
+    if (row.directionResolved === false) {
+      unresolved.push({ rawProductName: row.label, reason: "YÖN_DOĞRULANAMADI" });
+      continue;
+    }
+
     let buyHeader: string | null = null;
     let sellHeader: string | null = null;
     for (const header of Object.keys(row.cells)) {
@@ -148,7 +169,6 @@ export function extractQuotes(rows: readonly RawScreenRow[], extractionMethod: s
       if (kind === "sell" && sellHeader === null) sellHeader = header;
     }
     if (buyHeader === null || sellHeader === null) {
-      // Yön sütun başlığından doğrulanamıyorsa sıraya GÜVENİLMEZ; satır atlanır.
       unresolved.push({ rawProductName: row.label, reason: "ALIŞ_SATIŞ_BAŞLIĞI_YOK" });
       continue;
     }
@@ -218,8 +238,6 @@ export function compareSnapshots(
  * EKRAN ↔ JSON DOĞRULAMASI
  *
  * Çıkarılan her fiyatın ekranda GÖRÜNEN metinde birebir bulunduğunu denetler.
- * Sayı biçimi ekranda yerel (ör. "10.850"), JSON'da kanonik ("10850") olduğu
- * için karşılaştırma ham ekran metni üzerinden yapılır.
  */
 export function verifyAgainstScreenText(
   quotes: readonly ExtractedQuote[],
@@ -258,5 +276,128 @@ export function verifyAgainstScreenText(
       });
     }
   }
+  return mismatches;
+}
+
+/** Ağ ve DOM aynı ürün için farklı fiyat verirse uyuşmazlık listelenir. */
+export interface NetworkDomMismatch {
+  productId: string;
+  label: string;
+  field: "liquidationPrice" | "replacementPrice" | "satır";
+  network: string;
+  dom: string;
+}
+
+/**
+ * AĞ ↔ EKRAN ÇİFT DOĞRULAMASI
+ *
+ * Ağ yanıtı birincil kanaldır (yön `buying`/`sales` alan adlarıyla kesindir).
+ * DOM bağımsız doğrulayıcıdır: aynı değerin ekranda GÖRÜNDÜĞÜ kanıtlanır.
+ *
+ * İki satır biçimi vardır ve ikisi de doğrulanır:
+ *  - Yönü çözülmüş iki hücreli satır: ALIŞ hücresi bozdurmaya, SATIŞ hücresi
+ *    yeniden alıma birebir eşit olmalıdır.
+ *  - Tek hücreli satır (ekranda tek fiyat): ağ yanıtı bu ürün için alış ve
+ *    satışı EŞİT bildiriyorsa ekrandaki tek değer ikisine birden eşit olmalıdır.
+ *    Ağ farklı iki fiyat bildiriyorsa tek hücreyle doğrulanamaz ve uyuşmazlık
+ *    sayılır — "herhalde alıştır" varsayımı yapılmaz.
+ */
+export function verifyNetworkAgainstScreen(
+  networkQuotes: readonly ExtractedQuote[],
+  domRows: readonly RawScreenRow[],
+): NetworkDomMismatch[] {
+  const byLabel = new Map(domRows.map((row) => [row.label, row]));
+  const mismatches: NetworkDomMismatch[] = [];
+
+  for (const quote of networkQuotes) {
+    const row = byLabel.get(quote.rawProductName);
+    if (!row) {
+      mismatches.push({
+        productId: quote.canonicalProductId,
+        label: quote.rawProductName,
+        field: "satır",
+        network: "var",
+        dom: "yok",
+      });
+      continue;
+    }
+    const format = detectNumberFormat(Object.values(row.cells));
+    const parsed = Object.fromEntries(
+      Object.entries(row.cells).map(([header, text]) => [header, parseScreenNumber(text, format)]),
+    );
+
+    if (row.directionResolved === true) {
+      let buyHeader: string | null = null;
+      let sellHeader: string | null = null;
+      for (const header of Object.keys(row.cells)) {
+        const kind = classifyHeader(header);
+        if (kind === "buy" && buyHeader === null) buyHeader = header;
+        if (kind === "sell" && sellHeader === null) sellHeader = header;
+      }
+      if (buyHeader === null || sellHeader === null) {
+        mismatches.push({
+          productId: quote.canonicalProductId,
+          label: quote.rawProductName,
+          field: "satır",
+          network: "yön bekleniyordu",
+          dom: "başlık yok",
+        });
+        continue;
+      }
+      if (parsed[buyHeader] !== quote.liquidationPrice) {
+        mismatches.push({
+          productId: quote.canonicalProductId,
+          label: quote.rawProductName,
+          field: "liquidationPrice",
+          network: quote.liquidationPrice,
+          dom: row.cells[buyHeader] ?? "",
+        });
+      }
+      if (parsed[sellHeader] !== quote.replacementPrice) {
+        mismatches.push({
+          productId: quote.canonicalProductId,
+          label: quote.rawProductName,
+          field: "replacementPrice",
+          network: quote.replacementPrice,
+          dom: row.cells[sellHeader] ?? "",
+        });
+      }
+      continue;
+    }
+
+    // Tek hücreli satır.
+    const values = Object.values(parsed).filter((value): value is string => value !== null);
+    if (values.length !== 1) {
+      mismatches.push({
+        productId: quote.canonicalProductId,
+        label: quote.rawProductName,
+        field: "satır",
+        network: "tek değer bekleniyordu",
+        dom: String(values.length),
+      });
+      continue;
+    }
+    const only = values[0]!;
+    if (quote.liquidationPrice !== quote.replacementPrice) {
+      mismatches.push({
+        productId: quote.canonicalProductId,
+        label: quote.rawProductName,
+        field: "satır",
+        network: `${quote.liquidationPrice}/${quote.replacementPrice}`,
+        dom: only,
+      });
+      continue;
+    }
+    if (only !== quote.liquidationPrice) {
+      mismatches.push({
+        productId: quote.canonicalProductId,
+        label: quote.rawProductName,
+        field: "liquidationPrice",
+        network: quote.liquidationPrice,
+        dom: only,
+      });
+    }
+  }
+
   return mismatches;
 }

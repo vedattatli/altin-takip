@@ -141,3 +141,26 @@ Kaynak değişimi:
 | Gerçekleşmiş K/Z | |
 
 Fiyatı bulunmayan ürünlerde mevcut kısmi/none değerleme davranışı korunur.
+
+## 8. Ekran gözlemi kaynağı (özel pilot)
+
+`sarraf-tv-kayseri-screen` diğer kaynaklardan **ayrı** bir kimliktir ve bilerek
+farklı davranır:
+
+| Konu | Diğer kaynaklar | Ekran kaynağı |
+| --- | --- | --- |
+| Sağlayıcı türü | `REST` / `XML` / `WEBSOCKET` | `SCREEN` |
+| Lisans durumu | `LICENSED` gerekir | `EXPERIMENTAL_PRIVATE` — lisanslı **değildir** |
+| Kullanıcıya açık mı | Yönetici açabilir | **Asla** — izin listesiyle kişi bazlı |
+| Global varsayılan | Olabilir | **Olamaz** |
+| Zaman damgası | `UPSTREAM` | `OBSERVED` (kaynağın kendi saati bilinmez) |
+| Veri kanalı | HTTP yanıtı | Tarayıcı DOM'u (fiyatlar tarayıcıda hesaplanır) |
+| Toplayıcı | Uygulama içi cron | Ayrı, kalıcı worker container'ı |
+| Ürün kapsamı | Katalog geneli | Yalnızca değerlemeye hazır güvendeki satırlar |
+
+Kalite kapısı **aynıdır**. Ekran kaynağının yazdığı fiyat da `evaluateQuote`
+üzerinden geçer; ayrıca `OBSERVATION_STALE` ve `OBSERVATION_INVALID` kodları
+yalnızca bu kaynak için ek kontrol getirir.
+
+Durum, ölçüm ve sınırlar: [PRICE_SOURCE_STATUS.md](PRICE_SOURCE_STATUS.md)
+Mimari ve worker: [ARCHITECTURE.md](ARCHITECTURE.md) bölüm 14.

@@ -209,3 +209,55 @@ describe("arayüz sözleşmesi: test kancaları DOM'a ulaşır", () => {
     }
   });
 });
+
+describe("E2E ortamı .env.local sızıntısına kapalıdır", () => {
+  /**
+   * Next.js `.env.local` dosyasını sunucu açılışında yükler ama zaten ayarlı
+   * ortam değişkenlerini EZMEZ. Dolayısıyla `webServer.env` içinde AÇIKÇA
+   * ayarlanmayan her değişken, geliştiricinin makinesindeki `.env.local`
+   * değerini alır ve testlerin ölçtüğü davranışı sessizce değiştirir.
+   *
+   * Bu gerçekten yaşandı: `AUTH_SESSION_COOKIE` sızdı, sunucu çerezi başka
+   * adla yazdı ve oturum çerezi testleri çerezi hiç bulamadı.
+   */
+  function envKeys(file: string): string[] {
+    return readFileSync(join(process.cwd(), file), "utf8")
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#") && line.includes("="))
+      .map((line) => line.slice(0, line.indexOf("=")).trim());
+  }
+
+  it(".env.example içindeki HER değişken playwright.config.ts testEnv'inde sabitlenir", () => {
+    const config = readFileSync(join(process.cwd(), "playwright.config.ts"), "utf8");
+    const testEnvStart = config.indexOf("const testEnv = {");
+    expect(testEnvStart).toBeGreaterThan(-1);
+    const testEnvBlock = config.slice(testEnvStart, config.indexOf("};", testEnvStart));
+
+    // Satır bazlı KESİN eşleme: template literal içinde `\s` kaçışı yutulduğu
+    // için regex kurmak yerine anahtarın kendi satırında tanımlandığı aranır.
+    const declared = new Set(
+      testEnvBlock
+        .split(/\r?\n/u)
+        .map((line) => /^\s*([A-Z0-9_]+)\s*:/u.exec(line)?.[1])
+        .filter((name): name is string => Boolean(name)),
+    );
+    const leaked = envKeys(".env.example").filter((key) => !declared.has(key));
+    expect(leaked, `testEnv'de sabitlenmemiş değişkenler: ${leaked.join(", ")}`).toEqual([]);
+  });
+
+  it("E2E sunucusu her koşumda yeniden başlatılır", () => {
+    // Sunucu yeniden kullanılırsa Playwright `env` bloğunu UYGULAMAZ ve bütün
+    // takım sessizce yanlış yapılandırmayla koşar.
+    const config = readFileSync(join(process.cwd(), "playwright.config.ts"), "utf8");
+    expect(config).toMatch(/reuseExistingServer:\s*false/u);
+  });
+
+  it("E2E oturum çerezi adı testlerin aradığı adla aynıdır", () => {
+    const config = readFileSync(join(process.cwd(), "playwright.config.ts"), "utf8");
+    const spec = readFileSync(join(process.cwd(), "e2e", "session.spec.ts"), "utf8");
+    const suffix = /SESSION_COOKIE_SUFFIX = "([^"]+)"/u.exec(spec)?.[1];
+    expect(suffix).toBeTruthy();
+    expect(config).toContain(`AUTH_SESSION_COOKIE: "${suffix}"`);
+  });
+});

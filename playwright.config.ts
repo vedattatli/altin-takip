@@ -25,6 +25,17 @@ const TEST_OVERRIDE_TOKEN = "yalnizca-test-icin";
 
 const testEnv = {
   AUTH_LOCAL_STORE_FILE: "auth-e2e.json",
+  // Geliştiricinin `.env.local` dosyası bu takımı SESSİZCE geçersizleştirmesin.
+  //
+  // Next.js `.env.local` değerlerini sunucu açılışında yükler ama zaten ayarlı
+  // ortam değişkenlerini EZMEZ. Bu yüzden Supabase anahtarlarını burada boşa
+  // çekiyoruz: aksi hâlde `.env.local` içinde Supabase yapılandırması bulunan
+  // bir makinede uygulama Supabase arka ucuna geçer, E2E yöneticisi orada
+  // bulunmaz ve bütün girişler "kullanıcı adı veya parola hatalı" verir.
+  NEXT_PUBLIC_SUPABASE_URL: "",
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "",
+  SUPABASE_SECRET_KEY: "",
+  SUPABASE_SERVICE_ROLE_KEY: "",
   // Supabase olmadan üretim derlemesini test edebilmek için.
   AUTH_ALLOW_LOCAL_BACKEND: TEST_OVERRIDE_TOKEN,
   // Yalnızca yerel test sunucusu için sabit değerler. GERÇEK SECRET DEĞİLDİR;
@@ -44,6 +55,46 @@ const testEnv = {
   // Test verisi sağlayıcısı için AYRI kapı. Yerel auth kapısından bağımsızdır ve
   // gerçek üretim dağıtımında (VERCEL_ENV=production) hiçbir etkisi yoktur.
   PRICE_ALLOW_MOCK_PROVIDER: PRICE_TEST_TOKEN,
+  // --- `.env.local` SIZINTISINA KARŞI TAM SABİTLEME ---
+  //
+  // Next.js `.env.local` dosyasını sunucu açılışında yükler ama zaten ayarlı
+  // ortam değişkenlerini EZMEZ. Bu yüzden takımın davrandığı her değişken
+  // burada AÇIKÇA sabitlenir. Aksi hâlde geliştiricinin makinesindeki
+  // `.env.local` testleri sessizce değiştirir: bu gerçekten yaşandı —
+  // `AUTH_SESSION_COOKIE` sızdı ve oturum çerezi testleri çerezi bulamadı.
+  //
+  // `tests/deployment-surface.test.ts` bu listenin `.env.example` ile
+  // eksiksiz örtüştüğünü denetler; yeni bir değişken eklenince test kırılır.
+  AUTH_SESSION_COOKIE: "altin_takip_session",
+  APP_DEPLOYMENT_ENV: "test",
+  AUTH_INTERNAL_EMAIL_DOMAIN: "e2e.invalid",
+  PRICE_EXPERIMENTAL_SARRAF_SCREEN: "false",
+  NEXT_PUBLIC_ENABLE_DEMO_MODE: "false",
+  // Bu değişkenler E2E'de KULLANILMAZ; boş bırakılır ki canlı bir
+  // sağlayıcıya veya gerçek bir yapılandırmaya düşülmesin.
+  PRICE_INGESTION_INTERVAL_MS: "",
+  PRICE_STALE_AFTER_MS: "",
+  PRICE_MAX_CHANGE_RATIO: "",
+  PRICE_MAX_SPREAD_RATIO: "",
+  PRICE_MIN_TRY: "",
+  PRICE_MAX_TRY: "",
+  ALTINAPI_CONTRACT_VERSION: "",
+  HASFIYAT_CONTRACT_VERSION: "",
+  SARRAFPRO_CONTRACT_VERSION: "",
+  SARRAFPRO_API_URL: "",
+  SARRAFPRO_API_KEY: "",
+  SARRAFPRO_MARKET_ID: "",
+  SARRAFPRO_LICENSE_REFERENCE: "",
+  SARRAFPRO_REDISTRIBUTION_ALLOWED: "",
+  ALTINAPI_API_URL: "",
+  ALTINAPI_API_KEY: "",
+  ALTINAPI_LICENSE_TIER: "",
+  ALTINAPI_REDISTRIBUTION_ALLOWED: "",
+  HASFIYAT_API_URL: "",
+  HASFIYAT_API_KEY: "",
+  HASFIYAT_SOURCE: "",
+  HASFIYAT_LICENSE_REFERENCE: "",
+  HASFIYAT_REDISTRIBUTION_ALLOWED: "",
 };
 
 export default defineConfig({
@@ -85,7 +136,14 @@ export default defineConfig({
     // Üretim derlemesi: geliştirme sunucusunun HMR istemcisi devrede olmaz.
     command: `npx next build && npx next start --port ${PORT}`,
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    // KASITLI OLARAK KAPALI.
+    //
+    // Sunucu yeniden kullanılırsa Playwright `env` bloğunu UYGULAMAZ: 3100
+    // portunda önceden çalışan bir sunucu devralınır ve testEnv hiç geçerli
+    // olmaz. Bu, 282 testin sessizce geçersiz koşmasına yol açtı (yönetici
+    // girişleri baştan sona başarısız oldu, çünkü sunucu E2E veri dosyasını
+    // kullanmıyordu). Her koşum kendi sunucusunu başlatır.
+    reuseExistingServer: false,
     timeout: 300_000,
     env: testEnv,
     stdout: "ignore",

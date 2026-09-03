@@ -1,0 +1,276 @@
+{
+  "generatedAt": "2026-09-03T14:14:34.480Z",
+  "mode": "headless",
+  "target": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
+  "requests": [
+    {
+      "host": "www.gstatic.com",
+      "pathTemplate": "/recaptcha/releases/{token}/recaptcha__tr.js",
+      "method": "GET",
+      "resourceType": "script",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "text/javascript",
+      "count": 2
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/",
+      "method": "GET",
+      "resourceType": "document",
+      "queryKeys": [
+        "code:(maskelendi)",
+        "mode",
+        "slug"
+      ],
+      "status": 200,
+      "contentType": "text/html",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/css/index010061.css",
+      "method": "GET",
+      "resourceType": "stylesheet",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "text/css",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/js/index010061.js",
+      "method": "GET",
+      "resourceType": "script",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "application/javascript",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/wav/cash010061.wav",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "audio/wav",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/wav/coin010061.wav",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "audio/wav",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-400-normal010061.woff2",
+      "method": "GET",
+      "resourceType": "font",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "font/woff2",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-ext-400-normal010061.woff2",
+      "method": "GET",
+      "resourceType": "font",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "font/woff2",
+      "count": 1
+    },
+    {
+      "host": "www.google.com",
+      "pathTemplate": "/recaptcha/api.js",
+      "method": "GET",
+      "resourceType": "script",
+      "queryKeys": [
+        "render"
+      ],
+      "status": 200,
+      "contentType": "text/javascript",
+      "count": 1
+    },
+    {
+      "host": "www.google.com",
+      "pathTemplate": "/recaptcha/api2/anchor",
+      "method": "GET",
+      "resourceType": "document",
+      "queryKeys": [
+        "anchor-ms",
+        "ar",
+        "cb",
+        "co",
+        "execute-ms",
+        "hl",
+        "k",
+        "size",
+        "v"
+      ],
+      "status": 200,
+      "contentType": "text/html",
+      "count": 1
+    },
+    {
+      "host": "www.gstatic.com",
+      "pathTemplate": "/recaptcha/releases/{token}/styles__ltr.css",
+      "method": "GET",
+      "resourceType": "stylesheet",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "text/css",
+      "count": 1
+    },
+    {
+      "host": "www.gstatic.com",
+      "pathTemplate": "/recaptcha/api2/logo_48.png",
+      "method": "GET",
+      "resourceType": "image",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "image/png",
+      "count": 1
+    },
+    {
+      "host": "www.google.com",
+      "pathTemplate": "/recaptcha/api2/webworker.js",
+      "method": "GET",
+      "resourceType": "script",
+      "queryKeys": [
+        "hl",
+        "v"
+      ],
+      "status": 200,
+      "contentType": "text/javascript",
+      "count": 1
+    },
+    {
+      "host": "www.gstatic.com",
+      "pathTemplate": "/recaptcha/releases/{token}/recaptcha__tr.js",
+      "method": "GET",
+      "resourceType": "other",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "text/javascript",
+      "count": 1
+    },
+    {
+      "host": "fonts.gstatic.com",
+      "pathTemplate": "/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2",
+      "method": "GET",
+      "resourceType": "font",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "font/woff2",
+      "count": 1
+    },
+    {
+      "host": "www.google.com",
+      "pathTemplate": "/recaptcha/api2/reload",
+      "method": "POST",
+      "resourceType": "xhr",
+      "queryKeys": [
+        "k"
+      ],
+      "status": 200,
+      "contentType": "application/json",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/png/sarraf-white010061.png",
+      "method": "GET",
+      "resourceType": "image",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "image/png",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/woff2/manrope-latin-wght-normal010061.woff2",
+      "method": "GET",
+      "resourceType": "font",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "font/woff2",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/woff2/manrope-latin-ext-wght-normal010061.woff2",
+      "method": "GET",
+      "resourceType": "font",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "font/woff2",
+      "count": 1
+    },
+    {
+      "host": "www.google.com",
+      "pathTemplate": "/recaptcha/api2/clr",
+      "method": "POST",
+      "resourceType": "fetch",
+      "queryKeys": [
+        "k"
+      ],
+      "status": 200,
+      "contentType": "application/binary",
+      "count": 1
+    },
+    {
+      "host": "interactive.sarraf.pro",
+      "pathTemplate": "/pricetv",
+      "method": "POST",
+      "resourceType": "xhr",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "application/json",
+      "count": 1
+    },
+    {
+      "host": "interactive.sarraf.pro",
+      "pathTemplate": "/price",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [
+        "slug"
+      ],
+      "status": 200,
+      "contentType": "application/json",
+      "count": 1
+    },
+    {
+      "host": "interactive.sarraf.pro",
+      "pathTemplate": "/price/list",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [
+        "slug"
+      ],
+      "status": 200,
+      "contentType": "application/json",
+      "count": 1
+    },
+    {
+      "host": "api.sarraf.ai",
+      "pathTemplate": "/markets/rates",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [
+        "channel"
+      ],
+      "status": 200,
+      "contentType": "application/json",
+      "count": 1
+    }
+  ]
+}

@@ -125,6 +125,64 @@ export interface IngestionPayload {
   quarantined: IngestionQuarantineInput[];
 }
 
+/** Deneysel kaynağa erişim izni verilmiş portföy (yönetim ekranı). */
+export interface ExperimentalAccessRow {
+  username: string;
+  displayName: string;
+  portfolioId: string;
+  enabled: boolean;
+  approvedAt: string;
+  expiresAt: string | null;
+  reason: string;
+}
+
+/** Yönetici tarafından onaylanmış ekran eşlemesi. */
+export interface MappingApprovalRow {
+  rawLabel: string;
+  canonicalProductId: string;
+  confidence: string;
+  mappingVersion: string;
+  evidenceLiquidation: string | null;
+  evidenceReplacement: string | null;
+  evidenceObservedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string;
+}
+
+/** Kalıcı tarayıcı worker'ının kira durumu. */
+export interface WorkerLeaseState {
+  workerId: string;
+  acquiredAt: string;
+  heartbeatAt: string;
+  expiresAt: string;
+  active: boolean;
+}
+
+/** Worker'ın gönderdiği tek ekran gözlemi. */
+export interface ScreenObservationInput {
+  canonicalProductId: string;
+  rawLabel: string;
+  mappingConfidence: string;
+  liquidationPrice: string;
+  replacementPrice: string;
+  observedAt: string;
+}
+
+/** Worker gönderisinin gövdesi (ham payload veya secret İÇERMEZ). */
+export interface ScreenWorkerPayload {
+  workerId: string;
+  workerVersion: string;
+  browserVersion: string;
+  mappingVersion: string;
+  screenSignature: string;
+  headers: string[];
+  observedAt: string;
+  captchaSeen: boolean;
+  observations: ScreenObservationInput[];
+  unresolved: { rawProductName: string; reason: string }[];
+  restartCount: number;
+}
+
 /** Yönetim ekranındaki karantina satırı (salt okunur). */
 export interface QuarantineRow {
   providerCode: string;

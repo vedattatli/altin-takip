@@ -309,6 +309,57 @@ Arayüz yönlendirmesine tek başına güvenme.
   `findForbiddenTraces` ile tara.
 - Ekran yapısı beklenen imzaya uymazsa fail closed ol: yanlış fiyat üretmek yerine hiç üretme.
 
+## Ekran gözlemi kaynağı ve worker (Sprint 3.2 — özel pilot)
+
+- Ekran kaynağının kimliği AYRIDIR: `sarraf-tv-kayseri-screen`, lisans `EXPERIMENTAL_PRIVATE`,
+  sağlayıcı türü `SCREEN`. Bunu lisanslı bir kaynakla aynı kimlik altında birleştirme,
+  `REST` diye etiketleme, `REDISTRIBUTION_LICENSED` yeteneği verme.
+- **Değerlemeye yalnızca `VALUATION_READY_CONFIDENCE` girer**
+  (`NETWORK_VERIFIED`, `GROUPED_EXPLICIT`, `OPERATOR_VERIFIED`). `EXACT` tek başına ve
+  `CONVENTION` yetmez. Bir ürünü "çalışsın diye" bu listeye ekleme; yönetici onayı yolu vardır.
+- Ekran kaynağı `providerTimestamp: null` + `timestampProvenance: "OBSERVED"` üretir.
+  Gözlem anını "kaynak fiyat zamanı" gibi sunma; arayüzde "Son ekran gözlemi" yazar.
+  `UNKNOWN` köken her koşulda reddedilir.
+- **Worker'a Supabase anahtarı verme.** `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+  veya `service_role` worker ortamına, koduna veya imajına girmez. Worker yalnızca HMAC
+  imzalı makine ucuna yazar; bu kural `tests/private-pilot.test.ts` tarafından denetlenir.
+- Worker imzası iki dosyada birden uygulanır (`services/sarraf-screen-worker/src/signing.ts`
+  ve `src/server/security/worker-signature.ts`). Birini değiştirirsen diğerini de değiştir;
+  uyum testi kırılır.
+- Worker'ın yazdığı fiyat **merkezî kalite kapısından** geçer. Kaynağa özel bir "hızlı yol"
+  açma; `evaluateQuote` atlanamaz.
+- Deneysel kaynak genel kullanıcı listesine açılamaz ve global varsayılan yapılamaz.
+  Erişim portföy bazlı izin listesindendir ve hem uygulama hem veritabanı katmanında
+  doğrulanır. Tek katmanla yetinme.
+- İzin geri alındığında veya fiyat alınamadığında kullanıcıyı **başka bir kaynağa sessizce
+  düşürme**. Fiyat yoksa yok denir ve nedeni yazılır.
+
+## Ortam değişkeni okuma (ihlal edilemez)
+
+- **`Number(process.env.X ?? "varsayilan")` YAZMA.** `??` boş string için
+  devreye girmez; `PRICE_MAX_TRY=` gibi tanımlı-ama-boş bir değişken sessizce
+  `0` üretir ve kalite kapısını çökertir. `tests/env-parsing.test.ts` bu kalıbın
+  `src/` ve `services/` altına dönmesini engeller.
+- Sayısal/metinsel ayarları `src/lib/env.ts` üzerinden oku: `numberFromEnv`,
+  `stringFromEnv`, `flagFromEnv`. Boş ve yalnızca-boşluk değer "ayarlanmamış"
+  sayılır; sınır dışı değer varsayılana düşer.
+- Worker `@/` alias'ını kullanamaz; aynı kuralın kopyası
+  `services/sarraf-screen-worker/src/policy.ts` içindedir. Birini değiştirirsen
+  diğerini de değiştir — uyum testle denetlenir.
+
+## E2E koşum bütünlüğü (ihlal edilemez)
+
+- `playwright.config.ts` içinde `reuseExistingServer` **`false` kalır**. `true`
+  olursa Playwright önceden çalışan sunucuyu devralır, `webServer.env` bloğunu
+  HİÇ uygulamaz ve bütün takım yanlış yapılandırmayla sessizce koşar.
+- `.env.example` içindeki **her** değişken `testEnv`'de açıkça sabitlenir.
+  Next.js `.env.local` değerlerini yükler ama zaten ayarlı ortam değişkenlerini
+  ezmez; sabitlenmeyen her değişken geliştiricinin yerel değerini alır.
+- **Test komutunu `| tail` gibi bir boru hattından geçirme.** Bash boru hattının
+  çıkış kodu son komutundur; `npx playwright test | tail` testler kırılsa bile
+  `0` döner. Çıktıyı dosyaya yaz, `$?` yakala, `test-results/.last-run.json`
+  dosyasına bak.
+
 ## Arayüz kuralları
 
 - **Türkçe UI metinlerinde yazım hatası bırakma.** Türkçe karakterleri doğru kullan

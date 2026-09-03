@@ -26,9 +26,21 @@ export type ProviderId =
   | "hasfiyat"
   | "altinkaynak-direct"
   | "harem-direct"
-  | "bist-reference";
+  | "bist-reference"
+  /**
+   * Sarraf TV Kayseri EKRAN GÖZLEMİ.
+   *
+   * `sarraf-pro-kayseri` ile AYNI KİMLİK ALTINDA TUTULMAZ: biri ileride
+   * gelebilecek yetkili API sözleşmesi, diğeri tarayıcı ekran gözlemidir.
+   * Aynı kimliği paylaşsalardı, gözlem verisi lisanslı veri gibi görünürdü.
+   */
+  | "sarraf-tv-kayseri-screen";
 
-export type ProviderType = "MOCK" | "REST" | "WEBSOCKET" | "XML" | "REFERENCE";
+/**
+ * SCREEN: değer tarayıcı ekranından okunur; bir REST sözleşmesi DEĞİLDİR.
+ * Bu ayrım kasıtlıdır — ekran gözlemini "REST" saymak kaynağın niteliğini gizler.
+ */
+export type ProviderType = "MOCK" | "REST" | "WEBSOCKET" | "XML" | "REFERENCE" | "SCREEN";
 
 /**
  * Lisans / yapılandırma durumu.
@@ -36,8 +48,16 @@ export type ProviderType = "MOCK" | "REST" | "WEBSOCKET" | "XML" | "REFERENCE";
  *   NOT_CONFIGURED    : kimlik bilgisi veya API sözleşmesi yok
  *   LICENSE_REQUIRED  : teknik olarak hazır; yazılı lisans/izin bekleniyor
  *   LICENSED          : lisans referansı ve yeniden gösterim izni var
+ *   EXPERIMENTAL_PRIVATE : deneysel ekran gözlemi. Lisanslı SAYILMAZ, genel
+ *                          üretimde açılamaz, yalnızca yönetici izin listesindeki
+ *                          portföylerde ve özel pilot ortamında çalışır.
  */
-export type LicenseStatus = "DEV_ONLY" | "NOT_CONFIGURED" | "LICENSE_REQUIRED" | "LICENSED";
+export type LicenseStatus =
+  | "DEV_ONLY"
+  | "NOT_CONFIGURED"
+  | "LICENSE_REQUIRED"
+  | "LICENSED"
+  | "EXPERIMENTAL_PRIVATE";
 
 export type ProviderCapability =
   | "REST"
@@ -49,6 +69,8 @@ export type ProviderCapability =
   | "MULTI_SOURCE"
   | "REDISTRIBUTION_LICENSED"
   | "REFERENCE_ONLY"
+  /** Deneysel ekran gözlemi; resmî API değildir ve genel üretimde açılamaz. */
+  | "EXPERIMENTAL_SCREEN"
   /** Doğrulanmış sağlayıcı sözleşmesi olmadan üretimde kullanılamayan taslak adapter. */
   | "PROTOTYPE";
 

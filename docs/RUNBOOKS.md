@@ -120,3 +120,11 @@ Diğer kontroller:
 - **Silme:** yönetici, kullanıcı ayrıntısında kullanıcı adını birebir yazarak siler. Silme
   cascade ile profil, portföy, defter, anlık görüntü, pozisyon, oturum ve tercihleri kaldırır.
 - Silmeden önce kullanıcıya CSV dışa aktarma hatırlatılır.
+
+---
+
+## Özel pilot operasyonu
+
+Sarraf TV ekran worker'ı, deneysel kaynak izinleri, eşleme onayları ve pilotu
+durdurma adımları ayrı bir belgededir:
+[OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md)

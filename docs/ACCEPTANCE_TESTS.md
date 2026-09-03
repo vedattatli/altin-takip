@@ -14,7 +14,7 @@ Ek komutlar:
 npm run test:db
 ```
 
-(Supabase CLI + Docker; temiz veritabanına 0001→0012 uygular, 184 pgTAP testi koşar.)
+(Supabase CLI + Docker; temiz veritabanına 0001→0017 uygular, 272 pgTAP testi koşar.)
 
 ```bash
 npm run accounting:verify
@@ -450,3 +450,119 @@ Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop
 | 26.25 | Deneysel toplayıcı üretim sağlayıcı kaydına eklenmemiştir; sağlayıcı zamanı uydurulmaz | `tests/price-runtime.test.ts` §9 |
 | 26.26 | Artefaktlarda cookie/authorization/token/kişisel veri bulunmaz; hassas sorgu anahtarları maskelenir | `tests/price-runtime.test.ts` §10 |
 | 26.27 | Makine yanıtı `Set-Cookie` taşımaz (proxy makine yollarına CSRF çerezi yazmaz) | `tests/price-runtime.test.ts` §1; `e2e/price-sources.spec.ts` → "zamanlanmış alım ucu" |
+
+## 27. Sarraf TV özel pilotu (Sprint 3.2)
+
+`tests/private-pilot.test.ts` — 24 test.
+
+| Alan | Doğrulanan |
+| --- | --- |
+| HMAC imzası | Doğru imza kabul, yanlış imza `SIGNATURE_MISMATCH`, gövde değişimi `BODY_HASH_MISMATCH`, 60 sn dışı `TIMESTAMP_OUT_OF_RANGE`, secret yoksa `MISSING_SECRET` |
+| İmza uyumu | Worker tarafındaki `signRequest` ile sunucudaki `verifyWorkerSignature` birebir uyumlu (biri değişip diğeri unutulursa test kırılır) |
+| Nonce | Aynı nonce ikinci kez kabul edilmez |
+| Kira | Aynı anda tek worker; kirayı tutmayan yazamaz (`LEASE_NOT_HELD`); eski jeton reddedilir (`LEASE_TOKEN_STALE`) |
+| İzin listesi | İzinsiz kullanıcı deneysel kaynağı seçemez; izin verilince görünür ve seçilebilir; izin geri alınınca **başka kaynağa geçilmez**, kaynak yok sayılır |
+| Gözlem zamanı | 120 sn'den eski gözlem `OBSERVATION_STALE`; geçersiz gözlem `OBSERVATION_INVALID`; politika yalnızca eşleşen `providerId` için çalışır |
+| Sağlayıcı kimliği | Ekran kaynağı ayrı `providerId`, `EXPERIMENTAL_PRIVATE` lisans, `REDISTRIBUTION_LICENSED` yeteneği **yok**, varsayılan yapılamaz |
+| Worker sırları | Worker kaynak dosyalarında (yorumlar ayıklanarak) `SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `service_role` geçmez |
+
+### pgTAP bölümü 17 (`0017_sarraf_private_pilot.sql`)
+
+30 test. Dört pilot tablosunun istemciye kapalılığı, RPC'lerin yalnızca
+`service_role` ile çağrılabilirliği, deneysel kaynağın etkinleştirilebilir ama
+genel listeye açılamaz oluşu, varsayılan yapılamayışı, izin listesinin
+verilmesi/süre dolması/geri alınması, nonce replay engeli, kira devri, eşleme
+onayının `OPERATOR_VERIFIED` olarak kaydı ve deneysel kaynağın fiyat yazabilmesi.
+
+### Fizibilite koşumu
+
+```bash
+npm run price:sarraf-feasibility:headless
+npm run price:sarraf-feasibility:headed
+npm run price:sarraf-feasibility:strict
+```
+
+Sonuç kümesi: `FULL_OK` | `PARTIAL_OK` | `BLOCKED` | `UNAVAILABLE` | `NOT_RUN`.
+Ağ veya CAPTCHA nedeniyle çalışmayan koşum **başarı sayılmaz**; dürüstçe
+raporlanır. Son ölçüm `PARTIAL_OK`: 12 satır okundu, 4 ürün çözüldü, 8 satır
+bilerek çözülmedi, güven dağılımı `NETWORK_VERIFIED=1, CONVENTION=3`.
+Ayrıntı: [PRICE_SOURCE_STATUS.md](PRICE_SOURCE_STATUS.md)
+
+### Worker duman testi
+
+```bash
+npm --prefix services/sarraf-screen-worker run smoke
+```
+
+İmza başlıkları, Chromium açılışı, gözlem üretimi, imza değişiminde fail-closed
+davranışı ve tarayıcı ölünce oturumun ölü işaretlenmesi. Ağ erişimi yoksa
+tarayıcı adımları atlanır ve **başarı iddia edilmez**.
+
+## 28. E2E koşum bütünlüğü (Sprint 3.2)
+
+Bir test takımının "geçmesi" tek başına yeterli değildir: takımın **gerçekten
+ölçtüğünü** de doğrulamak gerekir. Sprint 3.2'de iki sessiz geçersizleştirici
+bulundu ve ikisi de kapatıldı.
+
+### 28.1 Sunucu yeniden kullanımı
+
+`reuseExistingServer` `true` iken 3100 portunda önceden çalışan bir sunucu
+devralınır ve Playwright `webServer.env` bloğunu **hiç uygulamaz**. Sonuç:
+uygulama yanlış arka uçla koşar, bütün girişler "kullanıcı adı veya parola
+hatalı" verir ve 282 testin 240'ı zaman aşımına düşer — hepsi ürün kusuru gibi
+görünür.
+
+Teşhis: tohumlanan yönetici hesabı `.data/auth-e2e.json` içinde `status: active`
+ve geçerli hash ile durur ama `lastLoginAt: null`'dur. Depo doğru, sunucu yanlış.
+
+Karar: `reuseExistingServer: false`. Her koşum kendi sunucusunu başlatır.
+
+### 28.2 `.env.local` sızıntısı
+
+Next.js `.env.local` dosyasını sunucu açılışında yükler ve **zaten ayarlı ortam
+değişkenlerini ezmez**. Dolayısıyla `webServer.env` içinde açıkça
+ayarlanmayan her değişken geliştiricinin yerel değerini alır.
+
+Yaşanan: `AUTH_SESSION_COOKIE=altin_session` sızdı; oturum çerezi testleri
+`altin_takip_session` ile biten adı aradığı için çerezi bulamadı ve 10 test
+başarısız oldu. Aynı sızıntı uygulamayı Supabase arka ucuna da kaydırıyordu.
+
+Karar: `testEnv` artık `.env.example` içindeki **her** değişkeni açıkça
+sabitler; kullanılmayanlar boş bırakılır ki canlı bir sağlayıcıya düşülmesin.
+
+### 28.3 Bunu koruyan testler
+
+`tests/deployment-surface.test.ts`:
+
+| Test | Doğruladığı |
+| --- | --- |
+| `.env.example` içindeki HER değişken `testEnv`'de sabitlenir | Yeni bir değişken eklenip sabitlenmezse test kırılır |
+| E2E sunucusu her koşumda yeniden başlatılır | `reuseExistingServer: false` korunur |
+| E2E oturum çerezi adı testlerin aradığı adla aynıdır | Ad iki yerde ayrışırsa test kırılır |
+
+### 28.4 Koşum sonucunu okuma kuralı
+
+Test komutunu `| tail` gibi bir boru hattından geçirmeyin: Bash boru hattının
+çıkış kodu **son** komutun kodudur, yani `npx playwright test | tail -25`
+testler başarısız olsa bile `0` döner ve başarısızlık özeti kırpılır.
+
+Doğru yol: çıktıyı dosyaya yazıp `$?` yakalamak. Kesin kaynak
+`test-results/.last-run.json` dosyasıdır (`status`, `failedTests`).
+
+## 29. Ortam değişkeni okuma (Sprint 3.2)
+
+`tests/env-parsing.test.ts` — 15 test.
+
+| Alan | Doğrulanan |
+| --- | --- |
+| Boş değer | `PRICE_MAX_TRY=""` gibi boş bir değişken varsayılana düşer, **0 dönmez** |
+| Yalnızca boşluk | `"   "` da "ayarlanmamış" sayılır |
+| Geçersiz değer | `abc`, `NaN`, `Infinity` varsayılana düşer |
+| Sınırlar | Alt/üst sınır dışındaki değer sessizce kabul edilmez |
+| Bayrak | Yalnızca `true` (harf durumu önemsiz) doğru sayılır; `1` ve `yes` DEĞİL |
+| Worker kopyası | Worker'daki `numberFromEnv` uygulama tarafıyla aynı davranır |
+| Kalıp koruması | `src/` ve `services/` içinde ham `Number(process.env...)` kalmadığı taranır |
+
+Bu testler, boş bir ortam değişkeninin kalite kapısını sessizce devre dışı
+bırakmasını engeller. Ayrıntı ve etki tablosu:
+[SECURITY.md](SECURITY.md) bölüm 35.

@@ -1,3 +1,4 @@
+import { numberFromEnv } from "@/lib/env";
 import { SNAPSHOT_FUTURE_TOLERANCE_MS } from "./types";
 import type { MarketId, NormalizedQuote, ProviderId } from "./contract";
 
@@ -29,7 +30,9 @@ export type QuoteRejectionCode =
   | "FETCHED_BEFORE_PROVIDER"
   | "PRICE_JUMP"
   | "OUT_OF_RANGE"
-  | "STATUS_NOT_OK";
+  | "STATUS_NOT_OK"
+  | "OBSERVATION_STALE"
+  | "OBSERVATION_INVALID";
 
 export type QuoteVerdict =
   | { ok: true; quote: NormalizedQuote }
@@ -46,13 +49,18 @@ export interface QualityPolicy {
   productRange: { min: number; max: number };
 }
 
+/**
+ * Eşikler `numberFromEnv` ile okunur: boş bir değişken (`PRICE_MAX_TRY=`)
+ * varsayılanı ATLAYIP 0 üretirdi ve kalite kapısı bütün fiyatları reddederdi.
+ * Sınırlar da doğrulanır; anlamsız bir değer sessizce kabul edilmez.
+ */
 export const DEFAULT_QUALITY_POLICY: QualityPolicy = {
-  maxChangeRatio: Number(process.env.PRICE_MAX_CHANGE_RATIO ?? "0.15"),
-  maxSpreadRatio: Number(process.env.PRICE_MAX_SPREAD_RATIO ?? "0.25"),
+  maxChangeRatio: numberFromEnv("PRICE_MAX_CHANGE_RATIO", 0.15, { min: 0.000001, max: 10 }),
+  maxSpreadRatio: numberFromEnv("PRICE_MAX_SPREAD_RATIO", 0.25, { min: 0.000001, max: 10 }),
   futureToleranceMs: SNAPSHOT_FUTURE_TOLERANCE_MS,
   productRange: {
-    min: Number(process.env.PRICE_MIN_TRY ?? "1"),
-    max: Number(process.env.PRICE_MAX_TRY ?? "100000000"),
+    min: numberFromEnv("PRICE_MIN_TRY", 1, { min: 0.000001 }),
+    max: numberFromEnv("PRICE_MAX_TRY", 100_000_000, { min: 1 }),
   },
 };
 
@@ -65,6 +73,23 @@ export interface QualityContext {
   previousLiquidation?: (productId: string) => number | null;
   now: number;
   policy?: Partial<QualityPolicy>;
+  /**
+   * GÖZLEM ZAMANI POLİTİKASI (yalnızca deneysel ekran kaynağı)
+   *
+   * Genel kural değişmez: sağlayıcı fiyat zamanı bildirmiyorsa quote reddedilir.
+   * Ancak ekran gözleminde kaynak, ayrı bir fiyat zaman damgası YAYIMLAMIYOR;
+   * elimizde yalnızca kendi gözlem anımız var. Bu durum uydurulmaz, açıkça
+   * `OBSERVED` olarak taşınır ve BURADA ayrı kurallarla değerlendirilir:
+   *   - gözlem geçerli bir zaman olmalı,
+   *   - gözlem `maxObservationAgeMs`'ten eski olmamalı,
+   *   - gelecek toleransını aşmamalı.
+   * Politika yalnızca `providerId` eşleşen kaynak için açılır; başka hiçbir
+   * sağlayıcı bu yolla zaman damgası kuralını atlayamaz.
+   */
+  observedTimePolicy?: {
+    providerId: ProviderId;
+    maxObservationAgeMs: number;
+  };
 }
 
 function toNumber(value: string): number {
@@ -114,6 +139,32 @@ export function evaluateQuote(quote: NormalizedQuote, context: QualityContext): 
   }
   if (liquidation < policy.productRange.min || replacement > policy.productRange.max) {
     return reject("OUT_OF_RANGE", "Fiyat tanımlı aralığın dışında.");
+  }
+
+  // GÖZLEM ZAMANI YOLU: yalnızca politika açık olan sağlayıcı için.
+  const observed = context.observedTimePolicy;
+  if (observed && observed.providerId === quote.providerId && quote.timestampProvenance === "OBSERVED") {
+    const observedAt = parseInstant(quote.fetchedAt);
+    if (observedAt === null) {
+      return reject("OBSERVATION_INVALID", "Gözlem zamanı geçersiz.");
+    }
+    if (observedAt > context.now + policy.futureToleranceMs) {
+      return reject("TIMESTAMP_FUTURE", "Gözlem zamanı gelecekte.");
+    }
+    if (context.now - observedAt > observed.maxObservationAgeMs) {
+      return reject("OBSERVATION_STALE", "Ekran gözlemi çok eski; güncel fiyat sayılmaz.");
+    }
+    const previousObserved = context.previousLiquidation?.(quote.canonicalProductId) ?? null;
+    if (previousObserved !== null && previousObserved > 0) {
+      const change = Math.abs(liquidation - previousObserved) / previousObserved;
+      if (change > policy.maxChangeRatio) {
+        return reject(
+          "PRICE_JUMP",
+          `Fiyat önceki değere göre beklenenden çok değişti (%${(change * 100).toFixed(1)}).`,
+        );
+      }
+    }
+    return { ok: true, quote };
   }
 
   // Zaman damgasının KAYNAĞI bilinmiyorsa fiyat değerlemeye giremez. Eksik zamanı

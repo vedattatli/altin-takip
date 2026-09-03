@@ -1,0 +1,11 @@
+{
+  "name": "sarraf-screen-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sarraf TV Kayseri ekran gözlem worker'ı (deneysel, özel pilot).",
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "smoke": "node --import tsx src/smoke.ts"
+  }
+}

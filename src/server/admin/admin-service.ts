@@ -137,6 +137,103 @@ export class AdminService {
     }
   }
 
+  // --- Deneysel özel pilot (Sprint 3.2) ---
+
+  /** Deneysel kaynağa erişimi olan portföyler. */
+  async listExperimentalAccess(actor: AdminActor, code: string): Promise<unknown> {
+    const rows = await this.backend.listExperimentalAccess(code);
+    await this.audit(actor, "price.experimental_access", null, true, {
+      providerCode: code,
+      action: "list",
+      count: rows.length,
+    });
+    return rows;
+  }
+
+  /**
+   * Yönetici bir kullanıcının portföyüne deneysel kaynak erişimi verir/kaldırır.
+   * Kullanıcı kendi kendine açamaz; her değişiklik denetim kaydı üretir.
+   */
+  async setExperimentalAccess(
+    actor: AdminActor,
+    userId: string,
+    code: string,
+    enabled: boolean,
+    reason: string,
+    expiresAt: string | null,
+  ): Promise<void> {
+    const target = await this.backend.getProfile(userId);
+    if (!target) {
+      await this.audit(actor, "price.experimental_access", null, false, { providerCode: code, userId });
+      throw notFound("Kullanıcı bulunamadı.");
+    }
+    try {
+      await this.backend.setExperimentalAccess(userId, code, enabled, actor.profile.id, reason, expiresAt);
+      await this.audit(actor, "price.experimental_access", target, true, {
+        providerCode: code,
+        enabled,
+        expiresAt: expiresAt ?? "none",
+      });
+    } catch (error) {
+      await this.audit(actor, "price.experimental_access", target, false, { providerCode: code, enabled });
+      if (error instanceof ProviderNotSelectableError) throw conflict(error.message);
+      throw error;
+    }
+  }
+
+  /** Onaylanmış ekran eşlemeleri. */
+  async listMappingApprovals(actor: AdminActor, code: string): Promise<unknown> {
+    const rows = await this.backend.listMappingApprovals(code);
+    await this.audit(actor, "price.mapping_approve", null, true, {
+      providerCode: code,
+      action: "list",
+      count: rows.length,
+    });
+    return rows;
+  }
+
+  /**
+   * Yönetici, ekran etiketi ↔ kanonik ürün eşlemesini kanıtıyla onaylar.
+   * Onay, CONVENTION eşlemesini OPERATOR_VERIFIED'a yükseltir ve ancak o zaman
+   * fiyat değerlemeye girebilir.
+   */
+  async approveMapping(
+    actor: AdminActor,
+    input: {
+      code: string;
+      rawLabel: string;
+      canonicalProductId: string;
+      mappingVersion: string;
+      evidenceLiquidation: string | null;
+      evidenceReplacement: string | null;
+      evidenceObservedAt: string | null;
+      revoke: boolean;
+    },
+  ): Promise<void> {
+    try {
+      await this.backend.approvePriceMapping({ ...input, adminId: actor.profile.id });
+      await this.audit(actor, "price.mapping_approve", null, true, {
+        providerCode: input.code,
+        rawLabel: input.rawLabel,
+        productId: input.canonicalProductId,
+        revoked: input.revoke,
+      });
+    } catch (error) {
+      await this.audit(actor, "price.mapping_approve", null, false, {
+        providerCode: input.code,
+        rawLabel: input.rawLabel,
+      });
+      throw error;
+    }
+  }
+
+  /** Kalıcı tarayıcı worker'ının kira/heartbeat durumu. */
+  async screenWorkerState(actor: AdminActor, code: string): Promise<unknown> {
+    const state = await this.backend.workerLeaseState(code);
+    await this.audit(actor, "price.experimental_access", null, true, { providerCode: code, action: "worker_state" });
+    return state;
+  }
+
   /** Yönetici elle fiyat alımı tetikler. */
   async refreshPriceProvider(actor: AdminActor, code: string): Promise<unknown> {
     const { PriceIngestionService } = await import("@/server/prices/ingestion-service");

@@ -33,6 +33,9 @@ import {
   type IngestionQuoteInput,
   type IngestionResult,
   type QuarantineRow,
+  type ExperimentalAccessRow,
+  type MappingApprovalRow,
+  type WorkerLeaseState,
   type PricePreferenceResult,
   type PricePreferenceRow,
   type PriceSourceEventRow,
@@ -152,6 +155,10 @@ interface StoreShape {
   pricePreferences: StoredPricePreference[];
   priceSourceEvents: StoredPriceSourceEvent[];
   priceQuarantine: StoredPriceQuarantine[];
+  experimentalAccess: StoredExperimentalAccess[];
+  mappingApprovals: StoredMappingApproval[];
+  workerNonces: { nonce: string; workerId: string; seenAt: string }[];
+  workerLeases: StoredWorkerLease[];
   /** Yönetici ikinci faktörü (Sprint 3). Secret ŞİFRELİ; kurtarma kodları özet. */
   mfaCredentials: StoredMfaCredential[];
   mfaRecoveryCodes: StoredRecoveryCode[];
@@ -183,6 +190,41 @@ interface StoredPriceProvider extends ProviderSyncInput {
   mappingVersion: string;
   mappingCount: number;
   health: ProviderStateRow["health"];
+}
+
+/** Deneysel kaynağa portföy bazlı erişim izni. */
+interface StoredExperimentalAccess {
+  portfolioId: string;
+  userId: string;
+  providerCode: string;
+  enabled: boolean;
+  approvedBy: string | null;
+  approvedAt: string;
+  expiresAt: string | null;
+  reason: string;
+}
+
+/** Yönetici onaylı ekran eşlemesi. */
+interface StoredMappingApproval {
+  providerCode: string;
+  rawLabel: string;
+  canonicalProductId: string;
+  confidence: string;
+  mappingVersion: string;
+  evidenceLiquidation: string | null;
+  evidenceReplacement: string | null;
+  evidenceObservedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string;
+  revokedAt: string | null;
+}
+
+interface StoredWorkerLease {
+  providerCode: string;
+  workerId: string;
+  acquiredAt: string;
+  heartbeatAt: string;
+  expiresAt: string;
 }
 
 /** Karantina kaydı: append-only; ham yanıt saklanmaz. */
@@ -235,7 +277,7 @@ interface StoredPriceSourceEvent extends PriceSourceEventRow {
   portfolioId: string;
 }
 
-const STORE_VERSION = 6;
+const STORE_VERSION = 7;
 
 /** Katalogdaki geçerli ürün kimlikleri; bilinmeyen ürün karantinaya alınır. */
 const GOLD_PRODUCT_IDS = new Set(GOLD_PRODUCTS.map((product) => product.id));
@@ -256,6 +298,10 @@ function emptyStore(): StoreShape {
     pricePreferences: [],
     priceSourceEvents: [],
     priceQuarantine: [],
+    experimentalAccess: [],
+    mappingApprovals: [],
+    workerNonces: [],
+    workerLeases: [],
     mfaCredentials: [],
     mfaRecoveryCodes: [],
   };
@@ -1190,7 +1236,11 @@ export class LocalAuthBackend implements AuthBackend {
     this.refresh();
     for (const input of providers) {
       const existing = this.providerRow(input.code);
-      const licensed = input.licenseStatus === "LICENSED" || input.licenseStatus === "DEV_ONLY";
+      // Deneysel kaynak da etkin kalabilir; lisanslı SAYILMAZ ama kapatılmaz.
+      const licensed =
+        input.licenseStatus === "LICENSED" ||
+        input.licenseStatus === "DEV_ONLY" ||
+        input.licenseStatus === "EXPERIMENTAL_PRIVATE";
       if (existing) {
         const wasDefault = existing.isDefault === true;
         Object.assign(existing, input);
@@ -1236,8 +1286,17 @@ export class LocalAuthBackend implements AuthBackend {
     this.refresh();
     const provider = this.providerRow(code);
     if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
-    if (enabled && provider.licenseStatus !== "LICENSED" && provider.licenseStatus !== "DEV_ONLY") {
+    // Sunucudaki kısıtla aynı: deneysel kaynak da etkinleştirilebilir ama
+    // LİSANSLI SAYILMAZ ve "kullanıcıya açık" listesine giremez.
+    const activatable = ["LICENSED", "DEV_ONLY", "EXPERIMENTAL_PRIVATE"];
+    if (enabled && !activatable.includes(provider.licenseStatus)) {
       throw new ProviderNotSelectableError(code, "Bu kaynak lisans/izin olmadan etkinleştirilemez.");
+    }
+    if (userSelectable && provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
+      throw new ProviderNotSelectableError(
+        code,
+        "Deneysel kaynak genel listeye açılamaz; erişim portföy bazlı izin listesiyle verilir.",
+      );
     }
     if (enabled && provider.licenseStatus === "LICENSED" && !provider.redistributionAllowed) {
       throw new ProviderNotSelectableError(code, "Bu kaynak için yeniden gösterim izni işaretlenmemiş.");
@@ -1452,6 +1511,10 @@ export class LocalAuthBackend implements AuthBackend {
     if (provider.capabilities.includes("REFERENCE_ONLY")) {
       throw new ProviderNotSelectableError(code, "Referans kaynağı varsayılan yapılamaz.");
     }
+    // Deneysel kaynak hiçbir koşulda global varsayılan olamaz.
+    if (provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
+      throw new ProviderNotSelectableError(code, "Deneysel kaynak global varsayılan yapılamaz.");
+    }
     for (const candidate of this.store.priceProviders) candidate.isDefault = candidate.code === code;
     this.write();
     return code;
@@ -1460,6 +1523,214 @@ export class LocalAuthBackend implements AuthBackend {
   async defaultPriceProvider(): Promise<string | null> {
     this.refresh();
     return this.store.priceProviders.find((provider) => provider.isDefault)?.code ?? null;
+  }
+
+  // --- Deneysel özel pilot (Sprint 3.2) ---
+
+  async setExperimentalAccess(
+    userId: string,
+    code: string,
+    enabled: boolean,
+    adminId: string,
+    reason: string,
+    expiresAt: string | null,
+  ): Promise<void> {
+    this.refresh();
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+    if (provider.licenseStatus !== "EXPERIMENTAL_PRIVATE") {
+      throw new ProviderNotSelectableError(code, "Bu kaynak deneysel değildir; izin listesi kullanılamaz.");
+    }
+    const portfolio = this.store.portfolios.find((row) => row.userId === userId);
+    if (!portfolio) throw new Error("Portföy bulunamadı");
+    const existing = this.store.experimentalAccess.find(
+      (row) => row.portfolioId === portfolio.id && row.providerCode === code,
+    );
+    if (existing) {
+      existing.enabled = enabled;
+      existing.approvedBy = adminId;
+      existing.approvedAt = this.nowISO();
+      existing.expiresAt = expiresAt;
+      existing.reason = reason;
+    } else {
+      this.store.experimentalAccess.push({
+        portfolioId: portfolio.id,
+        userId,
+        providerCode: code,
+        enabled,
+        approvedBy: adminId,
+        approvedAt: this.nowISO(),
+        expiresAt,
+        reason,
+      });
+    }
+    this.write();
+  }
+
+  async experimentalAccessAllowed(userId: string, code: string): Promise<boolean> {
+    this.refresh();
+    const row = this.store.experimentalAccess.find(
+      (candidate) => candidate.userId === userId && candidate.providerCode === code,
+    );
+    if (!row || !row.enabled) return false;
+    if (row.expiresAt && Date.parse(row.expiresAt) <= Date.parse(this.nowISO())) return false;
+    return true;
+  }
+
+  async listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]> {
+    this.refresh();
+    return this.store.experimentalAccess
+      .filter((row) => row.providerCode === code)
+      .map((row) => {
+        const user = this.store.users.find((candidate) => candidate.id === row.userId);
+        return {
+          username: user?.username ?? "(bilinmiyor)",
+          displayName: user?.displayName ?? "",
+          portfolioId: row.portfolioId,
+          enabled: row.enabled,
+          approvedAt: row.approvedAt,
+          expiresAt: row.expiresAt,
+          reason: row.reason,
+        };
+      })
+      .sort((a, b) => a.username.localeCompare(b.username));
+  }
+
+  async approvePriceMapping(input: {
+    code: string;
+    rawLabel: string;
+    canonicalProductId: string;
+    mappingVersion: string;
+    adminId: string;
+    evidenceLiquidation: string | null;
+    evidenceReplacement: string | null;
+    evidenceObservedAt: string | null;
+    revoke: boolean;
+  }): Promise<void> {
+    this.refresh();
+    if (!this.providerRow(input.code)) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${input.code}`);
+    if (!GOLD_PRODUCT_IDS.has(input.canonicalProductId)) {
+      throw new Error(`Bilinmeyen ürün: ${input.canonicalProductId}`);
+    }
+    const existing = this.store.mappingApprovals.find(
+      (row) =>
+        row.providerCode === input.code &&
+        row.rawLabel === input.rawLabel &&
+        row.mappingVersion === input.mappingVersion,
+    );
+    if (input.revoke) {
+      if (existing) existing.revokedAt = this.nowISO();
+      this.write();
+      return;
+    }
+    if (existing) {
+      existing.canonicalProductId = input.canonicalProductId;
+      existing.evidenceLiquidation = input.evidenceLiquidation;
+      existing.evidenceReplacement = input.evidenceReplacement;
+      existing.evidenceObservedAt = input.evidenceObservedAt;
+      existing.approvedBy = input.adminId;
+      existing.approvedAt = this.nowISO();
+      existing.revokedAt = null;
+    } else {
+      this.store.mappingApprovals.push({
+        providerCode: input.code,
+        rawLabel: input.rawLabel,
+        canonicalProductId: input.canonicalProductId,
+        confidence: "OPERATOR_VERIFIED",
+        mappingVersion: input.mappingVersion,
+        evidenceLiquidation: input.evidenceLiquidation,
+        evidenceReplacement: input.evidenceReplacement,
+        evidenceObservedAt: input.evidenceObservedAt,
+        approvedBy: input.adminId,
+        approvedAt: this.nowISO(),
+        revokedAt: null,
+      });
+    }
+    this.write();
+  }
+
+  async listMappingApprovals(code: string): Promise<MappingApprovalRow[]> {
+    this.refresh();
+    return this.store.mappingApprovals
+      .filter((row) => row.providerCode === code && row.revokedAt === null)
+      .map((row) => ({
+        rawLabel: row.rawLabel,
+        canonicalProductId: row.canonicalProductId,
+        confidence: row.confidence,
+        mappingVersion: row.mappingVersion,
+        evidenceLiquidation: row.evidenceLiquidation,
+        evidenceReplacement: row.evidenceReplacement,
+        evidenceObservedAt: row.evidenceObservedAt,
+        approvedBy: this.store.users.find((user) => user.id === row.approvedBy)?.username ?? null,
+        approvedAt: row.approvedAt,
+      }))
+      .sort((a, b) => a.rawLabel.localeCompare(b.rawLabel));
+  }
+
+  async claimWorkerNonce(nonce: string, workerId: string): Promise<boolean> {
+    // Sunucudaki benzersiz anahtar kısıtıyla aynı garanti: aynı nonce iki kez
+    // kabul edilmez. Yazma kuyruğu eşzamanlı çağrıları sıraya sokar.
+    return this.serialize(`worker-nonce`, () => {
+      this.refresh();
+      const cutoff = Date.parse(this.nowISO()) - 60 * 60_000;
+      this.store.workerNonces = this.store.workerNonces.filter((row) => Date.parse(row.seenAt) >= cutoff);
+      if (this.store.workerNonces.some((row) => row.nonce === nonce)) return false;
+      this.store.workerNonces.push({ nonce, workerId, seenAt: this.nowISO() });
+      this.write();
+      return true;
+    });
+  }
+
+  async acquireWorkerLease(
+    code: string,
+    workerId: string,
+    ttlSeconds: number,
+  ): Promise<{ held: boolean; workerId: string; takeover: boolean }> {
+    return this.serialize(`worker-lease:${code}`, () => {
+      this.refresh();
+      const now = Date.parse(this.nowISO());
+      const ttl = Math.max(30, ttlSeconds) * 1000;
+      const existing = this.store.workerLeases.find((row) => row.providerCode === code);
+      if (!existing) {
+        this.store.workerLeases.push({
+          providerCode: code,
+          workerId,
+          acquiredAt: this.nowISO(),
+          heartbeatAt: this.nowISO(),
+          expiresAt: new Date(now + ttl).toISOString(),
+        });
+        this.write();
+        return { held: true, workerId, takeover: false };
+      }
+      if (existing.workerId === workerId) {
+        existing.heartbeatAt = this.nowISO();
+        existing.expiresAt = new Date(now + ttl).toISOString();
+        this.write();
+        return { held: true, workerId, takeover: false };
+      }
+      if (Date.parse(existing.expiresAt) > now) {
+        return { held: false, workerId: existing.workerId, takeover: false };
+      }
+      existing.workerId = workerId;
+      existing.acquiredAt = this.nowISO();
+      existing.heartbeatAt = this.nowISO();
+      existing.expiresAt = new Date(now + ttl).toISOString();
+      this.write();
+      return { held: true, workerId, takeover: true };
+    });
+  }
+
+  async workerLeaseState(code: string): Promise<WorkerLeaseState | null> {
+    this.refresh();
+    const row = this.store.workerLeases.find((candidate) => candidate.providerCode === code);
+    if (!row) return null;
+    return {
+      workerId: row.workerId,
+      acquiredAt: row.acquiredAt,
+      heartbeatAt: row.heartbeatAt,
+      expiresAt: row.expiresAt,
+      active: Date.parse(row.expiresAt) > Date.parse(this.nowISO()),
+    };
   }
 
   async currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null> {
@@ -1531,7 +1802,20 @@ export class LocalAuthBackend implements AuthBackend {
       throw new ProviderNotSelectableError(code, "Bu kaynak kullanıma kapalı.");
     }
     if (role === "user" && !provider.userSelectable) {
-      throw new ProviderNotSelectableError(code, "Bu kaynak kullanıcı seçimine kapalı.");
+      // Deneysel kaynak genel listeye açılmaz; erişim portföy bazlı izin
+      // listesiyle verilir ve BURADA da doğrulanır (arayüz kontrolü yetmez).
+      const experimentalAllowed =
+        provider.licenseStatus === "EXPERIMENTAL_PRIVATE" &&
+        this.store.experimentalAccess.some(
+          (row) =>
+            row.userId === scope.userId &&
+            row.providerCode === code &&
+            row.enabled &&
+            (row.expiresAt === null || Date.parse(row.expiresAt) > Date.parse(this.nowISO())),
+        );
+      if (!experimentalAllowed) {
+        throw new ProviderNotSelectableError(code, "Bu kaynak kullanıcı seçimine kapalı.");
+      }
     }
     if (provider.capabilities.includes("REFERENCE_ONLY")) {
       throw new ProviderNotSelectableError(code, "Referans kaynağı değerleme için seçilemez.");

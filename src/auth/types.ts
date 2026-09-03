@@ -131,6 +131,8 @@ export type AdminAction =
   | "price.refresh"
   | "price.quarantine_view"
   | "price.default_source"
+  | "price.experimental_access"
+  | "price.mapping_approve"
   | "data.export"
   | "data.deletion_request";
 

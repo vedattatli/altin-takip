@@ -149,6 +149,8 @@ describe("1. makine (cron) ucu tarayıcı kimliği beklemez", () => {
     const proxy = stripComments(readFileSync(join(process.cwd(), "src", "proxy.ts"), "utf8"));
     expect(proxy).toContain("MACHINE_PATHS");
     expect(proxy).toContain('"/api/cron/"');
+    // Worker ucu da makine yüzeyidir; davranış testi tests/private-pilot.test.ts içinde.
+    expect(proxy).toContain('"/api/internal/price-worker/"');
   });
 
   it("normal mutation route'ları CSRF korumasını KORUR", async () => {
@@ -628,7 +630,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
     expect(result.quotes).toHaveLength(0);
   });
 
-  it("veri türü deneysel etiketlenir ve sağlayıcı zamanı UYDURULMAZ", () => {
+  it("CONVENTION eşlemesi onaysız değerlemeye GİRMEZ", () => {
     process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
@@ -637,15 +639,82 @@ describe("9. deneysel ekran toplayıcısı", () => {
       captchaSeen: false,
       ingestionRunId: "run-1",
     });
+    expect(result.quotes).toHaveLength(0);
+    expect(result.status).toBe("UNAVAILABLE");
+    expect(result.unresolved.some((row) => row.reason.startsWith("ONAY_BEKLIYOR"))).toBe(true);
+  });
+
+  it("yönetici onayı CONVENTION eşlemesini kullanılabilir yapar", () => {
+    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+    const result = collectScreenQuotes({
+      headers: ["ALIŞ", "SATIŞ"],
+      observations: [observation],
+      unresolved: [],
+      captchaSeen: false,
+      ingestionRunId: "run-1",
+      approvedMappings: new Map([["yeni-ceyrek", "OPERATOR_VERIFIED" as const]]),
+    });
     expect(result.status).toBe("OK");
     expect(result.dataKind).toBe("LIVE_SCREEN_EXPERIMENTAL");
+    expect(result.quotes[0]!.providerId).toBe("sarraf-tv-kayseri-screen");
     expect(result.quotes[0]!.providerTimestamp).toBeNull();
     expect(result.quotes[0]!.timestampProvenance).toBe("OBSERVED");
     expect(result.quotes[0]!.licenseReference).toBeNull();
   });
 
-  it("deneysel toplayıcı üretim sağlayıcı kaydına eklenmemiştir", () => {
-    expect(PROVIDER_DESCRIPTORS.some((descriptor) => descriptor.providerId.includes("screen"))).toBe(false);
+  it("NETWORK_VERIFIED eşleme onaysız kullanılabilir", () => {
+    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+    const result = collectScreenQuotes({
+      headers: ["ALIŞ", "SATIŞ"],
+      observations: [{ ...observation, canonicalProductId: "gremse-altin", mappingConfidence: "NETWORK_VERIFIED" }],
+      unresolved: [],
+      captchaSeen: false,
+      ingestionRunId: "run-1",
+    });
+    expect(result.status).toBe("OK");
+    expect(result.quotes).toHaveLength(1);
+  });
+
+  it("bayat gözlem reddedilir", () => {
+    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+    const result = collectScreenQuotes({
+      headers: ["ALIŞ", "SATIŞ"],
+      observations: [
+        {
+          ...observation,
+          canonicalProductId: "gremse-altin",
+          mappingConfidence: "NETWORK_VERIFIED",
+          observedAt: new Date(NOW - 5 * 60_000).toISOString(),
+        },
+      ],
+      unresolved: [],
+      captchaSeen: false,
+      ingestionRunId: "run-1",
+      now: () => NOW,
+    });
+    expect(result.quotes).toHaveLength(0);
+    expect(result.unresolved.some((row) => row.reason === "GOZLEM_BAYAT")).toBe(true);
+  });
+
+  it("ekran kaynağı, resmî API sağlayıcısından AYRI kimlik taşır", () => {
+    const screen = PROVIDER_DESCRIPTORS.find((d) => d.providerId === "sarraf-tv-kayseri-screen");
+    const official = PROVIDER_DESCRIPTORS.find((d) => d.providerId === "sarraf-pro-kayseri");
+    expect(screen).toBeDefined();
+    expect(official).toBeDefined();
+    expect(screen!.providerId).not.toBe(official!.providerId);
+    // Deneysel kaynak lisanslı görünmez ve yeniden gösterim yeteneği taşımaz.
+    expect(screen!.capabilities).not.toContain("REDISTRIBUTION_LICENSED");
+    expect(screen!.capabilities).toContain("EXPERIMENTAL_SCREEN");
+    expect(screen!.technicalName).toContain("ekran gözlemi");
+  });
+
+  it("üretim dağıtımında deneysel kaynak lisanslı görünmez ve seçilemez", () => {
+    const env = process.env as Record<string, string | undefined>;
+    env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+    env.VERCEL_ENV = "production";
+    const view = describeProvider("sarraf-tv-kayseri-screen")!;
+    expect(view.licenseStatus).toBe("NOT_CONFIGURED");
+    expect(view.selectable).toBe(false);
   });
 });
 

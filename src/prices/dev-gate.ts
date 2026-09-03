@@ -44,3 +44,19 @@ export function devOnlyProviderBlocked(): boolean {
 }
 
 export const DEV_ONLY_BLOCKED_MESSAGE = "Test verisi sağlayıcısı üretim ortamında kullanılamaz.";
+
+/**
+ * DENEYSEL EKRAN KAYNAĞI KAPISI
+ *
+ * `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` olmadan kaynak hiç çalışmaz.
+ * Gerçek üretim dağıtımında (VERCEL_ENV=production veya
+ * APP_DEPLOYMENT_ENV=production) bayrak YOK SAYILIR: deneysel ekran gözlemi
+ * genel kullanıcıya asla fiyat üretmez.
+ *
+ * Bayrak açık olsa bile bu, kaynağın herkese açıldığı anlamına GELMEZ; hangi
+ * portföyün kullanabileceği yöneticinin izin listesiyle ayrıca belirlenir.
+ */
+export function experimentalScreenAllowed(): boolean {
+  if (productionDeployment()) return false;
+  return (process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN ?? "").trim().toLowerCase() === "true";
+}
