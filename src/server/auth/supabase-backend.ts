@@ -20,6 +20,8 @@ import {
   type ExperimentalAccessRow,
   type MappingApprovalRow,
   type WorkerLeaseState,
+  ScreenRawRow,
+  ScreenRowsSnapshot,
 } from "@/server/prices/types";
 import type {
   LedgerAppendRequest,
@@ -808,6 +810,34 @@ export class SupabaseAuthBackend implements AuthBackend {
     const updated = providers.find((provider) => provider.code === code);
     if (!updated) fail("Fiyat sağlayıcısı güncellenemedi", { message: "Kayıt bulunamadı" });
     return updated;
+  }
+
+  async setScreenRows(
+    code: string,
+    rows: readonly ScreenRawRow[],
+    signature: string,
+    observedAt: string,
+  ): Promise<void> {
+    await this.priceRpc(
+      "price_screen_rows_set",
+      { p_code: code, p_rows: rows, p_signature: signature, p_observed: observedAt },
+      "Ekran satırları kaydedilemedi",
+    );
+  }
+
+  async screenRows(code: string): Promise<ScreenRowsSnapshot | null> {
+    const result = await this.priceRpc<ScreenRowsSnapshot | null>(
+      "price_screen_rows_get",
+      { p_code: code },
+      "Ekran satırları okunamadı",
+    );
+    if (!result) return null;
+    return {
+      rows: Array.isArray(result.rows) ? result.rows : [],
+      screenSignature: String(result.screenSignature ?? ""),
+      observedAt: String(result.observedAt ?? ""),
+      updatedAt: String(result.updatedAt ?? ""),
+    };
   }
 
   async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {

@@ -43,6 +43,8 @@ import {
   type ProviderStateRow,
   type ProviderSyncInput,
   type StoredQuoteRow,
+  ScreenRawRow,
+  ScreenRowsSnapshot,
 } from "@/server/prices/types";
 import type { MfaCredentialRecord } from "./backend";
 import type { DataScope } from "./actor";
@@ -1310,6 +1312,26 @@ export class LocalAuthBackend implements AuthBackend {
     if (!provider.enabled || !provider.userSelectable) provider.isDefault = false;
     this.write();
     return this.toProviderState(provider);
+  }
+
+  private screenRowsStore = new Map<string, ScreenRowsSnapshot>();
+
+  async setScreenRows(
+    code: string,
+    rows: readonly ScreenRawRow[],
+    signature: string,
+    observedAt: string,
+  ): Promise<void> {
+    this.screenRowsStore.set(code, {
+      rows: [...rows],
+      screenSignature: signature,
+      observedAt,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async screenRows(code: string): Promise<ScreenRowsSnapshot | null> {
+    return this.screenRowsStore.get(code) ?? null;
   }
 
   async applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult> {

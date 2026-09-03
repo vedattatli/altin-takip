@@ -2,13 +2,22 @@ import { numberFromEnv } from "@/lib/env";
 import "server-only";
 
 import { MOCK_PROVIDER_META } from "@/prices/mock-provider";
+import {
+  SCREEN_OBSERVATION_FRESH_MS,
+  SCREEN_OBSERVATION_MAX_AGE_MS,
+} from "@/prices/providers/sarraf-tv-screen-collector";
 import { describeProvider, listProviderStatuses } from "@/prices/registry";
 import type { PriceQuote, PriceSnapshot } from "@/prices/types";
 import { adminScope, ownScope, type AdminActor, type DataScope, type UserActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
 import { PriceIngestionService } from "./ingestion-service";
-import { ProviderNotSelectableError, type PriceSourceEventRow, type ProviderQuotesRow } from "./types";
+import {
+  ProviderNotSelectableError,
+  type PriceSourceEventRow,
+  type ProviderQuotesRow,
+  type ScreenRawRow,
+} from "./types";
 
 /**
  * AKTİF FİYAT KAYNAĞI
@@ -210,6 +219,64 @@ export class PriceSourceService {
    */
   async activeSnapshot(actor: UserActor): Promise<ActiveSnapshotResult> {
     return this.snapshotForScope(ownScope(actor));
+  }
+
+  /**
+   * KAYSERİ EKRANINDA GÖRÜNEN BÜTÜN HAM SATIRLAR
+   *
+   * Ekranda ne yazıyorsa onu gösterir. Bir satırın burada görünmesi, o fiyatın
+   * portföy hesabına girdiği anlamına GELMEZ — `usedInValuation` bunu satır
+   * satır söyler.
+   *
+   * Erişim izni olmayan kullanıcıya boş döner: deneysel kaynak yalnız
+   * yöneticinin izin listesindeki portföylere açıktır.
+   */
+  async kayseriScreenRows(actor: UserActor): Promise<{
+    rows: ScreenRawRow[];
+    observedAt: string | null;
+    screenSignature: string;
+    /** Gözlem yaşına göre: "fresh" | "stale" | "unusable" | "none" */
+    freshness: "fresh" | "stale" | "unusable" | "none";
+    ageMinutes: number | null;
+    allowed: boolean;
+  }> {
+    const allowed = await this.backend
+      .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
+      .catch(() => false);
+    if (!allowed) {
+      return { rows: [], observedAt: null, screenSignature: "", freshness: "none", ageMinutes: null, allowed: false };
+    }
+
+    const snapshot = await this.backend.screenRows(EXPERIMENTAL_SCREEN_CODE);
+    if (!snapshot || snapshot.rows.length === 0) {
+      return { rows: [], observedAt: null, screenSignature: "", freshness: "none", ageMinutes: null, allowed: true };
+    }
+
+    const observedMs = Date.parse(snapshot.observedAt);
+    if (!Number.isFinite(observedMs)) {
+      return {
+        rows: snapshot.rows,
+        observedAt: null,
+        screenSignature: snapshot.screenSignature,
+        freshness: "none",
+        ageMinutes: null,
+        allowed: true,
+      };
+    }
+
+    const ageMs = Math.max(0, this.now() - observedMs);
+    const ageMinutes = Math.floor(ageMs / 60_000);
+    // Zamanlanmış bulut toplayıcısı saatte bir çalışır ve gecikebilir.
+    const freshness = ageMs <= SCREEN_OBSERVATION_FRESH_MS ? "fresh" : ageMs <= SCREEN_OBSERVATION_MAX_AGE_MS ? "stale" : "unusable";
+
+    return {
+      rows: snapshot.rows,
+      observedAt: snapshot.observedAt,
+      screenSignature: snapshot.screenSignature,
+      freshness,
+      ageMinutes,
+      allowed: true,
+    };
   }
 
   /**

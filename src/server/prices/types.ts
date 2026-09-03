@@ -255,3 +255,43 @@ export class ProviderNotSelectableError extends Error {
     this.name = "ProviderNotSelectableError";
   }
 }
+
+/**
+ * EKRANDA GÖRÜNEN TEK HAM SATIR
+ *
+ * "Kayseri Fiyatları" ekranı Sarraf TV'deki BÜTÜN satırları ham adıyla gösterir.
+ * Bir satırın görünmesi, o fiyatın portföy değerlemesine girdiği anlamına
+ * GELMEZ — ikisi ayrı kavramdır ve `usedInValuation` bunu açıkça söyler.
+ */
+export interface ScreenRawRow {
+  /** Ekranda YAZDIĞI gibi ham etiket. Çevrilmez, düzeltilmez. */
+  rawLabel: string;
+  /**
+   * Fiyatlar ONDALIK METİN olarak taşınır. Kayan noktaya çevrilmez: para
+   * değerlerinde 0,1 gibi sayılar ikili tabanda tam gösterilemez ve
+   * yuvarlama hatası birikir.
+   */
+  /** İki yönlü satırlarda alış (bozdurma); tek fiyatlı satırlarda null. */
+  buy: string | null;
+  /** İki yönlü satırlarda satış (yeniden alma); tek fiyatlı satırlarda null. */
+  sell: string | null;
+  /**
+   * Tek yönlü referans fiyat. Yön KANITLANMADIĞI için alış/satış alanlarına
+   * yazılmaz; aynı rakamı iki yöne birden koymak yanlış olurdu.
+   */
+  single: string | null;
+  canonicalProductId: string | null;
+  confidence: string | null;
+  /** Portföy değerlemesine giriyor mu? */
+  usedInValuation: boolean;
+  /** Değerlemeye girmiyorsa sebebi. */
+  reason: string | null;
+}
+
+/** Saklanan son ham satır kümesi. */
+export interface ScreenRowsSnapshot {
+  rows: ScreenRawRow[];
+  screenSignature: string;
+  observedAt: string;
+  updatedAt: string;
+}

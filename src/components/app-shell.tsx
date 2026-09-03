@@ -43,6 +43,7 @@ const ICONS = {
     <Icon path="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm9-1 1.6 1.6L23 7" />
   ),
   priceSource: <Icon path="M4 19V5m0 14h16M8 15l3.5-4 3 2.5L20 8" />,
+  kayseri: <Icon path="M12 3v18M5 8h14M5 16h14" />,
 } as const;
 
 /**
@@ -56,6 +57,7 @@ function buildNavItems(role: SessionUser["role"] | null): NavItem[] {
     { href: "/panel", label: "Panel", icon: ICONS.panel },
     { href: "/islemler", label: "İşlemler", icon: ICONS.transactions },
     { href: "/fiyat-kaynagi", label: "Fiyat", icon: ICONS.priceSource },
+    { href: "/kayseri-fiyatlari", label: "Kayseri", icon: ICONS.kayseri },
     { href: "/ayarlar", label: "Ayarlar", icon: ICONS.settings },
   ];
   if (role === "admin") {

@@ -18,6 +18,8 @@ import type {
   ProviderStateRow,
   ProviderSyncInput,
   QuarantineRow,
+  ScreenRawRow,
+  ScreenRowsSnapshot,
   ExperimentalAccessRow,
   MappingApprovalRow,
   WorkerLeaseState,
@@ -176,6 +178,8 @@ export type {
   ProviderQuotesRow,
   ProviderStateRow,
   ProviderSyncInput,
+  ScreenRawRow,
+  ScreenRowsSnapshot,
 };
 export { ProviderNotSelectableError } from "@/server/prices/types";
 
@@ -317,6 +321,17 @@ export interface AuthBackend {
   setPriceProviderFlags(code: string, enabled: boolean, userSelectable: boolean): Promise<ProviderStateRow>;
   /** Fiyat alımını uygular (atomik, kilitli, idempotent). */
   applyPriceIngestion(code: string, runKey: string, payload: IngestionPayload): Promise<IngestionResult>;
+
+  /**
+   * Ekranda görünen BÜTÜN ham satırları saklar.
+   *
+   * Hiçbir fiyat kabul edilmese bile yazılır: "Kayseri Fiyatları" ekranının
+   * asıl gerekli olduğu durum tam olarak budur.
+   */
+  setScreenRows(code: string, rows: readonly ScreenRawRow[], signature: string, observedAt: string): Promise<void>;
+
+  /** Saklanan son ham satır kümesi. */
+  screenRows(code: string): Promise<ScreenRowsSnapshot | null>;
   /** Bir sağlayıcının güncel fiyatları. */
   currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null>;
   /** Birden çok sağlayıcının fiyatları (karşılaştırma ekranı). */

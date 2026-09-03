@@ -13,7 +13,7 @@ import {
 } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { evaluateSnapshot } from "@/prices/quality";
 import type { AuthBackend } from "@/server/auth/backend";
-import type { IngestionPayload, ScreenWorkerPayload, WorkerLeaseState } from "./types";
+import type { IngestionPayload, ScreenRawRow, ScreenWorkerPayload, WorkerLeaseState } from "./types";
 
 /**
  * EKRAN WORKER'I → UYGULAMA
@@ -135,6 +135,11 @@ export class ScreenWorkerService {
       now: () => this.now(),
     });
 
+    // HAM SATIRLARI SAKLA — kabul edilen fiyat olmasa BİLE.
+    // "Kayseri Fiyatları" ekranının asıl gerekli olduğu durum tam olarak budur:
+    // hiçbir fiyat değerlemeye girmese de kullanıcı ekranda ne yazdığını görür.
+    await this.persistScreenRows(payload, collected);
+
     if (collected.quotes.length === 0) {
       return {
         ok: true,
@@ -201,6 +206,68 @@ export class ScreenWorkerService {
       unresolved: collected.unresolved,
       message: `${quality.accepted.length} fiyat uygulandı, ${quality.quarantined.length} karantinaya alındı.`,
     };
+  }
+
+  /**
+   * Ekranda görünen bütün ham satırları saklar.
+   *
+   * Görünmek ile değerlemede kullanılmak AYRI kavramlardır:
+   *  - `usedInValuation` yalnız kalite kapısından geçenler için true olur,
+   *  - tek yönlü satırlarda rakam `single` alanına yazılır ve alış/satış BOŞ
+   *    kalır; aynı değeri iki yöne birden koymak yön uydurmak olurdu.
+   *
+   * Saklama başarısız olursa fiyat alımı DURDURULMAZ: bu gösterim amaçlı bir
+   * yan kayıttır ve muhasebeyi etkilemez.
+   */
+  private async persistScreenRows(
+    payload: ScreenWorkerPayload,
+    collected: { quotes: readonly NormalizedQuote[]; unresolved: readonly { rawProductName: string; reason: string }[] },
+  ): Promise<void> {
+    const accepted = new Set(collected.quotes.map((quote) => quote.canonicalProductId));
+    const rows: ScreenRawRow[] = [];
+
+    for (const observation of payload.observations) {
+      const twoSided = observation.liquidationPrice !== null && observation.replacementPrice !== null;
+      rows.push({
+        rawLabel: observation.rawLabel ?? observation.canonicalProductId,
+        buy: twoSided ? observation.liquidationPrice : null,
+        sell: twoSided ? observation.replacementPrice : null,
+        single: twoSided ? null : (observation.liquidationPrice ?? observation.replacementPrice ?? null),
+        canonicalProductId: observation.canonicalProductId,
+        confidence: observation.mappingConfidence,
+        usedInValuation: accepted.has(observation.canonicalProductId),
+        reason: accepted.has(observation.canonicalProductId)
+          ? null
+          : (collected.unresolved.find((entry) => entry.rawProductName === observation.canonicalProductId)?.reason ??
+            "DEGERLEMEYE_GIRMEDI"),
+      });
+    }
+
+    // Çözülemeyen ham satırlar da gösterilir: kullanıcı ekranda ne olduğunu
+    // görür, ama bunlar hesaba KATILMAZ.
+    for (const entry of payload.unresolved) {
+      rows.push({
+        rawLabel: entry.rawProductName,
+        buy: null,
+        sell: null,
+        single: null,
+        canonicalProductId: null,
+        confidence: null,
+        usedInValuation: false,
+        reason: entry.reason,
+      });
+    }
+
+    try {
+      await this.backend.setScreenRows(
+        SCREEN_PROVIDER_CODE,
+        rows,
+        payload.screenSignature ?? "",
+        payload.observedAt,
+      );
+    } catch {
+      // Gösterim kaydı yazılamadı; fiyat alımı etkilenmez.
+    }
   }
 
   /** Devre kesici referansı: aynı sağlayıcının güncel kabul edilmiş fiyatları. */
