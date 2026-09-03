@@ -35,6 +35,7 @@ const ENV_KEYS = [
   "ALTINAPI_API_KEY",
   "ALTINAPI_LICENSE_TIER",
   "ALTINAPI_REDISTRIBUTION_ALLOWED",
+  "ALTINAPI_CONTRACT_VERSION",
   "AUTH_MFA_ENCRYPTION_KEY",
   "PRICE_MOCK_UNAVAILABLE_PRODUCTS",
 ] as const;
@@ -45,6 +46,8 @@ function licenseAltinApi(): void {
   process.env.ALTINAPI_API_KEY = "test-anahtari";
   process.env.ALTINAPI_LICENSE_TIER = "SOZLESME-2026-001";
   process.env.ALTINAPI_REDISTRIBUTION_ALLOWED = "true";
+  // Operatör beyanı: yanıt şekli fixture ile doğrulanmış sözleşmeye uyuyor.
+  process.env.ALTINAPI_CONTRACT_VERSION = "generic-json-1";
 }
 
 /**
@@ -59,8 +62,8 @@ function priceFixture(price = "5000"): typeof fetch {
     const stamp = new Date().toISOString();
     return new Response(
       JSON.stringify([
-        { symbol: "GRAM_ALTIN", bid: price, ask: String(Number(price) + 50), timestamp: stamp },
-        { symbol: "CEYREK_YENI", bid: "11000", ask: "11300", timestamp: stamp },
+        { symbol: "GRAM_ALTIN", bid: price, ask: String(Number(price) + 50), timestamp: stamp, currency: "TRY" },
+        { symbol: "CEYREK_YENI", bid: "11000", ask: "11300", timestamp: stamp, currency: "TRY" },
       ]),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -148,29 +151,78 @@ describe("1. katalog eşitleme ve yönetici bayrakları", () => {
     expect(state.find((row) => row.code === "mock")?.enabled).toBe(true);
   });
 
-  it("test sağlayıcısı üretimde kapalıdır; yalnızca test kaçış kapısıyla açılır", async () => {
+  it("test sağlayıcısı üretimde kapalıdır; yalnızca AYRI test kapısıyla açılır", () => {
     const env = process.env as Record<string, string | undefined>;
-    const savedNodeEnv = env.NODE_ENV;
-    const savedOverride = env.AUTH_ALLOW_LOCAL_BACKEND;
+    const saved = {
+      nodeEnv: env.NODE_ENV,
+      localBackend: env.AUTH_ALLOW_LOCAL_BACKEND,
+      mockGate: env.PRICE_ALLOW_MOCK_PROVIDER,
+      vercel: env.VERCEL_ENV,
+      deployment: env.APP_DEPLOYMENT_ENV,
+    };
     try {
       env.NODE_ENV = "production";
       delete env.AUTH_ALLOW_LOCAL_BACKEND;
+      delete env.PRICE_ALLOW_MOCK_PROVIDER;
+      delete env.VERCEL_ENV;
+      delete env.APP_DEPLOYMENT_ENV;
       expect(devOnlyProviderBlocked()).toBe(true);
       expect(describeProvider("mock")?.selectable).toBe(false);
 
-      // Playwright üretim derlemesine karşı koşar; oradaki kaçış kapısı test sağlayıcısını açar.
+      // Yerel auth kapısı ARTIK test fiyatını açmaz; iki kapı ayrıdır.
       env.AUTH_ALLOW_LOCAL_BACKEND = TEST_OVERRIDE_TOKEN;
+      expect(devOnlyProviderBlocked()).toBe(true);
+
+      // Yalnızca açık fiyat kapısı açar (Playwright üretim derlemesine karşı koşar).
+      env.PRICE_ALLOW_MOCK_PROVIDER = TEST_OVERRIDE_TOKEN;
       expect(devOnlyProviderBlocked()).toBe(false);
       expect(describeProvider("mock")?.selectable).toBe(true);
 
       // Yanlış belirteç kapıyı açmaz.
-      env.AUTH_ALLOW_LOCAL_BACKEND = "baska-bir-deger";
+      env.PRICE_ALLOW_MOCK_PROVIDER = "baska-bir-deger";
       expect(devOnlyProviderBlocked()).toBe(true);
+
+      // GERÇEK ÜRETİM DAĞITIMINDA hiçbir override test verisini açamaz.
+      env.PRICE_ALLOW_MOCK_PROVIDER = TEST_OVERRIDE_TOKEN;
+      env.VERCEL_ENV = "production";
+      expect(devOnlyProviderBlocked()).toBe(true);
+      delete env.VERCEL_ENV;
+      env.APP_DEPLOYMENT_ENV = "production";
+      expect(devOnlyProviderBlocked()).toBe(true);
+    } finally {
+      const restore = (key: string, value: string | undefined) => {
+        if (value === undefined) delete env[key];
+        else env[key] = value;
+      };
+      restore("NODE_ENV", saved.nodeEnv);
+      restore("AUTH_ALLOW_LOCAL_BACKEND", saved.localBackend);
+      restore("PRICE_ALLOW_MOCK_PROVIDER", saved.mockGate);
+      restore("VERCEL_ENV", saved.vercel);
+      restore("APP_DEPLOYMENT_ENV", saved.deployment);
+    }
+  });
+
+  it("üretimde katalog eşitlemesi açık kalmış test sağlayıcısını zorla kapatır", async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const savedNodeEnv = env.NODE_ENV;
+    const savedGate = env.PRICE_ALLOW_MOCK_PROVIDER;
+    try {
+      await ingestion.syncCatalog();
+      await backend.setPriceProviderFlags("mock", true, true);
+      expect((await backend.listPriceProviders()).find((p) => p.code === "mock")!.enabled).toBe(true);
+
+      // Aynı veritabanı üretime taşınırsa test verisi sessizce kullanıcıya gitmemeli.
+      env.NODE_ENV = "production";
+      delete env.PRICE_ALLOW_MOCK_PROVIDER;
+      await ingestion.syncCatalog();
+      const row = (await backend.listPriceProviders()).find((p) => p.code === "mock")!;
+      expect(row.enabled).toBe(false);
+      expect(row.userSelectable).toBe(false);
     } finally {
       if (savedNodeEnv === undefined) delete env.NODE_ENV;
       else env.NODE_ENV = savedNodeEnv;
-      if (savedOverride === undefined) delete env.AUTH_ALLOW_LOCAL_BACKEND;
-      else env.AUTH_ALLOW_LOCAL_BACKEND = savedOverride;
+      if (savedGate === undefined) delete env.PRICE_ALLOW_MOCK_PROVIDER;
+      else env.PRICE_ALLOW_MOCK_PROVIDER = savedGate;
     }
   });
 
@@ -216,8 +268,8 @@ describe("2. ingestion: idempotent, kilitli, karantinalı", () => {
     const bad = (async () =>
       new Response(
         JSON.stringify([
-          { symbol: "GRAM_ALTIN", bid: "5000", ask: "4000", timestamp: new Date(NOW).toISOString() },
-          { symbol: "CEYREK_YENI", bid: "11000", ask: "11300", timestamp: new Date(NOW).toISOString() },
+          { symbol: "GRAM_ALTIN", bid: "5000", ask: "4000", timestamp: new Date(NOW).toISOString(), currency: "TRY" },
+          { symbol: "CEYREK_YENI", bid: "11000", ask: "11300", timestamp: new Date(NOW).toISOString(), currency: "TRY" },
         ]),
       )) as typeof fetch;
     const outcome = await ingestion.ingestProvider("altinapi", { runKey: "run-q", fetchImpl: bad });

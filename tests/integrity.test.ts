@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -253,8 +253,15 @@ describe("migration bütünlük kuralları", () => {
     );
     const fromTypes = [...block.matchAll(/"([a-z_]+\.[a-z_]+)"/g)].map((match) => match[1]).sort();
 
-    const mfa = readFileSync(join(process.cwd(), "supabase", "migrations", "0015_admin_mfa.sql"), "utf8");
-    const constraint = mfa.slice(mfa.indexOf("add constraint admin_audit_logs_action_check"));
+    // Kısıt birden çok migration'da yeniden tanımlanabilir; SON tanım geçerlidir.
+    const migrationsDir = join(process.cwd(), "supabase", "migrations");
+    const withConstraint = readdirSync(migrationsDir)
+      .filter((file) => file.endsWith(".sql"))
+      .sort()
+      .filter((file) => readFileSync(join(migrationsDir, file), "utf8").includes("admin_audit_logs_action_check check"));
+    expect(withConstraint.length).toBeGreaterThan(0);
+    const latest = readFileSync(join(migrationsDir, withConstraint[withConstraint.length - 1]!), "utf8");
+    const constraint = latest.slice(latest.lastIndexOf("admin_audit_logs_action_check check"));
     const fromSql = [...constraint.slice(0, constraint.indexOf(");")).matchAll(/'([a-z_]+\.[a-z_]+)'/g)]
       .map((match) => match[1])
       .sort();

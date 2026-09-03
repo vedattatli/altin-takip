@@ -48,7 +48,17 @@ export type ProviderCapability =
   | "LOCAL_MARKET"
   | "MULTI_SOURCE"
   | "REDISTRIBUTION_LICENSED"
-  | "REFERENCE_ONLY";
+  | "REFERENCE_ONLY"
+  /** Doğrulanmış sağlayıcı sözleşmesi olmadan üretimde kullanılamayan taslak adapter. */
+  | "PROTOTYPE";
+
+/**
+ * Zaman damgasının kaynağı.
+ *  - UPSTREAM: sağlayıcı fiyatın kendi zamanını bildirdi.
+ *  - OBSERVED: zaman sağlayıcıdan gelmedi; yalnızca bizim gözlem anımız bilinir.
+ *  - UNKNOWN: geçerli bir zaman elde edilemedi (kalite kapısından geçemez).
+ */
+export type TimestampProvenance = "UPSTREAM" | "OBSERVED" | "UNKNOWN";
 
 /** Kanonik piyasa kimlikleri. Farklı piyasaların fiyatı birbirinin yerine KULLANILMAZ. */
 export type MarketId = "test" | "kayseri" | "turkiye-genel" | "composite" | "bist";
@@ -76,7 +86,17 @@ export interface NormalizedQuote {
   /** Kuyumcunun kullanıcıya sattığı fiyat (yeniden alım). Ondalık dize. */
   replacementPrice: string;
   currency: "TRY";
-  providerTimestamp: string;
+  /**
+   * Sağlayıcının bildirdiği fiyat zamanı.
+   *
+   * Sağlayıcı zaman vermiyorsa BURAYA GÖZLEM ZAMANI YAZILMAZ; alan null kalır ve
+   * `timestampProvenance` "UNKNOWN" olur. Aksi hâlde bayat bir fiyat, çekildiği
+   * anda üretilmiş gibi görünür ve tazelik kontrolü anlamsızlaşırdı.
+   */
+  providerTimestamp: string | null;
+  /** Zaman damgasının kaynağı. UNKNOWN olan quote değerlemeye giremez. */
+  timestampProvenance: TimestampProvenance;
+  /** Bizim gözlem zamanımız — yalnızca gözlemdir, fiyat zamanı DEĞİLDİR. */
   fetchedAt: string;
   status: "ok" | "stale" | "unavailable";
   staleAfterMs: number;
@@ -151,6 +171,11 @@ export interface ProviderDescriptor {
   requiredEnv: readonly string[];
   /** Bu sağlayıcı yalnızca geliştirme ortamında mı çalışır? */
   devOnly: boolean;
+  /**
+   * Sağlayıcının SUNDUĞUNU söylediği ama bizde ÇALIŞAN adapter'ı bulunmayan
+   * yetenekler. Yönetim ekranında "çalışan özellik" gibi gösterilmez.
+   */
+  advertisedCapabilities?: readonly ProviderCapability[];
 }
 
 /** Tüm sağlayıcıların uyduğu çalışma zamanı sözleşmesi. */
@@ -196,6 +221,11 @@ export interface NormalizeContext {
 
 /** Kanonik quote → muhasebe motorunun beklediği PriceQuote. */
 export function toPriceQuote(quote: NormalizedQuote): PriceQuote {
+  if (quote.providerTimestamp === null) {
+    // Zamanı bilinmeyen quote buraya ULAŞMAMALIDIR; kalite kapısı onu daha önce
+    // reddeder. Yine de sessizce gözlem zamanı yazmak yerine açıkça durulur.
+    throw new Error("Sağlayıcı zamanı bilinmeyen fiyat değerlemeye çevrilemez.");
+  }
   return {
     productId: quote.canonicalProductId,
     liquidationPrice: quote.liquidationPrice,

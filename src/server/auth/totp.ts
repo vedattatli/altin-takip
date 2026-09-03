@@ -73,25 +73,49 @@ export function totpCode(secretBase32: string, timestampMs: number, period = TOT
   return String(binary % 10 ** digits).padStart(digits, "0");
 }
 
-/** Kodu doğrular (±1 pencere). Sabit zamanlı karşılaştırma kullanır. */
+/** Bir kodun hangi zaman adımıyla eşleştiği. */
+export interface TotpMatch {
+  ok: boolean;
+  /** Eşleşen zaman adımı (time-step counter). Replay koruması bunu saklar. */
+  counter: number | null;
+}
+
+/**
+ * Kodu doğrular (±1 pencere) ve EŞLEŞEN SAYACI döndürür.
+ *
+ * Sayaç boolean yerine döndürülür çünkü aynı kod 30 saniyelik pencere içinde
+ * ikinci bir oturumda tekrar kullanılamamalıdır: çağıran taraf bu sayacı kalıcı
+ * olarak saklar ve aynı ya da daha eski sayacı reddeder.
+ *
+ * Karşılaştırma sabit zamanlıdır ve bütün pencereler her koşulda denenir (erken
+ * çıkış yoktur), böylece hangi pencerenin tuttuğu zamanlamadan sızmaz.
+ */
 export function verifyTotp(
   secretBase32: string,
   code: string,
   timestampMs: number,
   options: { period?: number; digits?: number; window?: number } = {},
-): boolean {
+): TotpMatch {
   const period = options.period ?? TOTP_PERIOD_SECONDS;
   const digits = options.digits ?? TOTP_DIGITS;
   const window = options.window ?? TOTP_WINDOW;
   const clean = code.replace(/\s/g, "");
-  if (!new RegExp(`^\\d{${digits}}$`).test(clean)) return false;
+  if (!new RegExp(`^\\d{${digits}}$`).test(clean)) return { ok: false, counter: null };
   const candidate = Buffer.from(clean, "utf8");
-  let matched = false;
+  let matched: number | null = null;
   for (let offset = -window; offset <= window; offset += 1) {
-    const expected = Buffer.from(totpCode(secretBase32, timestampMs + offset * period * 1000, period, digits), "utf8");
-    if (expected.length === candidate.length && timingSafeEqual(expected, candidate)) matched = true;
+    const at = timestampMs + offset * period * 1000;
+    const expected = Buffer.from(totpCode(secretBase32, at, period, digits), "utf8");
+    if (expected.length === candidate.length && timingSafeEqual(expected, candidate)) {
+      matched = Math.floor(at / 1000 / period);
+    }
   }
-  return matched;
+  return { ok: matched !== null, counter: matched };
+}
+
+/** Verilen anın TOTP zaman adımı. */
+export function totpCounter(timestampMs: number, period = TOTP_PERIOD_SECONDS): number {
+  return Math.floor(timestampMs / 1000 / period);
 }
 
 /** Kimlik doğrulayıcı uygulamalar için otpauth URI'si (yalnızca kayıt anında gösterilir). */

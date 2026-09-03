@@ -132,6 +132,21 @@ export class PriceIngestionService {
         mapping,
       );
     }
+
+    // ÜRETİM TEMİZLİĞİ: veritabanında geçmişten kalmış açık bir test sağlayıcısı
+    // varsa zorla kapatılır. Aksi hâlde staging'de açılmış test verisi, aynı
+    // veritabanı üretime taşındığında sessizce kullanıcıya fiyat verirdi.
+    if (devOnlyProviderBlocked()) {
+      const rows = await this.backend.listPriceProviders();
+      for (const row of rows) {
+        if (row.licenseStatus !== "DEV_ONLY") continue;
+        if (!row.enabled && !row.userSelectable && !row.isDefault) continue;
+        await this.backend.setPriceProviderFlags(row.code, false, false).catch(() => {
+          // Kapatma başarısız olsa bile test sağlayıcısı çalışma zamanında zaten
+          // veri üretmez (fetchSnapshot bloklu); bir sonraki eşitlemede yeniden denenir.
+        });
+      }
+    }
     return count;
   }
 
@@ -176,12 +191,20 @@ export class PriceIngestionService {
       fetchImpl: options.fetchImpl,
     });
 
+    // DEVRE KESİCİ REFERANSI
+    //
+    // Sıçrama kontrolü ancak önceki KABUL EDİLMİŞ fiyat bilinirse çalışır. Referans
+    // yalnızca AYNI sağlayıcının aynı piyasadaki güncel kaydından alınır: başka
+    // sağlayıcının veya başka piyasanın fiyatı karşılaştırmaya karışmaz. Karantinaya
+    // alınan fiyatlar güncel tabloya hiç yazılmadığı için referans da olamaz.
+    // İlk alımda önceki değer yoktur; o durumda PRICE_JUMP uygulanmaz.
+    const previous = await this.previousLiquidationMap(providerCode, provider.marketId);
     const quality = evaluateSnapshot(snapshot.quotes, {
       providerId: provider.providerId,
       marketId: provider.marketId,
       knownProductIds: KNOWN_PRODUCT_IDS,
       now,
-      previousLiquidation: undefined,
+      previousLiquidation: (productId) => previous.get(productId) ?? null,
     });
 
     const payload: IngestionPayload = {
@@ -200,9 +223,18 @@ export class PriceIngestionService {
         mappingVersion: quote.mappingVersion,
         rawPayloadHash: quote.rawPayloadHash,
       })),
+      // Karantina kaydı KALICI hâle gelir: hangi ürün, hangi fiyat, hangi sebep,
+      // hangi zaman ve hangi eşleme sürümü. Ham yanıt saklanmaz.
       quarantined: quality.quarantined.map((entry) => ({
         canonicalProductId: entry.quote.canonicalProductId,
         code: entry.code,
+        liquidationPrice: entry.quote.liquidationPrice ?? null,
+        replacementPrice: entry.quote.replacementPrice ?? null,
+        currency: entry.quote.currency ?? null,
+        providerTimestamp: entry.quote.providerTimestamp ?? null,
+        fetchedAt: entry.quote.fetchedAt ?? null,
+        mappingVersion: entry.quote.mappingVersion ?? null,
+        rawPayloadHash: entry.quote.rawPayloadHash ?? null,
       })),
     };
 
@@ -224,6 +256,31 @@ export class PriceIngestionService {
             ? "Aynı sağlayıcı için başka bir alım sürüyor; bu koşum atlandı."
             : `${quality.accepted.length} fiyat güncellendi, ${quality.quarantined.length} kayıt karantinaya alındı.`,
     };
+  }
+
+  /**
+   * Sağlayıcının güncel (kabul edilmiş) bozdurma fiyatları.
+   *
+   * Okuma başarısız olursa sıçrama kontrolü sessizce DEVRE DIŞI kalır; alım
+   * engellenmez. Referans yokluğu fiyatı reddetme sebebi değildir.
+   */
+  private async previousLiquidationMap(
+    providerCode: string,
+    marketId: string,
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    try {
+      const row = await this.backend.currentPriceQuotes(providerCode);
+      if (!row || row.marketId !== marketId) return map;
+      for (const quote of row.quotes) {
+        if (quote.status !== "ok") continue;
+        const value = Number(quote.liquidationPrice);
+        if (Number.isFinite(value) && value > 0) map.set(quote.canonicalProductId, value);
+      }
+    } catch {
+      return new Map();
+    }
+    return map;
   }
 
   /**

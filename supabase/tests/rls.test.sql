@@ -20,7 +20,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(220);
+select plan(242);
 
 -- -----------------------------------------------------------------------------
 -- Yardımcılar
@@ -2038,6 +2038,178 @@ select throws_ok(
     values ('33333333-3333-3333-3333-333333333333', 'yoneticix', 'bilinmeyen.eylem', true)$q$,
   '23514', NULL,
   'Tanımsız denetim eylemi reddedilir');
+
+-- =============================================================================
+-- 16. FİYAT ÇALIŞMA ZAMANI BÜTÜNLÜĞÜ (0016)
+-- =============================================================================
+
+-- Karantina tablosu istemciye kapalıdır ve append-only'dir.
+select ok(
+  not has_table_privilege('anon', 'public.price_quote_quarantine', 'SELECT')
+  and not has_table_privilege('authenticated', 'public.price_quote_quarantine', 'SELECT')
+  and has_table_privilege('service_role', 'public.price_quote_quarantine', 'SELECT')
+  and not has_table_privilege('service_role', 'public.price_quote_quarantine', 'INSERT')
+  and not has_table_privilege('service_role', 'public.price_quote_quarantine', 'UPDATE')
+  and not has_table_privilege('service_role', 'public.price_quote_quarantine', 'DELETE'),
+  'Karantina tablosu: istemciye kapalı, service_role yalnızca okur'
+);
+
+select ok(
+  (select count(*) from pg_trigger
+   where tgrelid = 'public.price_quote_quarantine'::regclass
+     and tgname in ('price_quote_quarantine_no_update', 'price_quote_quarantine_no_delete')) = 2,
+  'Karantina kayıtları tetikleyiciyle değiştirilemez ve silinemez'
+);
+
+select ok(
+  (select bool_and(
+     has_function_privilege('service_role', f, 'execute')
+     and not has_function_privilege('anon', f, 'execute')
+     and not has_function_privilege('authenticated', f, 'execute'))
+   from unnest(array[
+     'public.price_quarantine_list(text, integer)',
+     'public.price_provider_set_default(text)'
+   ]) as f),
+  'Yeni fiyat RPC leri yalnızca service_role tarafından çağrılabilir'
+);
+
+-- Sertleştirilmiş ingestion: sağlayıcı durumu veritabanında da denetlenir.
+select throws_ok(
+  $q$select public.price_ingestion_apply('test-lisanssiz', 'run-kapali', jsonb_build_object(
+      'status', 'ok', 'safeErrorCode', null, 'latencyMs', '1', 'fetchedAt', now(),
+      'quotes', jsonb_build_array(), 'quarantined', jsonb_build_array()))$q$,
+  'P0006', NULL,
+  'Kapalı/lisanssız sağlayıcı fiyat YAZAMAZ (veritabanı seviyesinde)'
+);
+
+select throws_ok(
+  $q$select public.price_ingestion_apply('test-referans', 'run-referans', jsonb_build_object(
+      'status', 'ok', 'safeErrorCode', null, 'latencyMs', '1', 'fetchedAt', now(),
+      'quotes', jsonb_build_array(), 'quarantined', jsonb_build_array()))$q$,
+  'P0006', NULL,
+  'Referans kaynağı güncel değerleme tablosuna YAZAMAZ'
+);
+
+-- Geçersiz kayıtlar karantinaya alınır ve güncel fiyata girmez.
+select is(
+  (public.price_ingestion_apply('test-lisansli', 'run-kalite-1', jsonb_build_object(
+    'status', 'ok', 'safeErrorCode', null, 'latencyMs', '5', 'fetchedAt', now(),
+    'quotes', jsonb_build_array(
+      jsonb_build_object('canonicalProductId', 'yeni-ceyrek', 'liquidationPrice', '11000',
+        'replacementPrice', '10000', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'currency', 'TRY'),
+      jsonb_build_object('canonicalProductId', 'bilinmeyen-urun', 'liquidationPrice', '1',
+        'replacementPrice', '2', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'currency', 'TRY'),
+      jsonb_build_object('canonicalProductId', 'eski-ceyrek', 'liquidationPrice', '9000',
+        'replacementPrice', '9100', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'currency', 'USD')),
+    'quarantined', jsonb_build_array()))->>'quoteCount'),
+  '0', 'Ters makas, bilinmeyen ürün ve yabancı para birimi güncel fiyata GİRMEZ'
+);
+
+select is(
+  (select count(*)::int from public.price_quote_quarantine q
+   join public.price_ingestion_runs r on r.id = q.ingestion_run_id
+   where r.run_key = 'run-kalite-1'),
+  3, 'Üç geçersiz kayıt karantinaya KALICI olarak yazıldı'
+);
+
+select is(
+  (select rejection_code from public.price_quote_quarantine q
+   where q.canonical_product_id = 'yeni-ceyrek' limit 1),
+  'INVERTED_SPREAD', 'Karantina kaydı reddetme sebebini saklar'
+);
+
+select is(
+  (select liquidation_price::text from public.price_quote_quarantine q
+   where q.canonical_product_id = 'yeni-ceyrek' limit 1),
+  '11000.00000000', 'Karantina kaydı reddedilen fiyatı saklar'
+);
+
+select throws_ok(
+  $q$update public.price_quote_quarantine set rejection_code = 'DEGISTI'$q$,
+  '42501', NULL,
+  'Karantina kaydı GÜNCELLENEMEZ'
+);
+
+select throws_ok(
+  $q$delete from public.price_quote_quarantine$q$,
+  '42501', NULL,
+  'Karantina kaydı SİLİNEMEZ'
+);
+
+-- Aynı koşumda aynı kanonik ürün iki kez kabul edilmez.
+select is(
+  (public.price_ingestion_apply('test-lisansli', 'run-dup-1', jsonb_build_object(
+    'status', 'ok', 'safeErrorCode', null, 'latencyMs', '5', 'fetchedAt', now(),
+    'quotes', jsonb_build_array(
+      jsonb_build_object('canonicalProductId', 'gram-altin', 'liquidationPrice', '5000',
+        'replacementPrice', '5050', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'currency', 'TRY'),
+      jsonb_build_object('canonicalProductId', 'gram-altin', 'liquidationPrice', '9999',
+        'replacementPrice', '9999', 'upstreamSourceId', null, 'providerTimestamp', now(),
+        'fetchedAt', now(), 'status', 'ok', 'mappingVersion', 'v1', 'currency', 'TRY')),
+    'quarantined', jsonb_build_array()))->>'quoteCount'),
+  '1', 'Aynı koşumda yinelenen kanonik ürün kabul edilmez'
+);
+
+select is(
+  (select liquidation_price::text from public.current_price_quotes q
+   join public.price_providers p on p.id = q.provider_id
+   where p.code = 'test-lisansli' and q.canonical_product_id = 'gram-altin'),
+  '5000.00000000', 'İlk kayıt korunur; son kayıt kazanır davranışı YOKTUR'
+);
+
+select is(
+  (select rejection_code from public.price_quote_quarantine q
+   where q.rejection_code = 'DUPLICATE_CANONICAL_PRODUCT' limit 1),
+  'DUPLICATE_CANONICAL_PRODUCT', 'Yinelenen kayıt karantinaya alınır'
+);
+
+-- Global varsayılan kaynak
+select is(
+  (public.price_provider_set_default('test-lisansli')->>'providerCode'),
+  'test-lisansli', 'Yönetici açık global varsayılan kaynağı belirleyebilir'
+);
+
+select throws_ok(
+  $q$select public.price_provider_set_default('test-referans')$q$,
+  'P0006', NULL,
+  'Referans kaynağı global varsayılan YAPILAMAZ'
+);
+
+select throws_ok(
+  $q$select public.price_provider_set_default('test-lisanssiz')$q$,
+  'P0006', NULL,
+  'Kapalı kaynak global varsayılan YAPILAMAZ'
+);
+
+select is(
+  (select count(*)::int from public.price_providers where is_default),
+  1, 'En fazla bir global varsayılan bulunur'
+);
+
+select lives_ok(
+  $q$select public.price_provider_set_flags('test-lisansli', false, false)$q$,
+  'Varsayılan kaynak kapatılabilir'
+);
+
+select is(
+  (select count(*)::int from public.price_providers where is_default),
+  0, 'Kapatılan kaynak varsayılanlıktan da düşer'
+);
+
+-- Yönetici TOTP replay koruması için sayaç sütunu
+select has_column('public', 'admin_mfa_credentials', 'last_used_counter',
+  'admin_mfa_credentials.last_used_counter bulunur (TOTP replay koruması)');
+
+select ok(
+  (select atttypid::regtype::text from pg_attribute
+   where attrelid = 'public.admin_mfa_credentials'::regclass
+     and attname = 'last_used_counter') = 'bigint',
+  'last_used_counter bigint türündedir'
+);
 
 select * from finish();
 

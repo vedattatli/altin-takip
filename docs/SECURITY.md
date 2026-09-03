@@ -696,3 +696,55 @@ veya başka şehrin fiyatına geçilmez. Bu bir güvenlik değil **veri doğrulu
   **yapmaz**. Gerçek silme yalnızca yöneticinin kullanıcı adı onayıyla yaptığı cascade işlemidir.
 - **Gizlilik sayfası** hangi verinin neden tutulduğunu, fiyatların bağlayıcı teklif olmadığını ve
   yatırım tavsiyesi verilmediğini açıkça belirtir.
+
+## 29. Makine (cron) ucu — Sprint 3.1
+
+Zamanlanmış alım ucu artık tarayıcı sarmalayıcısını kullanmaz. Gerekçe bir güvenlik
+gevşetmesi değil, **doğru kimlik modelidir**: bir zamanlayıcının çerezi yoktur, bu yüzden
+CSRF kontrolü onu doğru secret'la bile reddederdi.
+
+`machineRoute` (`src/server/security/machine-route.ts`):
+
+- Kimlik YALNIZCA paylaşılan secret'tır; `Origin`, `Referer` veya çereze güvenilmez.
+- Karşılaştırma sabit sürelidir; secret tanımsızsa uç kapalıdır (403).
+- Oturum çözülmez, çerez yazılmaz, oturum ömrü uzatılmaz. Makine çağrısı hiçbir kullanıcı
+  oturumunu etkilemez.
+- Koşum anahtarı istemciden gelmez; sunucu dakikaya yuvarlayarak üretir. Aynı dakikadaki
+  tekrar çağrı ikinci fiyat geçmişi satırı oluşturmaz.
+- Yanıt secret, upstream adres veya ham payload içermez.
+
+**Normal mutation uçlarının CSRF koruması değişmemiştir** ve bu, `tests/price-runtime.test.ts`
+§1 ile ayrıca denetlenir.
+
+## 30. Yönetici TOTP replay koruması
+
+Bir TOTP kodu 30 saniyelik pencere içinde YALNIZCA BİR KEZ kabul edilir.
+
+- `verifyTotp` artık eşleşen zaman adımını (counter) döndürür.
+- `admin_mfa_credentials.last_used_counter` bu adımı saklar.
+- Talep ATOMİKTİR: tek koşullu UPDATE (`last_used_counter is null or last_used_counter < $2`).
+  İki eşzamanlı oturum aynı kodu gönderirse yalnızca birinin koşulu tutar; oku-sonra-yaz
+  yapılsaydı ikisi de geçebilirdi.
+- Kurulum onayı da sayacı tüketir; aynı kod ikinci bir oturumu doğrulayamaz.
+- ±1 pencere ve kurtarma kodu davranışı korunur. Sıfırlama kaydı sildiği için sayaç temizlenir.
+
+## 31. Test verisi kapısı ayrıldı
+
+Test sağlayıcısının kapısı artık yerel auth kapısından bağımsızdır (`src/prices/dev-gate.ts`).
+Üç kademe vardır ve en katı olan kazanır:
+
+1. **Gerçek üretim dağıtımı** (`VERCEL_ENV=production` veya `APP_DEPLOYMENT_ENV=production`):
+   test verisi hiçbir override ile açılamaz.
+2. **Üretim derlemesi** (Playwright): yalnızca `PRICE_ALLOW_MOCK_PROVIDER` belirteciyle.
+3. **Geliştirme:** açık.
+
+Ayrıca katalog eşitlemesi üretimde açık kalmış bir test sağlayıcısını zorla kapatır; staging'de
+açılmış test verisi, aynı veritabanı üretime taşındığında sessizce kullanıcıya gitmez.
+
+## 32. Deneysel ekran toplayıcısı
+
+`SarrafTvKayseriScreenCollector` üretim sağlayıcı kaydına **eklenmemiştir** ve varsayılan
+olarak kapalıdır. Yalnızca `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` iken ve üretim dağıtımı
+DIŞINDA çalışır. Veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir; `LICENSED`, `OFFICIAL_API` veya
+`SARRAF_PRO_API` olarak etiketlenmez. CAPTCHA/etkileşim istenirse `BLOCKED` döner ve aşma
+denenmez; ekran imzası değişirse fail closed olur ve hiç fiyat üretilmez.

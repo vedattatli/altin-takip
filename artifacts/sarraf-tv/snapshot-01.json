@@ -1,0 +1,166 @@
+{
+  "observedAt": "2026-09-03T09:17:12.447Z",
+  "sourceUrl": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
+  "extractionMethod": "dom",
+  "numberFormat": "tr",
+  "domRowCount": 12,
+  "screenRows": [
+    {
+      "label": "HAS",
+      "cells": {
+        "TEK_SUTUN": "6.871"
+      }
+    },
+    {
+      "label": "22 AYAR",
+      "cells": {
+        "TEK_SUTUN": "6.600"
+      }
+    },
+    {
+      "label": "14 AYAR",
+      "cells": {
+        "TEK_SUTUN": "4.710"
+      }
+    },
+    {
+      "label": "8 AYAR",
+      "cells": {
+        "TEK_SUTUN": "2.955"
+      }
+    },
+    {
+      "label": "ÇEYREK",
+      "cells": {
+        "ALIŞ": "10.850",
+        "SATIŞ": "11.450"
+      }
+    },
+    {
+      "label": "YARIM",
+      "cells": {
+        "ALIŞ": "21.700",
+        "SATIŞ": "22.900"
+      }
+    },
+    {
+      "label": "TAM ALTIN",
+      "cells": {
+        "ALIŞ": "43.400",
+        "SATIŞ": "45.800"
+      }
+    },
+    {
+      "label": "GREMSE",
+      "cells": {
+        "ALIŞ": "108.500",
+        "SATIŞ": "114.500"
+      }
+    },
+    {
+      "label": "ATA - REŞAT LİRA",
+      "cells": {
+        "ALIŞ": "44.900",
+        "SATIŞ": "47.100"
+      }
+    },
+    {
+      "label": "ATA - REŞAT BEŞLİ",
+      "cells": {
+        "ALIŞ": "224.200",
+        "SATIŞ": "240.500"
+      }
+    },
+    {
+      "label": "24 AYAR PAKETLİ",
+      "cells": {
+        "ALIŞ": "6.780",
+        "SATIŞ": "6.970"
+      }
+    },
+    {
+      "label": "KÜLÇE GÜMÜŞ",
+      "cells": {
+        "ALIŞ": "95.158",
+        "SATIŞ": "104.869"
+      }
+    }
+  ],
+  "quotes": [
+    {
+      "rawProductName": "ÇEYREK",
+      "canonicalProductId": "yeni-ceyrek",
+      "mappingConfidence": "CONVENTION",
+      "rawBuyLabel": "ALIŞ",
+      "rawSellLabel": "SATIŞ",
+      "liquidationPrice": "10850",
+      "replacementPrice": "11450",
+      "extractionMethod": "dom"
+    },
+    {
+      "rawProductName": "YARIM",
+      "canonicalProductId": "yeni-yarim",
+      "mappingConfidence": "CONVENTION",
+      "rawBuyLabel": "ALIŞ",
+      "rawSellLabel": "SATIŞ",
+      "liquidationPrice": "21700",
+      "replacementPrice": "22900",
+      "extractionMethod": "dom"
+    },
+    {
+      "rawProductName": "TAM ALTIN",
+      "canonicalProductId": "yeni-tam",
+      "mappingConfidence": "CONVENTION",
+      "rawBuyLabel": "ALIŞ",
+      "rawSellLabel": "SATIŞ",
+      "liquidationPrice": "43400",
+      "replacementPrice": "45800",
+      "extractionMethod": "dom"
+    },
+    {
+      "rawProductName": "GREMSE",
+      "canonicalProductId": "gremse-altin",
+      "mappingConfidence": "EXACT",
+      "rawBuyLabel": "ALIŞ",
+      "rawSellLabel": "SATIŞ",
+      "liquidationPrice": "108500",
+      "replacementPrice": "114500",
+      "extractionMethod": "dom"
+    }
+  ],
+  "unresolved": [
+    {
+      "rawProductName": "HAS",
+      "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+    },
+    {
+      "rawProductName": "22 AYAR",
+      "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+    },
+    {
+      "rawProductName": "14 AYAR",
+      "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+    },
+    {
+      "rawProductName": "8 AYAR",
+      "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+    },
+    {
+      "rawProductName": "ATA - REŞAT LİRA",
+      "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+    },
+    {
+      "rawProductName": "ATA - REŞAT BEŞLİ",
+      "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+    },
+    {
+      "rawProductName": "24 AYAR PAKETLİ",
+      "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+    },
+    {
+      "rawProductName": "KÜLÇE GÜMÜŞ",
+      "reason": "ALTIN_DEĞİL"
+    }
+  ],
+  "screenMismatches": []
+}

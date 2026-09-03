@@ -129,6 +129,8 @@ export type AdminAction =
   | "price.provider_update"
   | "price.source_change"
   | "price.refresh"
+  | "price.quarantine_view"
+  | "price.default_source"
   | "data.export"
   | "data.deletion_request";
 

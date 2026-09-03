@@ -19,7 +19,20 @@ import {
  * - Jeton hiçbir zaman localStorage/sessionStorage'a yazılmaz ve çerez
  *   HttpOnly olduğu için document.cookie ile okunamaz.
  */
+/**
+ * Makine (zamanlanmış görev) uçları.
+ *
+ * Bu uçlar tarayıcıdan çağrılmaz: oturumları, sayfaları ve dolayısıyla CSRF
+ * jetonları yoktur. Onlara çerez yazmak gereksizdir ve "makine yanıtı çerez
+ * taşımaz" garantisini bozar.
+ */
+const MACHINE_PATHS = ["/api/cron/"];
+
 export async function proxy(request: NextRequest) {
+  if (MACHINE_PATHS.some((prefix) => request.nextUrl.pathname.startsWith(prefix))) {
+    return NextResponse.next();
+  }
+
   const secret = csrfSecretOrNull();
 
   // Üretimde gizli anahtar yoksa jeton üretilmez; durum değiştiren istekler

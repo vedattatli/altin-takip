@@ -29,6 +29,7 @@
     "staging:admin": "node scripts/staging-admin.mjs",
     "test:staging": "playwright test -c playwright.staging.config.ts",
     "price:contract": "node scripts/price-contract-test.mjs",
+    "price:sarraf-feasibility": "node -r ./scripts/node-server-only-stub.cjs --import tsx tools/experimental/sarraf-tv-kayseri/feasibility.ts",
     "price:smoke": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/price-ingestion-smoke.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle"
   },

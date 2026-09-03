@@ -39,6 +39,8 @@ export interface ProviderStatusView {
   /** Eksik ortam değişkeni ADLARI (değer YOK). */
   missingConfig: readonly string[];
   requiresPersistentWorker: boolean;
+  /** Sağlayıcının sunduğunu söylediği ama bizde adapter'ı OLMAYAN yetenekler. */
+  advertisedCapabilities: readonly ProviderCapability[];
   supportedProductCount: number;
   devOnly: boolean;
 }
@@ -99,6 +101,7 @@ export function describeProvider(providerId: string): ProviderStatusView | null 
     referenceUrl: provider.descriptor.referenceUrl,
     missingConfig: validation.issues.map((issue) => issue.variable).filter((name) => name !== "—"),
     requiresPersistentWorker: capabilities.requiresPersistentWorker,
+    advertisedCapabilities: provider.descriptor.advertisedCapabilities ?? [],
     supportedProductCount: provider.listSupportedProducts().length,
     devOnly: provider.descriptor.devOnly,
   };

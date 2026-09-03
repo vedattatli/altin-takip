@@ -74,6 +74,8 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/price-sources/[code]/route.ts": "admin",
   "admin/price-sources/[code]/refresh/route.ts": "admin",
   "admin/price-sources/[code]/test/route.ts": "admin",
+  "admin/price-sources/quarantine/route.ts": "admin",
+  "admin/price-sources/default/route.ts": "admin",
   "admin/users/[id]/mfa/route.ts": "admin",
   // İkinci faktör durumunu geçici parolalı yönetici de sorgulayabilmelidir.
   "auth/mfa/route.ts": "authenticated",
@@ -94,6 +96,8 @@ function routeKey(file: string): string {
 function detectGuard(source: string): Guard {
   // Sağlık ucu secret'ı YALNIZCA ayrıntı seviyesini açar; erişimi kısıtlamaz.
   if (source.includes("detailAuthorized")) return "public-health";
+  // Makine uçları tarayıcı oturumu yerine paylaşılan secret ile korunur.
+  if (source.includes("machineRoute")) return "cron";
   if (source.includes("PRICE_CRON_SECRET")) return "cron";
   if (source.includes("requireAdminForMfaSetup")) return "admin-mfa-setup";
   if (source.includes("requireCurrentAdmin")) return "admin";
@@ -116,10 +120,13 @@ describe("API yetkilendirme matrisi", () => {
     }
   });
 
-  it("her route merkezi apiRoute sarmalayıcısını kullanır", () => {
+  it("her route merkezi sarmalayıcıyı kullanır", () => {
     for (const file of ROUTE_FILES) {
       const source = readFileSync(file, "utf8");
-      expect(source, routeKey(file)).toContain("apiRoute");
+      // Tarayıcı uçları apiRoute, makine (cron) uçları machineRoute kullanır.
+      // İkisi de merkezîdir; ham handler export edilmesi yasaktır.
+      const wrapped = source.includes("apiRoute") || source.includes("machineRoute");
+      expect(wrapped, `${routeKey(file)} merkezi sarmalayıcı kullanmalı`).toBe(true);
       // Ham export edilmiş handler kalmamalı; hepsi sarmalayıcıdan geçmeli.
       expect(source, routeKey(file)).not.toMatch(
         /export async function (GET|POST|PUT|PATCH|DELETE)/,

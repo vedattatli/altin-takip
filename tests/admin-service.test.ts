@@ -5,7 +5,9 @@ import { AdminService } from "@/server/admin/admin-service";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { AuthService } from "@/server/auth/service";
 import { MemoryLoginRateLimiter } from "@/server/rate-limit/memory";
-import { adminActor, scopeOf } from "./actors";
+import { PriceIngestionService } from "@/server/prices/ingestion-service";
+import { PriceSourceService } from "@/server/prices/price-source-service";
+import { adminActor, scopeOf, userActor } from "./actors";
 import { dec, parseLedgerCommand } from "@/domain/accounting";
 import { buyCommand } from "./helpers";
 
@@ -200,9 +202,17 @@ describe("yönetici: pasifleştirme ve silme", () => {
 });
 
 describe("yönetici: portföy görüntüleme", () => {
-  it("kullanıcının portföy özetini hesaplar", async () => {
+  it("kullanıcının portföy özetini KULLANICININ aktif kaynağıyla hesaplar", async () => {
     const user = await createUserAccount("ayse");
     await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
+
+    // Kaynak hazırlanır ve kullanıcı adına seçilir.
+    const ingestion = new PriceIngestionService(backend);
+    await ingestion.syncCatalog();
+    await backend.setPriceProviderFlags("mock", true, true);
+    await ingestion.ingestProvider("mock");
+    const sources = new PriceSourceService(backend);
+    await sources.selectSource(userActor(user), "mock", "test");
 
     const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
 
@@ -210,6 +220,44 @@ describe("yönetici: portföy görüntüleme", () => {
     expect(view.ledger).toHaveLength(1);
     expect(view.summary.totalRemainingCostBasis).toBe("50000");
     expect(dec(view.summary.totalReplacementValue).greaterThan(dec(view.summary.totalLiquidationValue))).toBe(true);
+
+    // Yönetici, kullanıcının gördüğü kaynağın AYNISINI görür.
+    const own = await sources.activeSnapshot(userActor(user));
+    expect(view.summary.priceSource?.providerCode).toBe("mock");
+    expect(view.summary.priceSource?.marketId).toBe(own.source.marketId);
+    expect(view.summary.priceSource?.isRealMarketData).toBe(false);
+  });
+
+  it("kullanıcının kaynağı yoksa yönetici test verisine düşmez", async () => {
+    const user = await createUserAccount("ayse");
+    await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
+
+    // Hiçbir kaynak açılmadı ve varsayılan tanımlanmadı.
+    const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
+
+    expect(view.summary.priceSource?.providerCode).toBeNull();
+    expect(view.summary.priceSource?.status).toBe("not_selected");
+    // Maliyet görünür ama değerleme uydurulmaz.
+    expect(view.summary.totalRemainingCostBasis).toBe("50000");
+    expect(view.summary.valuationStatus).toBe("none");
+  });
+
+  it("iki kullanıcı farklı kaynak seçtiyse yönetici her biri için doğru kaynağı görür", async () => {
+    const first = await createUserAccount("ayse");
+    const second = await createUserAccount("mehmet");
+    const ingestion = new PriceIngestionService(backend);
+    await ingestion.syncCatalog();
+    await backend.setPriceProviderFlags("mock", true, true);
+    await ingestion.ingestProvider("mock");
+
+    const sources = new PriceSourceService(backend);
+    await sources.selectSource(userActor(first), "mock", "test");
+    // İkinci kullanıcı seçim yapmaz ve global varsayılan da yoktur.
+
+    const firstView = await admin.getUserPortfolio(adminActor(adminProfile), first.id);
+    const secondView = await admin.getUserPortfolio(adminActor(adminProfile), second.id);
+    expect(firstView.summary.priceSource?.providerCode).toBe("mock");
+    expect(secondView.summary.priceSource?.providerCode).toBeNull();
   });
 
   it("yönetici yalnızca okur: kullanıcı adına düzenleme yetkisi yoktur ve servis mutation sunmaz", async () => {

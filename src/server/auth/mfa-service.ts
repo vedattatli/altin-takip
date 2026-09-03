@@ -121,9 +121,23 @@ export class MfaService {
     const credential = await this.backend.getMfaCredential(actor.profile.id);
     if (!credential) throw badRequest("Önce ikinci faktör kurulumunu başlatın.");
     if (credential.confirmedAt) throw conflict("İkinci faktör zaten onaylanmış.");
-    if (typeof code !== "string" || !verifyTotp(decryptSecret({ ciphertext: credential.secretCiphertext, nonce: credential.secretNonce }), code, this.now())) {
+    const match =
+      typeof code === "string"
+        ? verifyTotp(
+            decryptSecret({ ciphertext: credential.secretCiphertext, nonce: credential.secretNonce }),
+            code,
+            this.now(),
+          )
+        : { ok: false, counter: null };
+    if (!match.ok || match.counter === null) {
       await this.backend.recordMfaAttempt(actor.profile.id, false, new Date(this.now()).toISOString());
       throw badRequest("Kod doğrulanamadı. Uygulamanızdaki güncel kodu girin.");
+    }
+    // Kurulum kodu da tüketilmiş sayılır: aynı kod ikinci bir oturumu doğrulayamaz.
+    const claimed = await this.backend.claimMfaCounter(actor.profile.id, match.counter);
+    if (!claimed) {
+      await this.backend.recordMfaAttempt(actor.profile.id, false, new Date(this.now()).toISOString());
+      throw badRequest("Bu kod zaten kullanıldı. Uygulamanızdaki bir sonraki kodu bekleyin.");
     }
     const at = new Date(this.now()).toISOString();
     await this.backend.confirmMfaCredential(actor.profile.id, at);
@@ -153,7 +167,16 @@ export class MfaService {
 
     const at = new Date(now).toISOString();
     const secret = decryptSecret({ ciphertext: credential.secretCiphertext, nonce: credential.secretNonce });
-    if (verifyTotp(secret, code, now)) {
+    const match = verifyTotp(secret, code, now);
+    if (match.ok && match.counter !== null) {
+      // REPLAY KORUMASI: aynı zaman adımı yalnızca BİR kez kabul edilir. Sayaç
+      // atomik olarak talep edilir; iki eşzamanlı oturum aynı kodu gönderirse
+      // yalnızca biri başarılı olur.
+      const claimed = await this.backend.claimMfaCounter(actor.profile.id, match.counter);
+      if (!claimed) {
+        await this.backend.recordMfaAttempt(actor.profile.id, false, at);
+        throw badRequest("Bu kod zaten kullanıldı. Uygulamanızdaki bir sonraki kodu bekleyin.");
+      }
       await this.backend.recordMfaAttempt(actor.profile.id, true, at);
       await this.backend.markSessionMfaVerified(actor.sessionId, at);
       return { usedRecoveryCode: false };

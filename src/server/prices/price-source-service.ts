@@ -3,7 +3,7 @@ import "server-only";
 import { MOCK_PROVIDER_META } from "@/prices/mock-provider";
 import { describeProvider, listProviderStatuses } from "@/prices/registry";
 import type { PriceQuote, PriceSnapshot } from "@/prices/types";
-import { adminScope, ownScope, type AdminActor, type UserActor } from "@/server/auth/actor";
+import { adminScope, ownScope, type AdminActor, type DataScope, type UserActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
 import { PriceIngestionService } from "./ingestion-service";
@@ -107,16 +107,31 @@ export class PriceSourceService {
       }));
   }
 
-  /** Portföyün aktif kaynağı; seçim yoksa yöneticinin açtığı ilk kaynak varsayılır. */
+  /** Portföyün aktif kaynağı; seçim yoksa AÇIK global varsayılan kullanılır. */
   async resolveActiveProviderCode(actor: UserActor): Promise<string | null> {
+    return this.resolveProviderCodeForScope(ownScope(actor));
+  }
+
+  /**
+   * Bir kapsam için aktif sağlayıcı kodu.
+   *
+   * Sıra: (1) kullanıcının kendi tercihi, (2) yöneticinin AÇIKÇA seçtiği global
+   * varsayılan. "Listedeki ilk açık kaynak" davranışı KULLANILMAZ: bu, sağlayıcı
+   * eklendiğinde veya sıralama değiştiğinde kullanıcıların fiyat kaynağını
+   * sessizce değiştirirdi. Varsayılan tanımlı değilse kaynak YOKTUR.
+   */
+  private async resolveProviderCodeForScope(scope: DataScope): Promise<string | null> {
     await this.ensureCatalog();
-    const preference = await this.backend.getPricePreference(ownScope(actor));
+    const preference = await this.backend.getPricePreference(scope);
     if (preference.providerCode) return preference.providerCode;
+
+    const explicitDefault = await this.backend.defaultPriceProvider();
+    if (!explicitDefault) return null;
     const providers = await this.backend.listPriceProviders();
-    const fallbackDefault = providers.find(
-      (provider) => provider.enabled && provider.userSelectable && !provider.capabilities.includes("REFERENCE_ONLY"),
-    );
-    return fallbackDefault?.code ?? null;
+    const row = providers.find((provider) => provider.code === explicitDefault);
+    if (!row || !row.enabled || !row.userSelectable) return null;
+    if (row.capabilities.includes("REFERENCE_ONLY")) return null;
+    return row.code;
   }
 
   private toSnapshot(row: ProviderQuotesRow, now: number): { snapshot: PriceSnapshot; lastQuoteAt: string | null } {
@@ -166,9 +181,25 @@ export class PriceSourceService {
    * SESSİZ FALLBACK YOKTUR: aktif kaynak veri vermiyorsa başka kaynağa geçilmez.
    */
   async activeSnapshot(actor: UserActor): Promise<ActiveSnapshotResult> {
+    return this.snapshotForScope(ownScope(actor));
+  }
+
+  /**
+   * Yöneticinin başka bir kullanıcının portföyünü görüntülerken kullandığı
+   * anlık görüntü.
+   *
+   * HEDEF KULLANICININ aktif kaynağı kullanılır; yöneticinin kendi tercihi veya
+   * eski test sağlayıcısı DEĞİL. Yalnızca okumadır: kaynak değiştirmez, tercih
+   * yazmaz. Kaynak yoksa test verisine düşülmez.
+   */
+  async activeSnapshotForAdmin(admin: AdminActor, targetUserId: string): Promise<ActiveSnapshotResult> {
+    return this.snapshotForScope(adminScope(admin, targetUserId));
+  }
+
+  private async snapshotForScope(scope: DataScope): Promise<ActiveSnapshotResult> {
     await this.ensureCatalog();
     const now = this.now();
-    const providerCode = await this.resolveActiveProviderCode(actor);
+    const providerCode = await this.resolveProviderCodeForScope(scope);
     if (!providerCode) {
       return {
         snapshot: null,
@@ -354,6 +385,9 @@ export class PriceSourceService {
       selectable: boolean;
       blockedReason: string | null;
       missingConfig: readonly string[];
+      /** Sağlayıcının sunduğunu söylediği ama bizde adapter'ı OLMAYAN yetenekler. */
+      advertisedCapabilities: readonly string[];
+      requiresPersistentWorker: boolean;
     })[]
   > {
     await this.ensureCatalog();
@@ -367,6 +401,8 @@ export class PriceSourceService {
         selectable: view?.selectable ?? false,
         blockedReason: view?.blockedReason ?? null,
         missingConfig: view?.missingConfig ?? [],
+        advertisedCapabilities: view?.advertisedCapabilities ?? [],
+        requiresPersistentWorker: view?.requiresPersistentWorker ?? false,
       };
     });
   }

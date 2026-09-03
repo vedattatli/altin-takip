@@ -17,6 +17,7 @@ import type {
   ProviderQuotesRow,
   ProviderStateRow,
   ProviderSyncInput,
+  QuarantineRow,
 } from "@/server/prices/types";
 import type { DataScope } from "./actor";
 
@@ -184,6 +185,8 @@ export interface MfaCredentialRecord {
   lastVerifiedAt: string | null;
   failedAttempts: number;
   lockedUntil: string | null;
+  /** Başarıyla kullanılmış son TOTP zaman adımı (replay koruması). */
+  lastUsedCounter: number | null;
 }
 
 /** Defter sürümü: yalnızca gerçek değişiklikte artan sinyal (işlem sayısı değil). */
@@ -326,6 +329,12 @@ export interface AuthBackend {
     reason: string,
   ): Promise<PricePreferenceResult>;
   /** Kaynak değişim geçmişi. */
+  /** Karantinaya alınmış fiyat kayıtları (yalnızca yönetim; salt okunur). */
+  listPriceQuarantine(code: string | null, limit?: number): Promise<QuarantineRow[]>;
+  /** Açık global varsayılan kaynağı belirler; null hepsini temizler. */
+  setDefaultPriceProvider(code: string | null): Promise<string | null>;
+  /** Açık global varsayılan kaynak (yoksa null). */
+  defaultPriceProvider(): Promise<string | null>;
   listPriceSourceEvents(scope: DataScope, limit?: number): Promise<PriceSourceEventRow[]>;
 
   // --- Yönetici ikinci faktörü (Sprint 3) ---
@@ -339,6 +348,13 @@ export interface AuthBackend {
   deleteMfaCredential(userId: string): Promise<void>;
   /** Başarılı/başarısız doğrulama sayaçlarını günceller. */
   recordMfaAttempt(userId: string, success: boolean, at: string): Promise<MfaCredentialRecord | null>;
+  /**
+   * TOTP zaman adımını ATOMİK olarak talep eder.
+   *
+   * `true` yalnızca sayaç daha önce kullanılmamışsa döner. Aynı kodu gönderen
+   * ikinci (eşzamanlı) istek `false` alır ve doğrulanamaz.
+   */
+  claimMfaCounter(userId: string, counter: number): Promise<boolean>;
   /** Kurtarma kodlarını (yalnızca özet) yazar; eski kodları geçersiz kılar. */
   replaceRecoveryCodes(userId: string, hashes: readonly string[]): Promise<void>;
   /** Kurtarma kodunu tek kullanımlık olarak harcar. */

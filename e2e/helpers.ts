@@ -96,6 +96,28 @@ export async function login(
  */
 const adminSecrets = new Map<string, string>();
 
+/** Yönetici başına en son gönderilen TOTP zaman adımı. */
+const usedTotpCounters = new Map<string, number>();
+
+/** TOTP zaman adımı (30 saniyelik pencere). */
+function totpCounter(atMs: number): number {
+  return Math.floor(atMs / 30_000);
+}
+
+/**
+ * Bu yönetici için mevcut pencere zaten kullanıldıysa bir sonraki pencereye kadar bekler.
+ * Uygulama aynı kodu ikinci kez kabul etmediği için beklemek DOĞRU davranıştır;
+ * korumayı gevşetmek yerine test gerçek kullanıcının yapacağını yapar.
+ */
+async function waitForFreshTotpWindow(page: Page, username: string): Promise<void> {
+  const previous = usedTotpCounters.get(username);
+  if (previous === undefined) return;
+  while (totpCounter(Date.now()) <= previous) {
+    const nextWindowAt = (previous + 1) * 30_000;
+    await page.waitForTimeout(Math.max(250, nextWindowAt - Date.now() + 250));
+  }
+}
+
 async function storedAdminSecret(username: string): Promise<string | null> {
   const cached = adminSecrets.get(username);
   if (cached) return cached;
@@ -135,9 +157,25 @@ export async function loginAsAdmin(
     if (!secret) {
       throw new Error(`Yönetici ${username} için TOTP anahtarı bulunamadı; kurulum ekranı da açılmadı.`);
     }
-    await page.getByTestId("mfa-code").fill(totpCode(secret, Date.now()));
-    await page.getByTestId("mfa-submit").click();
-    await page.waitForURL((url) => !url.pathname.startsWith("/guvenlik"), { timeout: 30_000 });
+    // REPLAY KORUMASI: uygulama aynı TOTP zaman adımını ikinci kez kabul etmez.
+    // Testler aynı 30 saniyelik pencerede birden çok kez yönetici girişi yaptığı
+    // için, o pencere daha önce kullanıldıysa bir sonraki koda kadar beklenir.
+    // Saat kayması yüzünden sunucu ±1 pencereden farklı bir sayaç eşleştirebilir;
+    // bu yüzden reddedilme hâlinde bir sonraki pencereyle YENİDEN denenir.
+    let verified = false;
+    for (let attempt = 0; attempt < 3 && !verified; attempt += 1) {
+      await waitForFreshTotpWindow(page, username);
+      usedTotpCounters.set(username, totpCounter(Date.now()));
+      await page.getByTestId("mfa-code").fill(totpCode(secret, Date.now()));
+      await page.getByTestId("mfa-submit").click();
+      verified = await page
+        .waitForURL((url) => !url.pathname.startsWith("/guvenlik"), { timeout: 15_000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+    if (!verified) {
+      throw new Error(`Yönetici ${username} için ikinci faktör doğrulanamadı (3 deneme).`);
+    }
     await page.waitForSelector('html[data-hydrated="true"]', { timeout: 30_000 });
   }
 

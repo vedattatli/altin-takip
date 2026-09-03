@@ -95,13 +95,18 @@ export const REQUIRED = [
   "supabase/migrations/0013_price_providers.sql",
   "supabase/migrations/0014_price_rpc.sql",
   "supabase/migrations/0015_admin_mfa.sql",
+  "supabase/migrations/0016_price_runtime_integrity.sql",
   "supabase/setup/maintenance-cron.sql",
   "supabase/tests/rls.test.sql",
   "src/prices/contract.ts",
   "src/prices/descriptors.ts",
+  "src/prices/dev-gate.ts",
+  "src/prices/providers/contracts.ts",
+  "src/server/security/machine-route.ts",
   "docs/SECURITY.md",
   "docs/ARCHITECTURE.md",
   "docs/PRICE_PROVIDERS.md",
+  "docs/PRICE_RUNTIME_INTEGRITY.md",
   "docs/RUNBOOKS.md",
 ];
 

@@ -3,23 +3,44 @@ import { TEST_OVERRIDE_TOKEN } from "@/auth/types";
 /**
  * TEST VERİSİ SAĞLAYICISININ ÜRETİM KAPISI
  *
- * Test sağlayıcısı gerçek kullanıcıya asla fiyat üretmemelidir. Kural:
- * `NODE_ENV=production` ise kapalıdır.
+ * Test sağlayıcısı gerçek kullanıcıya asla fiyat üretmemelidir. Kapı üç
+ * kademelidir ve en katı olan kazanır:
  *
- * Tek istisna, uygulamanın zaten var olan test kaçış kapısıdır
- * (`AUTH_ALLOW_LOCAL_BACKEND`). Playwright paketi ÜRETİM DERLEMESİNE karşı
- * çalıştırır; o ortamda yerel arka uç bu belirteçle açılır. Belirteç gerçek
- * dağıtımlarda ASLA ayarlanmaz — ayarlanmadığında hem yerel arka uç hem test
- * sağlayıcısı kapalıdır. Böylece tek bir anahtar iki kapıyı birlikte yönetir ve
- * üretim güvenliği zayıflamaz.
+ *  1. GERÇEK ÜRETİM DAĞITIMI (`VERCEL_ENV=production` veya
+ *     `APP_DEPLOYMENT_ENV=production`): test sağlayıcısı HİÇBİR override ile
+ *     açılamaz. Bu kademe bilinçli olarak koşulsuzdur.
+ *  2. Üretim DERLEMESİ (`NODE_ENV=production`) ama üretim dağıtımı değil:
+ *     yalnızca test koşucusunun ayarladığı `PRICE_ALLOW_MOCK_PROVIDER`
+ *     belirteciyle açılır. Playwright paketi üretim derlemesine karşı koştuğu
+ *     için bu kapı gereklidir.
+ *  3. Geliştirme: açıktır.
+ *
+ * Bu kapı, yerel auth arka ucunu açan `AUTH_ALLOW_LOCAL_BACKEND` kapısından
+ * AYRIDIR. Daha önce ikisi aynı anahtara bağlıydı; tek bir değişken iki farklı
+ * güvenlik kararını birden açıyordu. Artık test fiyatı için ayrı ve açık bir
+ * belirteç gerekir.
  */
-export function testBackendOverrideActive(): boolean {
-  return process.env.AUTH_ALLOW_LOCAL_BACKEND === TEST_OVERRIDE_TOKEN;
+
+/** Gerçek üretim dağıtımı mı? (Hiçbir test override'ı burada geçerli değildir.) */
+export function productionDeployment(): boolean {
+  const vercel = (process.env.VERCEL_ENV ?? "").trim().toLowerCase();
+  if (vercel === "production") return true;
+  return (process.env.APP_DEPLOYMENT_ENV ?? "").trim().toLowerCase() === "production";
+}
+
+/** Yalnızca test koşucusunun ayarlayabileceği açık test verisi belirteci. */
+export function mockProviderOverrideActive(): boolean {
+  return process.env.PRICE_ALLOW_MOCK_PROVIDER === TEST_OVERRIDE_TOKEN;
 }
 
 /** Test verisi sağlayıcısı bu ortamda kullanılamaz mı? */
 export function devOnlyProviderBlocked(): boolean {
-  return process.env.NODE_ENV === "production" && !testBackendOverrideActive();
+  // 1. Üretim dağıtımında koşulsuz kapalı.
+  if (productionDeployment()) return true;
+  // 3. Geliştirme ortamında açık.
+  if (process.env.NODE_ENV !== "production") return false;
+  // 2. Üretim derlemesi: yalnızca açık test belirteciyle.
+  return !mockProviderOverrideActive();
 }
 
 export const DEV_ONLY_BLOCKED_MESSAGE = "Test verisi sağlayıcısı üretim ortamında kullanılamaz.";

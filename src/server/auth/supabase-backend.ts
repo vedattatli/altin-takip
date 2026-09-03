@@ -16,6 +16,7 @@ import {
   type ProviderQuotesRow,
   type ProviderStateRow,
   type ProviderSyncInput,
+  type QuarantineRow,
 } from "@/server/prices/types";
 import type {
   LedgerAppendRequest,
@@ -865,6 +866,29 @@ export class SupabaseAuthBackend implements AuthBackend {
     );
   }
 
+  async listPriceQuarantine(code: string | null, limit = 50): Promise<QuarantineRow[]> {
+    const rows = await this.priceRpc<QuarantineRow[] | null>(
+      "price_quarantine_list",
+      { p_code: code, p_limit: limit },
+      "Karantina kayıtları okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async setDefaultPriceProvider(code: string | null): Promise<string | null> {
+    const row = await this.priceRpc<{ providerCode: string | null }>(
+      "price_provider_set_default",
+      { p_code: code },
+      "Varsayılan fiyat kaynağı ayarlanamadı",
+    );
+    return row?.providerCode ?? null;
+  }
+
+  async defaultPriceProvider(): Promise<string | null> {
+    const providers = await this.listPriceProviders();
+    return providers.find((provider) => provider.isDefault)?.code ?? null;
+  }
+
   async listPriceSourceEvents(scope: DataScope, limit = 50): Promise<PriceSourceEventRow[]> {
     const rows = await this.priceRpc<PriceSourceEventRow[] | null>(
       "price_source_events",
@@ -893,7 +917,29 @@ export class SupabaseAuthBackend implements AuthBackend {
       lastVerifiedAt: (data.last_verified_at as string | null) ?? null,
       failedAttempts: Number(data.failed_attempts ?? 0),
       lockedUntil: (data.locked_until as string | null) ?? null,
+      lastUsedCounter:
+        data.last_used_counter === null || data.last_used_counter === undefined
+          ? null
+          : Number(data.last_used_counter),
     };
+  }
+
+  /**
+   * TOTP zaman adımını ATOMİK olarak talep eder.
+   *
+   * Tek bir koşullu UPDATE kullanılır: iki eşzamanlı istek aynı sayacı
+   * gönderirse yalnızca birinin WHERE koşulu tutar, diğeri satır döndürmez.
+   * Oku-sonra-yaz yapılsaydı ikisi de geçebilirdi.
+   */
+  async claimMfaCounter(userId: string, counter: number): Promise<boolean> {
+    const { data, error } = await this.admin
+      .from("admin_mfa_credentials")
+      .update({ last_used_counter: counter })
+      .eq("user_id", userId)
+      .or(`last_used_counter.is.null,last_used_counter.lt.${counter}`)
+      .select("user_id");
+    if (error) fail("İkinci faktör sayacı güncellenemedi", error);
+    return Array.isArray(data) && data.length > 0;
   }
 
   async saveMfaCredential(userId: string, secret: { ciphertext: string; nonce: string }): Promise<void> {

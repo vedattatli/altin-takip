@@ -59,34 +59,20 @@ export const HASFIYAT_MAPPING: Readonly<Record<string, string>> = {
   BILEZIK: "bilezik-22-ayar",
 };
 
-export const SARRAFPRO_MAPPING_VERSION = "sarrafpro-kayseri-1";
+export const SARRAFPRO_MAPPING_VERSION = "sarrafpro-kayseri-unmapped-1";
 
 /**
- * Kayseri yerel piyasa sembolleri.
- * Kesin sembol listesi yetkili sözleşmeyle birlikte gelir; eşleme sözleşme
- * geldiğinde bu tabloda güncellenir ve `mappingVersion` artırılır.
+ * Kayseri yerel piyasa (Sarraf Pro) ÜRETİM eşlemesi.
+ *
+ * BİLEREK BOŞTUR. Önceki sürümde buradaki semboller (GRAM, CEYREK, ATA...)
+ * yetkili sözleşmeden DOĞRULANMAMIŞ TAHMİNLERDİ. Tahmini bir sembol tablosu,
+ * gerçek API'de farklı bir sembolle eşleşirse fiyat sessizce YANLIŞ ürüne
+ * yazılabilirdi.
+ *
+ * Eşleme yalnızca yetkili API/XML sözleşmesi geldiğinde, sözleşmedeki sembol
+ * listesiyle doldurulur ve `SARRAFPRO_MAPPING_VERSION` artırılır.
+ *
+ * Ekran fizibilitesinde GÖZLENEN metinler ayrıdır ve üretim yolunda kullanılmaz:
+ * bkz. `src/prices/providers/sarraf-tv-screen-mapping.ts`.
  */
-export const SARRAFPRO_MAPPING: Readonly<Record<string, string>> = {
-  GRAM: "gram-altin",
-  GRAM_ALTIN: "gram-altin",
-  HAS: "has-altin",
-  HAS_ALTIN: "has-altin",
-  KULCE: "kulce-24-ayar",
-  BILEZIK_22: "bilezik-22-ayar",
-  AYAR_18: "altin-18-ayar",
-  AYAR_14: "altin-14-ayar",
-  AYAR_8: "altin-8-ayar",
-  CEYREK: "yeni-ceyrek",
-  CEYREK_ESKI: "eski-ceyrek",
-  YARIM: "yeni-yarim",
-  YARIM_ESKI: "eski-yarim",
-  TAM: "yeni-tam",
-  TAM_ESKI: "eski-tam",
-  CUMHURIYET: "cumhuriyet-altini",
-  ATA: "ata-altin",
-  RESAT: "resat-altin",
-  HAMIT: "hamit-altin",
-  IKIBUCUK: "ikibucuk-altin",
-  BESLI: "besli-altin",
-  GREMSE: "gremse-altin",
-};
+export const SARRAFPRO_MAPPING: Readonly<Record<string, string>> = {};

@@ -54,7 +54,47 @@ export interface AdminProviderRow {
   selectable: boolean;
   blockedReason: string | null;
   missingConfig: string[];
+  /** Açık global varsayılan kaynak mı? */
+  isDefault: boolean;
+  /** Sağlayıcının sunduğunu söylediği ama bizde adapter'ı OLMAYAN yetenekler. */
+  advertisedCapabilities: string[];
+  requiresPersistentWorker: boolean;
 }
+
+/** Karantina satırı (salt okunur). */
+export interface AdminQuarantineRow {
+  providerCode: string;
+  marketId: string;
+  canonicalProductId: string;
+  rejectionCode: string;
+  liquidationPrice: string | null;
+  replacementPrice: string | null;
+  currency: string | null;
+  providerTimestamp: string | null;
+  fetchedAt: string | null;
+  mappingVersion: string | null;
+  createdAt: string;
+}
+
+const REJECTION_LABELS: Record<string, string> = {
+  PRODUCT_UNKNOWN: "Bilinmeyen ürün",
+  PRODUCT_MISMATCH: "Ürün uyuşmuyor",
+  PROVIDER_MISMATCH: "Sağlayıcı uyuşmuyor",
+  MARKET_MISMATCH: "Piyasa uyuşmuyor",
+  PRICE_NOT_POSITIVE: "Fiyat pozitif değil",
+  INVERTED_SPREAD: "Makas ters",
+  SPREAD_TOO_WIDE: "Makas çok geniş",
+  CURRENCY_NOT_TRY: "Para birimi TL değil",
+  TIMESTAMP_INVALID: "Zaman geçersiz",
+  TIMESTAMP_PROVENANCE_UNKNOWN: "Sağlayıcı zamanı bildirilmedi",
+  TIMESTAMP_FUTURE: "Zaman gelecekte",
+  STALE: "Bayat",
+  FETCHED_BEFORE_PROVIDER: "Çekilme zamanı tutarsız",
+  PRICE_JUMP: "Aşırı fiyat sıçraması",
+  OUT_OF_RANGE: "Fiyat aralık dışı",
+  STATUS_NOT_OK: "Sağlayıcı durumu uygun değil",
+  DUPLICATE_CANONICAL_PRODUCT: "Aynı üründen iki kayıt",
+};
 
 const LICENSE_LABELS: Record<string, string> = {
   LICENSED: "Lisanslı",
@@ -71,14 +111,28 @@ const HEALTH_LABELS: Record<string, string> = {
   license_required: "Lisans bekleniyor",
 };
 
-export function AdminPriceSourcesView({ initialProviders }: { initialProviders: AdminProviderRow[] }) {
+export function AdminPriceSourcesView({
+  initialProviders,
+  initialQuarantine = [],
+}: {
+  initialProviders: AdminProviderRow[];
+  initialQuarantine?: AdminQuarantineRow[];
+}) {
   const [providers, setProviders] = useState(initialProviders);
+  const [quarantine, setQuarantine] = useState(initialQuarantine);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const defaultProvider = providers.find((provider) => provider.isDefault) ?? null;
+
   async function reload() {
-    setProviders(await apiFetch<AdminProviderRow[]>("/api/admin/price-sources"));
+    const [rows, quarantineRows] = await Promise.all([
+      apiFetch<AdminProviderRow[]>("/api/admin/price-sources"),
+      apiFetch<AdminQuarantineRow[]>("/api/admin/price-sources/quarantine?limit=20").catch(() => []),
+    ]);
+    setProviders(rows);
+    setQuarantine(quarantineRows);
   }
 
   async function run(code: string, action: () => Promise<string>) {
@@ -105,6 +159,18 @@ export function AdminPriceSourcesView({ initialProviders }: { initialProviders: 
       {notice ? <Alert tone="success">{notice}</Alert> : null}
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
+      <Card className="p-4" data-testid="default-source">
+        <p className="text-sm font-semibold text-ink">Global varsayılan kaynak</p>
+        <p className="mt-1 text-xs text-muted">
+          {defaultProvider
+            ? `${defaultProvider.displayName} (${defaultProvider.marketDisplayName})`
+            : "Tanımlı değil — kendi seçimini yapmamış kullanıcılara fiyat kaynağı ATANMAZ."}
+        </p>
+        <p className="mt-1 text-xs text-subtle">
+          Kendi tercihini yapmış kullanıcılar bu değişiklikten etkilenmez.
+        </p>
+      </Card>
+
       <ul className="space-y-3" data-testid="admin-price-sources">
         {providers.map((provider) => (
           <Card key={provider.code} className="p-4">
@@ -126,6 +192,10 @@ export function AdminPriceSourcesView({ initialProviders }: { initialProviders: 
                   </span>
                   {provider.enabled ? <span className="badge badge-positive">Etkin</span> : null}
                   {provider.userSelectable ? <span className="badge">Kullanıcıya açık</span> : null}
+                  {provider.isDefault ? <span className="badge badge-positive">Global varsayılan</span> : null}
+                  {provider.capabilities.includes("PROTOTYPE") ? (
+                    <span className="badge badge-notice">Taslak adapter</span>
+                  ) : null}
                   {provider.capabilities.includes("REFERENCE_ONLY") ? (
                     <span className="badge badge-notice">Yalnızca referans</span>
                   ) : null}
@@ -152,6 +222,17 @@ export function AdminPriceSourcesView({ initialProviders }: { initialProviders: 
                   // SARRAFPRO_REDISTRIBUTION_ALLOWED); 390 px'te taşmaması için kırılır.
                   <p className="mt-1 break-words text-xs text-[var(--notice)]">
                     Eksik ayar: {provider.missingConfig.join(", ")}
+                  </p>
+                ) : null}
+                {provider.advertisedCapabilities.length > 0 ? (
+                  <p className="mt-1 break-words text-xs text-subtle">
+                    Sağlayıcı ayrıca şunları sunduğunu bildiriyor ama bizde çalışan adapter YOK:{" "}
+                    {provider.advertisedCapabilities.join(", ")}
+                  </p>
+                ) : null}
+                {provider.requiresPersistentWorker ? (
+                  <p className="mt-1 break-words text-xs text-subtle">
+                    Bu kaynak kalıcı worker gerektirir (istek ömrü içinde bağlantı açılmaz).
                   </p>
                 ) : null}
                 {provider.blockedReason ? (
@@ -248,11 +329,69 @@ export function AdminPriceSourcesView({ initialProviders }: { initialProviders: 
                 >
                   {provider.userSelectable ? "Kullanıcıya kapat" : "Kullanıcıya aç"}
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
+                  disabled={busy !== null || !provider.userSelectable || provider.isDefault}
+                  data-testid={`default-${provider.code}`}
+                  onClick={() =>
+                    void run(provider.code, async () => {
+                      await apiFetch("/api/admin/price-sources/default", {
+                        method: "PUT",
+                        body: JSON.stringify({ providerCode: provider.code }),
+                      });
+                      return `${provider.displayName} global varsayılan kaynak yapıldı.`;
+                    })
+                  }
+                >
+                  {provider.isDefault ? "Varsayılan" : "Varsayılan yap"}
+                </button>
               </div>
             </div>
           </Card>
         ))}
       </ul>
+
+      <Card className="p-4" data-testid="quarantine-list">
+        <p className="text-sm font-semibold text-ink">Son karantina kayıtları</p>
+        <p className="mt-1 text-xs text-muted">
+          Bu fiyatlar değerlemeye GİRMEDİ. Kayıtlar değiştirilemez; ham sağlayıcı yanıtı saklanmaz.
+        </p>
+        {quarantine.length === 0 ? (
+          <p className="mt-2 text-xs text-subtle">Karantinaya alınmış kayıt yok.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-xs">
+              <thead className="text-subtle">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Zaman</th>
+                  <th className="py-1 pr-3 font-medium">Kaynak</th>
+                  <th className="py-1 pr-3 font-medium">Ürün</th>
+                  <th className="py-1 pr-3 font-medium">Sebep</th>
+                  <th className="py-1 pr-3 font-medium">Bozdurma</th>
+                  <th className="py-1 pr-3 font-medium">Yeniden alım</th>
+                  <th className="py-1 pr-3 font-medium">Eşleme</th>
+                </tr>
+              </thead>
+              <tbody className="text-muted">
+                {quarantine.map((row, index) => (
+                  <tr key={`${row.providerCode}-${row.canonicalProductId}-${row.createdAt}-${index}`}>
+                    <td className="tabular py-1 pr-3">{formatDateTime(row.createdAt)}</td>
+                    <td className="py-1 pr-3">{row.providerCode}</td>
+                    <td className="py-1 pr-3">{row.canonicalProductId}</td>
+                    <td className="py-1 pr-3 text-[var(--notice)]">
+                      {REJECTION_LABELS[row.rejectionCode] ?? row.rejectionCode}
+                    </td>
+                    <td className="tabular py-1 pr-3">{row.liquidationPrice ?? "—"}</td>
+                    <td className="tabular py-1 pr-3">{row.replacementPrice ?? "—"}</td>
+                    <td className="py-1 pr-3 break-words">{row.mappingVersion ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

@@ -23,6 +23,7 @@ export type QuoteRejectionCode =
   | "SPREAD_TOO_WIDE"
   | "CURRENCY_NOT_TRY"
   | "TIMESTAMP_INVALID"
+  | "TIMESTAMP_PROVENANCE_UNKNOWN"
   | "TIMESTAMP_FUTURE"
   | "STALE"
   | "FETCHED_BEFORE_PROVIDER"
@@ -115,6 +116,14 @@ export function evaluateQuote(quote: NormalizedQuote, context: QualityContext): 
     return reject("OUT_OF_RANGE", "Fiyat tanımlı aralığın dışında.");
   }
 
+  // Zaman damgasının KAYNAĞI bilinmiyorsa fiyat değerlemeye giremez. Eksik zamanı
+  // gözlem zamanıyla doldurmak, bayat veriyi "az önce üretilmiş" gösterirdi.
+  if (quote.timestampProvenance === "UNKNOWN" || quote.providerTimestamp === null) {
+    return reject(
+      "TIMESTAMP_PROVENANCE_UNKNOWN",
+      "Sağlayıcı fiyat zamanı bildirmedi; gözlem zamanı fiyat zamanı sayılmaz.",
+    );
+  }
   const providerTs = parseInstant(quote.providerTimestamp);
   const fetchedAt = parseInstant(quote.fetchedAt);
   if (providerTs === null || fetchedAt === null) {

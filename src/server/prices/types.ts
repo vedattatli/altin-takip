@@ -44,6 +44,8 @@ export interface ProviderStateRow {
   providerType: string;
   enabled: boolean;
   userSelectable: boolean;
+  /** Tercihi olmayan kullanıcılar için açık global varsayılan. */
+  isDefault: boolean;
   licenseStatus: LicenseStatus;
   licenseReference: string | null;
   redistributionAllowed: boolean;
@@ -88,10 +90,29 @@ export interface IngestionQuoteInput {
   liquidationPrice: string;
   replacementPrice: string;
   upstreamSourceId: string | null;
-  providerTimestamp: string;
+  /** Sağlayıcı zamanı; null ise kayıt kalite kapısından geçemez. */
+  providerTimestamp: string | null;
   fetchedAt: string;
   status: string;
   mappingVersion: string;
+  rawPayloadHash: string | null;
+}
+
+/**
+ * Karantinaya alınan tek kayıt.
+ *
+ * Ham yanıt SAKLANMAZ; yalnızca özeti (`rawPayloadHash`) taşınır. Adres, anahtar
+ * veya kişisel veri bu yapıya girmez.
+ */
+export interface IngestionQuarantineInput {
+  canonicalProductId: string;
+  code: string;
+  liquidationPrice: string | null;
+  replacementPrice: string | null;
+  currency: string | null;
+  providerTimestamp: string | null;
+  fetchedAt: string | null;
+  mappingVersion: string | null;
   rawPayloadHash: string | null;
 }
 
@@ -101,7 +122,22 @@ export interface IngestionPayload {
   latencyMs: number | null;
   fetchedAt: string;
   quotes: IngestionQuoteInput[];
-  quarantined: { canonicalProductId: string; code: string }[];
+  quarantined: IngestionQuarantineInput[];
+}
+
+/** Yönetim ekranındaki karantina satırı (salt okunur). */
+export interface QuarantineRow {
+  providerCode: string;
+  marketId: string;
+  canonicalProductId: string;
+  rejectionCode: string;
+  liquidationPrice: string | null;
+  replacementPrice: string | null;
+  currency: string | null;
+  providerTimestamp: string | null;
+  fetchedAt: string | null;
+  mappingVersion: string | null;
+  createdAt: string;
 }
 
 export interface IngestionResult {

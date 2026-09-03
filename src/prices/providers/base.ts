@@ -106,14 +106,26 @@ export abstract class BaseProvider implements CanonicalPriceProvider {
     this.staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
   }
 
+  /**
+   * ÇALIŞAN yetenekler.
+   *
+   * `descriptor.capabilities` yalnızca bizde adapter'ı BULUNAN yetenekleri
+   * içerir. Sağlayıcının sunduğunu söylediği ama bizde karşılığı olmayan
+   * yetenekler `advertisedCapabilities` altında ayrı durur ve "çalışan özellik"
+   * gibi raporlanmaz.
+   *
+   * `requiresPersistentWorker` yalnızca AKTİF çalışma modu WebSocket ise true
+   * olur. Sağlayıcı ayrıca WebSocket sunuyor diye REST ile çalışan bir adapter
+   * kalıcı worker gerektiriyormuş gibi görünmez.
+   */
   getCapabilities(): ProviderCapabilities {
     const capabilities = this.descriptor.capabilities;
+    const activeModeIsWebSocket = capabilities.includes("WEBSOCKET");
     return {
       capabilities,
       canBePrimary: !capabilities.includes("REFERENCE_ONLY"),
-      supportsWebSocket: capabilities.includes("WEBSOCKET"),
-      // WebSocket kalıcı bağlantı gerektirir; istek ömrü içinde açılmaz.
-      requiresPersistentWorker: capabilities.includes("WEBSOCKET"),
+      supportsWebSocket: activeModeIsWebSocket,
+      requiresPersistentWorker: activeModeIsWebSocket,
     };
   }
 

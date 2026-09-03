@@ -418,3 +418,35 @@ Ekran görüntüleri: `docs/screenshots/mobile.png` ve `docs/screenshots/desktop
 | 25.25 | Paylaşılan bileşene verilen `data-testid` DOM'a ulaşır (sessizce düşen prop yakalanır) | `tests/deployment-surface.test.ts` → "arayüz sözleşmesi" |
 | 25.26 | Yönetim fiyat kaynakları ekranı 390 px'te yatay taşma üretmez (uzun değişken adları ve düğme grubu dâhil) | `e2e/price-sources.spec.ts` → `expectNoHorizontalOverflow` |
 | 25.27 | Piyasa arayüzde okunur adıyla görünür ve kaynak hangi yoldan gelirse gelsin aynı adla etiketlenir | `e2e/portfolio.spec.ts` → "fiyat kaynağı test verisi olarak etiketlenir", "MARKET_BASELINE" |
+
+## 26. Fiyat çalışma zamanı bütünlüğü (Sprint 3.1)
+
+| # | Kabul kriteri | Test |
+| --- | --- | --- |
+| 26.1 | Cron ucu doğru secret ile CSRF çerezi OLMADAN çalışır; yanlış veya tanımsız secret 403 | `tests/price-runtime.test.ts` §1; `e2e/price-sources.spec.ts` → "zamanlanmış alım ucu" |
+| 26.2 | Normal mutation uçlarının CSRF koruması değişmez | `tests/price-runtime.test.ts` §1; `tests/csrf.test.ts` |
+| 26.3 | Aynı dakikadaki tekrar cron çağrısı ikinci fiyat geçmişi oluşturmaz (sunucu koşum anahtarı) | `tests/price-runtime.test.ts` §1 |
+| 26.4 | `PRICE_JUMP` gerçek alım akışında çalışır: 6.000 → 60.000 karantinaya alınır, 6.000 → 6.050 kabul edilir | `tests/price-runtime.test.ts` §2 |
+| 26.5 | İlk alımda önceki değer olmadığı için sıçrama uygulanmaz; başka sağlayıcının fiyatı referans olmaz | `tests/price-runtime.test.ts` §2 |
+| 26.6 | Karantina kaydı kalıcıdır (ürün, sebep, fiyat, eşleme sürümü) ve değiştirilemez/silinemez | `tests/price-runtime.test.ts` §3; pgTAP §16 |
+| 26.7 | Aynı koşumda yinelenen kanonik ürün reddedilir; "son kayıt kazanır" davranışı yoktur | `tests/price-runtime.test.ts` §3; pgTAP §16 |
+| 26.8 | Kapalı, lisanssız veya `REFERENCE_ONLY` sağlayıcı veritabanı seviyesinde fiyat yazamaz | pgTAP §16; `tests/price-runtime.test.ts` §3 |
+| 26.9 | `providerTimestamp` eksikse `fetchedAt` ile uydurulmaz; quote `TIMESTAMP_PROVENANCE_UNKNOWN` ile reddedilir | `tests/price-runtime.test.ts` §4 |
+| 26.10 | Para birimi doğrulanmadan TRY kabul edilmez | `tests/price-runtime.test.ts` §4 |
+| 26.11 | Yalnızca URL ve anahtar girilmesi taslak adapter'ı üretim adapter'ı yapmaz; doğrulanmamış sözleşme sürümü de yetmez | `tests/price-runtime.test.ts` §4 |
+| 26.12 | Çalışmayan XML/WebSocket yeteneği çalışan özellik gibi raporlanmaz; REST adapter kalıcı worker gerektirmez | `tests/price-runtime.test.ts` §4 |
+| 26.13 | Sarraf Pro üretim eşlemesi tahmini sembol içermez | `tests/price-runtime.test.ts` §4 |
+| 26.14 | Yönetici, kullanıcının aktif kaynağıyla aynı değerlemeyi görür; kaynağı yoksa test verisine düşmez | `tests/admin-service.test.ts` |
+| 26.15 | Açık global varsayılan yoksa ilk sağlayıcı seçilmez; kullanıcının kendi tercihi varsayılandan etkilenmez | `tests/price-runtime.test.ts` §5; pgTAP §16 |
+| 26.16 | Kapalı veya referans kaynak varsayılan yapılamaz; kapatılan kaynak varsayılanlıktan düşer | `tests/price-runtime.test.ts` §5; pgTAP §16 |
+| 26.17 | Üretim dağıtımında hiçbir test override'ı test verisini açamaz; katalog eşitlemesi açık kalmış test kaynağını zorla kapatır | `tests/price-sources.test.ts` §1 |
+| 26.18 | Aynı TOTP kodu ikinci kez kabul edilmez; iki eşzamanlı doğrulamadan yalnızca biri başarılı olur | `tests/price-runtime.test.ts` §6 |
+| 26.19 | KAYSARDER kurum adı doğru görünür ("Kuyumcular Odası" geçmez) | `tests/price-runtime.test.ts` §7; `tests/price-providers.test.ts`; `e2e/price-sources.spec.ts` |
+| 26.20 | Ekran okuma: alış/satış yönü sütun başlığından doğrulanır, tek sütunlu satır atlanır, ters makas düzeltilmez | `tests/price-runtime.test.ts` §8 |
+| 26.21 | Türkçe büyük harf başlıkları doğru küçültülür; sayı biçimi belge düzeyinde belirlenir | `tests/price-runtime.test.ts` §8 |
+| 26.22 | Belirsiz/katalog dışı satırlar tahmin edilmez; yeni-eski ayrımı yazmayan satırlar CONVENTION olarak işaretlenir | `tests/price-runtime.test.ts` §8 |
+| 26.23 | Çıkarılan JSON ekran metniyle birebir doğrulanır; tek fark bile PoC'yi başarısız yapar | `tests/price-runtime.test.ts` §8; `npm run price:sarraf-feasibility` |
+| 26.24 | Deneysel toplayıcı bayrak kapalıyken ve üretim dağıtımında çalışmaz; CAPTCHA'da BLOCKED, imza değişiminde fail closed olur | `tests/price-runtime.test.ts` §9 |
+| 26.25 | Deneysel toplayıcı üretim sağlayıcı kaydına eklenmemiştir; sağlayıcı zamanı uydurulmaz | `tests/price-runtime.test.ts` §9 |
+| 26.26 | Artefaktlarda cookie/authorization/token/kişisel veri bulunmaz; hassas sorgu anahtarları maskelenir | `tests/price-runtime.test.ts` §10 |
+| 26.27 | Makine yanıtı `Set-Cookie` taşımaz (proxy makine yollarına CSRF çerezi yazmaz) | `tests/price-runtime.test.ts` §1; `e2e/price-sources.spec.ts` → "zamanlanmış alım ucu" |

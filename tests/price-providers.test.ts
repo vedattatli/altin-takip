@@ -35,6 +35,12 @@ const ENV_KEYS = [
   "ALTINAPI_API_KEY",
   "ALTINAPI_LICENSE_TIER",
   "ALTINAPI_REDISTRIBUTION_ALLOWED",
+  "ALTINAPI_CONTRACT_VERSION",
+  "HASFIYAT_CONTRACT_VERSION",
+  "SARRAFPRO_CONTRACT_VERSION",
+  "PRICE_ALLOW_MOCK_PROVIDER",
+  "VERCEL_ENV",
+  "APP_DEPLOYMENT_ENV",
   "HASFIYAT_API_URL",
   "HASFIYAT_API_KEY",
   "HASFIYAT_SOURCE",
@@ -61,6 +67,8 @@ function licenseAltinApi(): void {
   process.env.ALTINAPI_API_KEY = "test-anahtari-gercek-degil";
   process.env.ALTINAPI_LICENSE_TIER = "SOZLESME-2026-001";
   process.env.ALTINAPI_REDISTRIBUTION_ALLOWED = "true";
+  // Operatör beyanı: yanıt şekli fixture ile doğrulanmış sözleşmeye uyuyor.
+  process.env.ALTINAPI_CONTRACT_VERSION = "generic-json-1";
 }
 
 function fixtureResponse(body: unknown, status = 200): typeof fetch {
@@ -124,7 +132,9 @@ describe("1. sağlayıcı kataloğu ve lisans kapısı", () => {
     const provider = createProvider("sarraf-pro-kayseri")!;
     expect(provider.licenseStatus()).toBe("NOT_CONFIGURED");
     expect(provider.displayName).toBe("Kayseri Yerel Piyasa");
-    expect(provider.technicalName).toBe("Sarraf Pro / KAYSARDER");
+    // Kurum adı KAYSARDER'ın kendi sitesindeki resmî adıdır.
+    expect(provider.technicalName).toContain("Kayseri Sarraflar ve Kuyumcular Derneği");
+    expect(provider.technicalName).not.toContain("Kuyumcular Odası");
     const snapshot = await provider.fetchSnapshot(["gram-altin"], { now: () => NOW });
     expect(snapshot.quotes).toEqual([]);
     expect(snapshot.status).toBe("unavailable");
@@ -191,9 +201,9 @@ describe("2. sembol eşleme ve normalizasyon (fixture)", () => {
       ingestionRunId: "run-1",
       fetchImpl: fixtureResponse({
         data: [
-          { symbol: "GRAM_ALTIN", bid: "5000.25", ask: "5060.75", timestamp: nowIso },
-          { symbol: "CEYREK_YENI", bid: 11000, ask: 11300, timestamp: nowIso },
-          { symbol: "BILINMEYEN", bid: 1, ask: 2, timestamp: nowIso },
+          { symbol: "GRAM_ALTIN", bid: "5000.25", ask: "5060.75", timestamp: nowIso, currency: "TRY" },
+          { symbol: "CEYREK_YENI", bid: 11000, ask: 11300, timestamp: nowIso, currency: "TRY" },
+          { symbol: "BILINMEYEN", bid: 1, ask: 2, timestamp: nowIso, currency: "TRY" },
         ],
       }),
     });
@@ -220,6 +230,8 @@ describe("2. sembol eşleme ve normalizasyon (fixture)", () => {
     process.env.HASFIYAT_API_KEY = "test-anahtari";
     process.env.HASFIYAT_LICENSE_REFERENCE = "SOZLESME-2026-002";
     process.env.HASFIYAT_REDISTRIBUTION_ALLOWED = "true";
+    // Bu sözleşme sürümü, ucun yalnızca TL döndürdüğünü garanti eder.
+    process.env.HASFIYAT_CONTRACT_VERSION = "generic-json-try-1";
     const provider = createProvider("hasfiyat")!;
     expect(provider.displayName).toBe("Hasfiyat Çoklu Kaynak");
     expect(provider.marketId).toBe("composite");
@@ -239,6 +251,8 @@ describe("2. sembol eşleme ve normalizasyon (fixture)", () => {
     process.env.HASFIYAT_API_KEY = "test-anahtari";
     process.env.HASFIYAT_LICENSE_REFERENCE = "SOZLESME-2026-002";
     process.env.HASFIYAT_REDISTRIBUTION_ALLOWED = "true";
+    // Bu sözleşme sürümü, ucun yalnızca TL döndürdüğünü garanti eder.
+    process.env.HASFIYAT_CONTRACT_VERSION = "generic-json-try-1";
     process.env.HASFIYAT_SOURCE = "kayseri-sarraf";
     const provider = createProvider("hasfiyat")!;
     let requestedUrl = "";
@@ -255,6 +269,7 @@ describe("2. sembol eşleme ve normalizasyon (fixture)", () => {
 
   it("Türkçe biçimli ve gruplu sayılar doğru okunur; bozuk kayıt atlanır", async () => {
     licenseAltinApi();
+    process.env.ALTINAPI_CONTRACT_VERSION = "generic-json-try-1";
     const provider = createProvider("altinapi")!;
     const snapshot = await provider.fetchSnapshot([], {
       now: () => NOW,
@@ -298,6 +313,7 @@ describe("3. kalite kapısı ve karantina", () => {
       liquidationPrice: "5000",
       replacementPrice: "5050",
       currency: "TRY",
+      timestampProvenance: "UPSTREAM",
       providerTimestamp: nowIso,
       fetchedAt: nowIso,
       status: "ok",

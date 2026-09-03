@@ -490,3 +490,20 @@ yalnızca `service_role`'e `grant execute`.
 Her iki tablo da `anon`, `authenticated` ve `service_role` yazımına kapalıdır; erişim yalnızca
 sunucu servisleri üzerindendir. Şifreleme anahtarı (`AUTH_MFA_ENCRYPTION_KEY`) veritabanında
 saklanmaz.
+
+## 24. Fiyat çalışma zamanı bütünlüğü (`0016_price_runtime_integrity.sql`)
+
+| Değişiklik | Ayrıntı |
+| --- | --- |
+| `price_quote_quarantine` | Append-only karantina tablosu: koşum, sağlayıcı, piyasa, kanonik ürün, reddetme kodu, reddedilen bozdurma/yeniden alım fiyatı, para birimi, sağlayıcı zamanı, çekilme zamanı, eşleme sürümü, ham yanıt **özeti**. Ham payload, adres, anahtar ve kişisel veri SAKLANMAZ |
+| `price_quote_quarantine` yetkileri | `anon` / `authenticated` erişemez; `service_role` yalnızca `select`. UPDATE/DELETE tetikleyiciyle 42501 |
+| `price_providers.is_default` | Açık global varsayılan kaynak. `price_providers_single_default_idx` en fazla bir tane olmasını zorlar; `price_providers_default_requires_enabled` varsayılanın `enabled` + `user_selectable` olmasını ister |
+| `price_providers_default_guard` tetikleyicisi | Kaynak kapatılınca veya kullanıcıya kapatılınca varsayılanlıktan da düşer |
+| `admin_mfa_credentials.last_used_counter` | Başarıyla kullanılmış son TOTP zaman adımı; aynı kod ikinci kez kabul edilmez |
+| `price_ingestion_apply` (yeniden yazıldı) | Sağlayıcı etkin ve lisanslı olmalı; `REFERENCE_ONLY` kaynak değerleme tablosuna yazamaz; para birimi payload'dan doğrulanır (TRY); fiyatlar pozitif; `replacement >= liquidation`; sağlayıcı zamanı geçerli ve 5 dk'dan fazla gelecekte olamaz; kanonik ürün katalogda ve aktif olmalı; aynı koşumda yinelenen ürün `DUPLICATE_CANONICAL_PRODUCT` ile karantinaya alınır. Sağlık kaydındaki karantina sayısı gerçek satır sayısıyla hesaplanır |
+| `price_quarantine_list(text, integer)` | Yönetim ekranı için karantina okuması (service_role) |
+| `price_provider_set_default(text)` | Global varsayılan kaynak seçimi; kapalı veya `REFERENCE_ONLY` kaynak `P0006` |
+| `admin_audit_logs_action_check` | `price.quarantine_view` ve `price.default_source` eklendi |
+
+**"Son kayıt kazanır" davranışı yoktur:** aynı kanonik ürün bir koşumda iki kez gelirse ilk
+kayıt korunur, ikincisi karantinaya yazılır ve koşum `PARTIAL` olur.

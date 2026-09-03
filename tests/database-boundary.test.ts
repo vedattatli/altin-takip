@@ -307,5 +307,7 @@ describe("kaynak paketi (ZIP)", () => {
     expect(packager.REQUIRED).toContain("supabase/migrations/0013_price_providers.sql");
     expect(packager.REQUIRED).toContain("supabase/migrations/0014_price_rpc.sql");
     expect(packager.REQUIRED).toContain("supabase/migrations/0015_admin_mfa.sql");
+    expect(packager.REQUIRED).toContain("supabase/migrations/0016_price_runtime_integrity.sql");
+    expect(packager.REQUIRED).toContain("src/server/security/machine-route.ts");
   });
 });

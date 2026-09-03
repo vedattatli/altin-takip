@@ -12,9 +12,38 @@ import { spawnSync } from "node:child_process";
 const shell = process.platform === "win32";
 
 const LIVE_PROVIDERS = [
-  { code: "sarraf-pro-kayseri", env: ["SARRAFPRO_API_URL", "SARRAFPRO_API_KEY", "SARRAFPRO_MARKET_ID", "SARRAFPRO_LICENSE_REFERENCE", "SARRAFPRO_REDISTRIBUTION_ALLOWED"] },
-  { code: "altinapi", env: ["ALTINAPI_API_URL", "ALTINAPI_API_KEY", "ALTINAPI_LICENSE_TIER", "ALTINAPI_REDISTRIBUTION_ALLOWED"] },
-  { code: "hasfiyat", env: ["HASFIYAT_API_URL", "HASFIYAT_API_KEY", "HASFIYAT_LICENSE_REFERENCE", "HASFIYAT_REDISTRIBUTION_ALLOWED"] },
+  {
+    code: "sarraf-pro-kayseri",
+    env: [
+      "SARRAFPRO_API_URL",
+      "SARRAFPRO_API_KEY",
+      "SARRAFPRO_MARKET_ID",
+      "SARRAFPRO_LICENSE_REFERENCE",
+      "SARRAFPRO_REDISTRIBUTION_ALLOWED",
+      // Sprint 3.1: yalnızca adres ve anahtar yetmez; sözleşme sürümü de beyan edilmelidir.
+      "SARRAFPRO_CONTRACT_VERSION",
+    ],
+  },
+  {
+    code: "altinapi",
+    env: [
+      "ALTINAPI_API_URL",
+      "ALTINAPI_API_KEY",
+      "ALTINAPI_LICENSE_TIER",
+      "ALTINAPI_REDISTRIBUTION_ALLOWED",
+      "ALTINAPI_CONTRACT_VERSION",
+    ],
+  },
+  {
+    code: "hasfiyat",
+    env: [
+      "HASFIYAT_API_URL",
+      "HASFIYAT_API_KEY",
+      "HASFIYAT_LICENSE_REFERENCE",
+      "HASFIYAT_REDISTRIBUTION_ALLOWED",
+      "HASFIYAT_CONTRACT_VERSION",
+    ],
+  },
 ];
 
 console.log("== Sağlayıcı sözleşme testleri (fixture) ==");

@@ -16,21 +16,27 @@ import { MARKET_DISPLAY_NAMES, type ProviderDescriptor, type ProviderId } from "
 const SARRAF_PRO: ProviderDescriptor = {
   providerId: "sarraf-pro-kayseri",
   displayName: MARKET_DISPLAY_NAMES.kayseri,
-  technicalName: "Sarraf Pro / KAYSARDER",
+  technicalName: "Sarraf Pro (Kayseri Sarraflar ve Kuyumcular Derneği ekranı)",
   marketId: "kayseri",
   marketDisplayName: MARKET_DISPLAY_NAMES.kayseri,
   providerType: "REST",
-  capabilities: ["REST", "XML", "PRODUCT_LEVEL", "LOCAL_MARKET"],
-  referenceUrl: "https://www.kaysarder.org.tr/",
+  // ÇALIŞAN yetenekler. XML sözleşmesi için bizde parser YOK; aşağıda yalnızca
+  // "sağlayıcı sunduğunu söylüyor" olarak listelenir.
+  capabilities: ["REST", "PRODUCT_LEVEL", "LOCAL_MARKET", "PROTOTYPE"],
+  advertisedCapabilities: ["XML"],
+  referenceUrl: "https://kaysarder.org.tr/altin-fiyatlari",
+  // Kurum adı KAYSARDER'ın kendi sitesindeki resmî adıdır. Derneğin verinin
+  // sahibi veya resmî API sağlayıcısı olduğu, sözleşme olmadan İDDİA EDİLMEZ.
   attribution:
-    "Kayseri Kuyumcular Odası (KAYSARDER) yerel piyasa verisi, Sarraf Pro yetkili veri sözleşmesi üzerinden alınır. " +
-    "Sayfa içeriği kopyalanmaz; yalnızca yetkili API/XML sözleşmesi kullanılır.",
+    "Kayseri Sarraflar ve Kuyumcular Derneği (KAYSARDER) fiyat sayfasında tv.sarraf.pro üzerinden yayımlanan " +
+    "Kayseri yerel piyasa ekranı. Üretimde yalnızca yetkili API/XML sözleşmesiyle alınır; sayfa içeriği kopyalanmaz.",
   requiredEnv: [
     "SARRAFPRO_API_URL",
     "SARRAFPRO_API_KEY",
     "SARRAFPRO_MARKET_ID",
     "SARRAFPRO_LICENSE_REFERENCE",
     "SARRAFPRO_REDISTRIBUTION_ALLOWED",
+    "SARRAFPRO_CONTRACT_VERSION",
   ],
   devOnly: false,
 };
@@ -42,7 +48,9 @@ const ALTINAPI: ProviderDescriptor = {
   marketId: "turkiye-genel",
   marketDisplayName: MARKET_DISPLAY_NAMES["turkiye-genel"],
   providerType: "REST",
-  capabilities: ["REST", "WEBSOCKET", "PRODUCT_LEVEL", "HISTORICAL"],
+  // WebSocket akışı için çalışan adapter yok; REST ile alınır.
+  capabilities: ["REST", "PRODUCT_LEVEL", "HISTORICAL", "PROTOTYPE"],
+  advertisedCapabilities: ["WEBSOCKET"],
   referenceUrl: null,
   attribution:
     "AltinAPI bağımsız bir veri sağlayıcısıdır; Harem Altın'ın veya başka bir kurumun resmî servisi değildir.",
@@ -50,6 +58,7 @@ const ALTINAPI: ProviderDescriptor = {
     "ALTINAPI_API_KEY",
     "ALTINAPI_LICENSE_TIER",
     "ALTINAPI_REDISTRIBUTION_ALLOWED",
+    "ALTINAPI_CONTRACT_VERSION",
   ],
   devOnly: false,
 };
@@ -61,7 +70,8 @@ const HASFIYAT: ProviderDescriptor = {
   marketId: "composite",
   marketDisplayName: MARKET_DISPLAY_NAMES.composite,
   providerType: "REST",
-  capabilities: ["REST", "WEBSOCKET", "PRODUCT_LEVEL", "MULTI_SOURCE"],
+  capabilities: ["REST", "PRODUCT_LEVEL", "MULTI_SOURCE", "PROTOTYPE"],
+  advertisedCapabilities: ["WEBSOCKET"],
   referenceUrl: null,
   attribution:
     "Hasfiyat birden çok üst kaynağı birleştirir. Üst kaynak açıkça bildirilmediğinde veri tek bir kurumun " +
@@ -71,6 +81,7 @@ const HASFIYAT: ProviderDescriptor = {
     "HASFIYAT_API_KEY",
     "HASFIYAT_LICENSE_REFERENCE",
     "HASFIYAT_REDISTRIBUTION_ALLOWED",
+    "HASFIYAT_CONTRACT_VERSION",
   ],
   devOnly: false,
 };

@@ -27,7 +27,7 @@ test.describe("fiyat kaynakları", () => {
 
     await expect(page.getByTestId("admin-price-sources")).toBeVisible();
     await expect(page.getByText("Kayseri Yerel Piyasa", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/Sarraf Pro \/ KAYSARDER/).first()).toBeVisible();
+    await expect(page.getByText(/Kayseri Sarraflar ve Kuyumcular Derneği/).first()).toBeVisible();
     // Harem'in resmî servisi iddiası hiçbir yerde geçmez.
     await expect(page.getByText(/Harem resmî/i)).toHaveCount(0);
     await expect(page.getByText(/AltinAPI — bağımsız veri sağlayıcısı/).first()).toBeVisible();
@@ -146,12 +146,40 @@ test.describe("fiyat kaynakları", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("zamanlanmış alım ucu secret olmadan çalışmaz", async ({ page }) => {
+  test("zamanlanmış alım ucu: secret olmadan 403, secret ile CSRF çerezi OLMADAN çalışır", async ({
+    page,
+    request,
+  }) => {
     const username = scopedUsername("cronucu");
     await createReadyUser(username);
     await loginAsUser(page, username);
     const denied = await browserApi(page, "POST", "/api/cron/price-ingestion");
     expect(denied.status).toBe(403);
+
+    // Zamanlayıcı gibi davran: tarayıcı bağlamı, çerez ve CSRF jetonu YOK.
+    const wrong = await request.post("/api/cron/price-ingestion", {
+      headers: { Authorization: "Bearer yanlis-secret" },
+    });
+    expect(wrong.status()).toBe(403);
+
+    const accepted = await request.post("/api/cron/price-ingestion", {
+      headers: { Authorization: `Bearer ${E2E_CRON_SECRET}` },
+    });
+    expect(accepted.status()).toBe(200);
+    const body = (await accepted.json()) as { data: { runKey: string; providers: unknown[] } };
+    expect(body.data.runKey).toContain("price-ingestion:");
+    expect(Array.isArray(body.data.providers)).toBe(true);
+    // Makine yanıtı çerez yazmaz ve secret sızdırmaz.
+    expect(accepted.headers()["set-cookie"]).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain(E2E_CRON_SECRET);
+
+    // Aynı dakikadaki tekrar çağrı aynı koşum anahtarını kullanır (idempotent).
+    const again = await request.post("/api/cron/price-ingestion", {
+      headers: { "X-Cron-Secret": E2E_CRON_SECRET },
+    });
+    expect(again.status()).toBe(200);
+    const secondBody = (await again.json()) as { data: { runKey: string } };
+    expect(secondBody.data.runKey).toBe(body.data.runKey);
   });
 
   test("sağlık ucu kimliksiz yalın durum döner; secret ayrıntıyı açar", async ({ page }) => {

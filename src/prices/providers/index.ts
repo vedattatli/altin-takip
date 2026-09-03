@@ -20,7 +20,7 @@ import {
   SARRAFPRO_MAPPING,
   SARRAFPRO_MAPPING_VERSION,
 } from "./mappings";
-import { RestQuoteProvider } from "./rest-provider";
+import { PrototypeJsonProvider } from "./rest-provider";
 
 /**
  * SAĞLAYICI FABRİKASI
@@ -80,7 +80,10 @@ export class MockCanonicalProvider extends BaseProvider {
       liquidationPrice,
       replacementPrice,
       currency: "TRY",
-      providerTimestamp: typeof record.providerTimestamp === "string" ? record.providerTimestamp : context.fetchedAt,
+      // Test sağlayıcısı fiyatı kendi ürettiği için zamanı da kendisi bildirir.
+      providerTimestamp:
+        typeof record.providerTimestamp === "string" ? record.providerTimestamp : context.fetchedAt,
+      timestampProvenance: "UPSTREAM",
       fetchedAt: context.fetchedAt,
       status: "ok",
       staleAfterMs: this.staleAfterMs,
@@ -124,10 +127,15 @@ export class MockCanonicalProvider extends BaseProvider {
  * Yalnızca yetkili API/XML sözleşmesi ile verilen adres ve anahtar kullanılır.
  */
 export function createSarrafProProvider(): CanonicalPriceProvider {
-  return new RestQuoteProvider({
+  return new PrototypeJsonProvider({
     descriptor: requireProviderDescriptor("sarraf-pro-kayseri"),
+    // Yetkili sözleşme gelene kadar eşleme BOŞTUR: tahmini semboller üretim
+    // yolunda kullanılmaz (bkz. mappings.ts SARRAFPRO_MAPPING açıklaması).
     mapping: SARRAFPRO_MAPPING,
     mappingVersion: SARRAFPRO_MAPPING_VERSION,
+    // Sarraf Pro için fixture ile doğrulanmış sözleşme YOKTUR; beyan edilse bile
+    // VERIFIED_CONTRACTS listesinde karşılığı olmadığı için NOT_CONFIGURED kalır.
+    contractVersionEnv: "SARRAFPRO_CONTRACT_VERSION",
     urlEnv: "SARRAFPRO_API_URL",
     apiKeyEnv: "SARRAFPRO_API_KEY",
     apiKeyHeader: "X-API-Key",
@@ -139,7 +147,7 @@ export function createSarrafProProvider(): CanonicalPriceProvider {
 
 /** AltinAPI — bağımsız veri sağlayıcısı (Harem Altın'ın resmî servisi DEĞİLDİR). */
 export function createAltinApiProvider(): CanonicalPriceProvider {
-  return new RestQuoteProvider({
+  return new PrototypeJsonProvider({
     descriptor: requireProviderDescriptor("altinapi"),
     mapping: ALTINAPI_MAPPING,
     mappingVersion: ALTINAPI_MAPPING_VERSION,
@@ -148,12 +156,14 @@ export function createAltinApiProvider(): CanonicalPriceProvider {
     apiKeyHeader: "X-API-Key",
     redistributionEnv: "ALTINAPI_REDISTRIBUTION_ALLOWED",
     licenseEnv: "ALTINAPI_LICENSE_TIER",
+    // Yalnızca URL+anahtar yetmez: operatör sözleşme sürümünü de beyan etmelidir.
+    contractVersionEnv: "ALTINAPI_CONTRACT_VERSION",
   });
 }
 
 /** Hasfiyat — çoklu kaynak birleşimi; tek bir kurumun fiyatı gibi etiketlenmez. */
 export function createHasfiyatProvider(): CanonicalPriceProvider {
-  return new RestQuoteProvider({
+  return new PrototypeJsonProvider({
     descriptor: requireProviderDescriptor("hasfiyat"),
     mapping: HASFIYAT_MAPPING,
     mappingVersion: HASFIYAT_MAPPING_VERSION,
@@ -163,6 +173,7 @@ export function createHasfiyatProvider(): CanonicalPriceProvider {
     redistributionEnv: "HASFIYAT_REDISTRIBUTION_ALLOWED",
     licenseEnv: "HASFIYAT_LICENSE_REFERENCE",
     sourceEnv: "HASFIYAT_SOURCE",
+    contractVersionEnv: "HASFIYAT_CONTRACT_VERSION",
   });
 }
 
@@ -211,4 +222,4 @@ export function createProvider(providerId: string): CanonicalPriceProvider | nul
   }
 }
 
-export { BaseProvider, DisabledProvider, RestQuoteProvider, isFlagTrue, readEnv };
+export { BaseProvider, DisabledProvider, PrototypeJsonProvider, isFlagTrue, readEnv };

@@ -12,8 +12,6 @@ import {
 import { isReservedUsername, validateUsername } from "@/auth/username";
 import { valuePositions } from "@/domain/accounting";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
-import { GOLD_PRODUCTS } from "@/domain/catalog";
-import { getPriceProvider } from "@/prices";
 import { adminScope, type AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
@@ -113,6 +111,32 @@ export class AdminService {
     }
   }
 
+  /** Yönetici: karantinaya alınmış fiyat kayıtları (salt okunur). */
+  async listPriceQuarantine(actor: AdminActor, code: string | null, limit = 50): Promise<unknown> {
+    const rows = await this.backend.listPriceQuarantine(code, limit);
+    await this.audit(actor, "price.quarantine_view", null, true, {
+      providerCode: code ?? "all",
+      count: rows.length,
+    });
+    return rows;
+  }
+
+  /**
+   * Yönetici: AÇIK global varsayılan kaynağı belirler.
+   * Tercihi olmayan kullanıcılar bu kaynağı kullanır; mevcut tercihler değişmez.
+   */
+  async setDefaultPriceProvider(actor: AdminActor, code: string | null): Promise<string | null> {
+    try {
+      const result = await this.backend.setDefaultPriceProvider(code);
+      await this.audit(actor, "price.default_source", null, true, { providerCode: code ?? "none" });
+      return result;
+    } catch (error) {
+      await this.audit(actor, "price.default_source", null, false, { providerCode: code ?? "none" });
+      if (error instanceof ProviderNotSelectableError) throw conflict(error.message);
+      throw error;
+    }
+  }
+
   /** Yönetici elle fiyat alımı tetikler. */
   async refreshPriceProvider(actor: AdminActor, code: string): Promise<unknown> {
     const { PriceIngestionService } = await import("@/server/prices/ingestion-service");
@@ -186,19 +210,31 @@ export class AdminService {
     // Başka kullanıcının verisine erişim AÇIKÇA işaretlenir. Yalnızca OKUMA:
     // yönetici kullanıcı adına BUY/SELL/OPENING_BALANCE/VOID/REPLACE yapamaz.
     const scope = adminScope(actor, userId);
-    const [ledger, positions, snapshot] = await Promise.all([
+    // Fiyat, HEDEF KULLANICININ aktif kaynağından gelir. Eski test sağlayıcısı
+    // kullanılsaydı yönetici, kullanıcının gördüğünden FARKLI bir değerleme
+    // görürdü. Kaynak yoksa test verisine düşülmez; değerleme boş kalır.
+    const { PriceSourceService } = await import("@/server/prices/price-source-service");
+    const sources = new PriceSourceService(this.backend, { now: () => this.now() });
+    const [ledger, positions, active] = await Promise.all([
       this.backend.listLedger(scope),
       this.backend.listPositions(scope),
-      getPriceProvider().getQuotes(GOLD_PRODUCTS.map((p) => p.id)),
+      sources.activeSnapshotForAdmin(actor, userId),
     ]);
-    const summary = valuePositions(positions, snapshot, this.now(), { ledgerEntryCount: ledger.length });
+    const summary = valuePositions(positions, active.snapshot, this.now(), {
+      ledgerEntryCount: ledger.length,
+    });
 
     // Denetim kaydına yalnızca hassas olmayan sayısal özet yazılır.
     await this.audit(actor, "user.portfolio_view", target, true, {
       transactionCount: ledger.length,
     });
 
-    return { user: target, summary, ledger, canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO };
+    return {
+      user: target,
+      summary: { ...summary, priceSource: active.source },
+      ledger,
+      canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO,
+    };
   }
 
   async createUser(

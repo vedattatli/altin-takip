@@ -24,13 +24,32 @@ Yalnızca güncel değerleme gösterilmez.
 
 ## 2. Karantina artışı (şüpheli fiyat)
 
-1. Yönetim → Fiyat kaynakları: "karantina" sayısına bakın.
+1. Yönetim → Fiyat kaynakları: sayfanın altındaki **"Son karantina kayıtları"** tablosuna
+   bakın. Her satır ürünü, sebebi, reddedilen fiyatı, zamanı ve eşleme sürümünü gösterir.
+   Aynı veri `GET /api/admin/price-sources/quarantine?kaynak=<kod>&limit=50` ile de okunur.
 2. Sık görülen nedenler: ters makas, aşırı fiyat sıçraması, bayat sağlayıcı zamanı, bilinmeyen
    sembol.
-3. Eşikler ortam değişkenleriyle ayarlanır: `PRICE_MAX_CHANGE_RATIO`, `PRICE_MAX_SPREAD_RATIO`,
+3. Sık görülen kodlar ve anlamları:
+   - `PRICE_JUMP`: önceki kabul edilmiş fiyata göre aşırı sıçrama (devre kesici).
+   - `INVERTED_SPREAD`: satış < alış. Sütunlar ters olabilir; DÜZELTİLMEZ, reddedilir.
+   - `TIMESTAMP_PROVENANCE_UNKNOWN`: sağlayıcı fiyat zamanı bildirmedi.
+   - `CURRENCY_NOT_TRY`: para birimi yanıtta TL değil veya hiç yok.
+   - `DUPLICATE_CANONICAL_PRODUCT`: aynı koşumda aynı ürün iki kez geldi.
+4. Eşikler ortam değişkenleriyle ayarlanır: `PRICE_MAX_CHANGE_RATIO`, `PRICE_MAX_SPREAD_RATIO`,
    `PRICE_STALE_AFTER_MS`. Eşiği gevşetmeden önce sağlayıcı verisini doğrulayın.
-4. Sembol eşlemesi değiştiyse `src/prices/providers/mappings.ts` güncellenir ve
+5. Sembol eşlemesi değiştiyse `src/prices/providers/mappings.ts` güncellenir ve
    `mappingVersion` artırılır.
+
+## 2.1 Global varsayılan fiyat kaynağı
+
+Kendi seçimini yapmamış kullanıcılara AÇIK bir varsayılan atanır; "listedeki ilk kaynak"
+davranışı yoktur.
+
+1. Yönetim → Fiyat kaynakları → ilgili kaynakta **"Varsayılan yap"**.
+2. Varsayılan `enabled` + `user_selectable` olmalı ve referans kaynağı olamaz.
+3. Kaynak kapatılırsa varsayılanlıktan da düşer; bu durumda tercihi olmayan kullanıcılara
+   kaynak ATANMAZ ve değerleme boş kalır (test verisine düşülmez).
+4. **Kendi tercihini yapmış kullanıcılar bu değişiklikten etkilenmez.**
 
 ## 3. Yedekleme ve geri yükleme
 
@@ -67,6 +86,12 @@ npx supabase db dump --linked -f yedek-$(date +%Y%m%d).sql
 
 **Uyarı:** `AUTH_MFA_ENCRYPTION_KEY` kaybedilirse mevcut TOTP kayıtları çözülemez; bütün
 yöneticilerin ikinci faktörü sıfırlanmalıdır. Anahtarı yedekleyin.
+
+**"Bu kod zaten kullanıldı" hatası:** aynı TOTP kodu 30 saniyelik pencerede yalnızca bir kez
+kabul edilir (replay koruması). Bir sonraki kodu bekleyin. Bu bir arıza değildir.
+
+Aynı kural otomasyon için de geçerlidir: birden çok oturumu arka arkaya açan betikler her
+oturum için YENİ bir pencere beklemelidir (bkz. `e2e/helpers.ts` → `waitForFreshTotpWindow`).
 
 ## 5. Sağlık kontrolü
 

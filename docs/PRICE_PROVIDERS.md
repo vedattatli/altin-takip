@@ -29,13 +29,17 @@ kanonik biçimde sunmaktır.
 
 | Kod | Kullanıcıya görünen ad | Teknik ad | Piyasa | Durum |
 | --- | --- | --- | --- | --- |
-| `mock` | Test Verisi | MockPriceProvider | Test | `DEV_ONLY` — üretimde kapalı (`src/prices/dev-gate.ts`) |
-| `sarraf-pro-kayseri` | Kayseri Yerel Piyasa | Sarraf Pro / KAYSARDER | Kayseri | `NOT_CONFIGURED` — yetkili API/XML sözleşmesi bekleniyor |
+| `mock` | Test Verisi | MockPriceProvider | Test | `DEV_ONLY` — üretim dağıtımında koşulsuz kapalı (`src/prices/dev-gate.ts`) |
+| `sarraf-pro-kayseri` | Kayseri Yerel Piyasa | Sarraf Pro (KAYSARDER ekranı) | Kayseri | `NOT_CONFIGURED` — yetkili API/XML sözleşmesi bekleniyor |
 | `altinapi` | Genel Türkiye | AltinAPI — bağımsız veri sağlayıcısı | Genel Türkiye | `NOT_CONFIGURED` — anahtar ve lisans bekleniyor |
 | `hasfiyat` | Hasfiyat Çoklu Kaynak | Hasfiyat — çoklu kaynak birleşimi | Çoklu Kaynak | `NOT_CONFIGURED` |
 | `altinkaynak-direct` | Altınkaynak (doğrudan) | Resmî API sözleşmesi bekleniyor | Genel Türkiye | `LICENSE_REQUIRED` — adapter kapalı |
 | `harem-direct` | Harem Altın (doğrudan) | Resmî API sözleşmesi bekleniyor | Genel Türkiye | `LICENSE_REQUIRED` — adapter kapalı |
 | `bist-reference` | BIST Referans (yalnızca kontrol) | BIST — referans/anomali | BIST | `LICENSE_REQUIRED`, `REFERENCE_ONLY` |
+
+**KAYSARDER**'ın resmî adı **Kayseri Sarraflar ve Kuyumcular Derneği**'dir ("Kuyumcular Odası"
+değildir). Derneğin fiyat sayfası, canlı ekranı `tv.sarraf.pro` üzerinden yayımlar. Dernek, bu
+verinin sahibi veya resmî API sağlayıcısı olarak — yazılı sözleşme olmadan — anılmaz.
 
 **AltinAPI**, Harem Altın'ın veya başka bir kurumun resmî servisi **değildir**; bağımsız bir
 veri sağlayıcısıdır ve arayüzde böyle etiketlenir.
@@ -47,6 +51,19 @@ etiketlenmez, **"Çoklu Kaynak"** olarak sunulur.
 **BIST** referans kaynağıdır: değerlemede birincil kaynak olamaz, yerel ziynet (çeyrek, Ata,
 Reşat) bozdurma hesabında kullanılmaz. Yalnızca veri sapması ve sağlık kontrolü içindir.
 
+## 2.1 Taslak adapter ve sözleşme doğrulaması
+
+Gerçek sağlayıcıların hepsi şu anda **taslak** JSON adapter'ı (`PrototypeJsonProvider`)
+kullanır. Bu adapter birden çok alan adını dener; sözleşmesi doğrulanmamış bir API'de
+sessizce yanlış sütunu okuyabilir. Bu yüzden `*_API_URL` ve `*_API_KEY` girilmesi bir
+kaynağı üretimde AÇMAZ. İki koşul birden gerekir:
+
+1. **Kodda fixture:** `src/prices/providers/contracts.ts` içinde o sağlayıcı için
+   doğrulanmış bir sözleşme sürümü.
+2. **Ortamda beyan:** operatör `*_CONTRACT_VERSION` ile aynı sürümü yazar.
+
+Sarraf Pro için doğrulanmış sürüm **yoktur**; beyan edilse bile kaynak açılmaz.
+
 ## 3. Bir kaynağı üretimde açmak
 
 1. Sağlayıcıyla **yazılı lisans/izin** sözleşmesi yapılır (yeniden gösterim dâhil).
@@ -54,6 +71,9 @@ Reşat) bozdurma hesabında kullanılmaz. Yalnızca veri sapması ve sağlık ko
    adres, anahtar, lisans referansı ve `*_REDISTRIBUTION_ALLOWED=true`.
 3. Sembol eşlemesi `src/prices/providers/mappings.ts` içinde doğrulanır; değişirse
    `mappingVersion` artırılır (eski kayıtların hangi eşlemeyle üretildiği izlenebilir kalır).
+   Sarraf Pro eşlemesi sözleşme gelene kadar BOŞTUR; tahmini sembol eklenmez.
+3b. Sözleşme sürümü `contracts.ts` içine fixture'ıyla eklenir ve `*_CONTRACT_VERSION` ile
+   beyan edilir.
 4. Yönetim → **Fiyat kaynakları** ekranında "Bağlantıyı test et" çalıştırılır.
 5. Kaynak "Etkinleştir" ve gerekiyorsa "Kullanıcıya aç" ile açılır. Lisans yoksa sunucu
    etkinleştirmeyi `409` ile reddeder.
@@ -98,9 +118,10 @@ yönetim ekranında güvenli hata koduyla görünür.
 
 - Bir portföyde **tek** aktif sağlayıcı/piyasa kullanılır.
 - Kullanıcı yalnızca yöneticinin açtığı (`enabled` + `user_selectable`) kaynakları görür.
-- Hiç seçim yapmamış kullanıcı için açık olan kaynaklardan ilki **varsayılan** olur ve
-  ekranda adıyla görünür. Bu bir *değişim* değildir; aktif kaynak düştüğünde başka kaynağa
-  geçilmez. Kullanıcı istediği an açık kaynaklardan birini seçebilir.
+- Hiç seçim yapmamış kullanıcı için yöneticinin **açıkça belirlediği** global varsayılan
+  kullanılır. "Listedeki ilk açık kaynak" davranışı YOKTUR: varsayılan tanımlı değilse
+  kaynak atanmaz ve değerleme boş kalır. Kendi tercihini yapmış kullanıcı, global varsayılan
+  değiştiğinde etkilenmez.
 - Piyasa kimliği arayüzde ham gösterilmez; okunur adla ("Kayseri Yerel Piyasa") sunulur.
 - Değişiklik açık onay ister:
   > Fiyat kaynağını değiştirmek güncel portföy değerinizi ve görünen gerçekleşmemiş kâr/zararı

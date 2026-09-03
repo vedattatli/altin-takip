@@ -185,14 +185,30 @@ hatasıdır. Normal kullanıcı route'ları `AdminActor` üretemediği için
 
 `tests/authorization-matrix.test.ts` bu tabloyu kaynak kod üzerinde doğrular.
 
-## 3.7 Merkezi route sarmalayıcısı
+## 3.7 Merkezi route sarmalayıcıları
 
-Tüm API route'ları `apiRoute()` ile sarılır (`src/server/security/route.ts`):
+İki sarmalayıcı vardır ve hangisinin kullanılacağı isteğin KİMDEN geldiğine bağlıdır.
+Bir route'un ikisini de atlaması test tarafından engellenir.
 
-1. Durum değiştiren isteklerde origin + CSRF doğrulaması.
+### Tarayıcı uçları — `apiRoute()` (`src/server/security/route.ts`)
+
+1. Durum değiştiren isteklerde origin + `Sec-Fetch-Site` + imzalı CSRF jetonu doğrulaması.
 2. `AppError` → HTTP yanıtı dönüşümü; beklenmeyen hataların iç detayı sızmaz.
+3. İstek sonunda oturum çerezi gerekiyorsa sessizce tazelenir.
 
-Bir route'un bu kontrolü atlaması test tarafından engellenir.
+### Makine uçları — `machineRoute()` (`src/server/security/machine-route.ts`)
+
+Zamanlanmış görevler için. Neden ayrı: bir cron zamanlayıcısının elinde çerez, sayfa
+meta jetonu veya oturum YOKTUR; `apiRoute` ile sarılsaydı doğru secret'la bile istek
+CSRF aşamasında reddedilirdi.
+
+- Kimlik yalnızca paylaşılan secret'tır (`Authorization: Bearer` veya `X-Cron-Secret`),
+  sabit sürede karşılaştırılır; secret tanımsızsa uç kapalıdır (403).
+- Oturum ÇÖZMEZ, çerez YAZMAZ, oturum ömrü UZATMAZ.
+- Koşum anahtarı sunucuda dakikaya yuvarlanarak üretilir; aynı dakikadaki tekrar çağrı
+  ikinci kayıt oluşturmaz.
+
+Ayrıntı: [PRICE_RUNTIME_INTEGRITY.md](PRICE_RUNTIME_INTEGRITY.md).
 
 ## 3.8 Oturum yaşam döngüsü (tercihe bağlı: kalıcı / tarayıcı oturumu / admin)
 
@@ -286,7 +302,9 @@ Ayrıntı ve kabul edilen sapma: [SECURITY.md](SECURITY.md) bölüm 2.1.
 | PATCH | `/api/admin/price-sources/[code]` | Yönetici — etkinleştir / kullanıcıya aç (lisanssızsa 409) |
 | POST | `/api/admin/price-sources/[code]/refresh` | Yönetici — şimdi güncelle |
 | POST | `/api/admin/price-sources/[code]/test` | Yönetici — bağlantı testi (secret döndürmez) |
-| POST | `/api/cron/price-ingestion` | `PRICE_CRON_SECRET` (oturum yok; secret tanımsızsa 403) |
+| POST | `/api/cron/price-ingestion` | **Makine ucu** — `machineRoute`, `PRICE_CRON_SECRET` (oturum ve CSRF yok; secret tanımsızsa 403) |
+| GET | `/api/admin/price-sources/quarantine` | Yönetici — karantina kayıtları (salt okunur) |
+| PUT | `/api/admin/price-sources/default` | Yönetici — açık global varsayılan kaynak |
 | GET | `/api/health` | Herkese açık (yalın durum). `PRICE_CRON_SECRET` ile sağlayıcı sağlık özeti eklenir |
 | GET | `/api/auth/mfa` | Oturum — ikinci faktör durumu |
 | POST | `/api/auth/mfa/enroll` | Yönetici (kurulum guard'ı) — secret üret |

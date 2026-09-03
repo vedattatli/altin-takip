@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import { E2E_CRON_SECRET, E2E_MFA_ENCRYPTION_KEY } from "./e2e/test-env";
+import { TEST_OVERRIDE_TOKEN as PRICE_TEST_TOKEN } from "./src/auth/types";
 
 /**
  * Tarayıcı duman (smoke) testleri.
@@ -40,6 +41,9 @@ const testEnv = {
   AUTH_MFA_ENCRYPTION_KEY: E2E_MFA_ENCRYPTION_KEY,
   // Zamanlanmış fiyat alımı ucu için test secret'ı.
   PRICE_CRON_SECRET: E2E_CRON_SECRET,
+  // Test verisi sağlayıcısı için AYRI kapı. Yerel auth kapısından bağımsızdır ve
+  // gerçek üretim dağıtımında (VERCEL_ENV=production) hiçbir etkisi yoktur.
+  PRICE_ALLOW_MOCK_PROVIDER: PRICE_TEST_TOKEN,
 };
 
 export default defineConfig({

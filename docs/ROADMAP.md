@@ -119,7 +119,7 @@
 
 - **Kanonik sağlayıcı sözleşmesi:** `src/prices/contract.ts` — lisans durumu, yetenekler,
   yapılandırma doğrulama, sağlık kontrolü, ham yanıt → `NormalizedQuote` normalizasyonu.
-- **Sağlayıcı kataloğu (7):** test verisi, Kayseri yerel piyasa (Sarraf Pro / KAYSARDER),
+- **Sağlayıcı kataloğu (7):** test verisi, Kayseri yerel piyasa (Sarraf Pro — KAYSARDER ekranı),
   AltinAPI, Hasfiyat, Altınkaynak (doğrudan), Harem (doğrudan), BIST referans.
   Gerçek kaynakların tamamı `NOT_CONFIGURED` / `LICENSE_REQUIRED`; lisans olmadan
   etkinleştirilemez (fail closed).
@@ -145,13 +145,47 @@
 - **BEKLEMEDE (dış lisans gerekiyor):** hiçbir gerçek sağlayıcıya bağlanılmadı. Canlı sağlayıcı
   testleri NOT_RUN'dır; eksik ayarlar yalnızca değişken adıyla raporlanır.
 
+## Tamamlanan — Sprint 3.1 (fiyat çalışma zamanı bütünlüğü ve Sarraf TV fizibilitesi)
+
+Sprint 3 fiyat MİMARİSİNİ kurdu; bu sprint o mimarinin gerçek çalışma yolunda kopan
+yerlerini kapattı ve Sarraf TV Kayseri ekranının okunabilirliğini ölçtü.
+
+- **Makine (cron) ucu:** `machineRoute` eklendi. Zamanlanmış alım artık tarayıcı CSRF
+  çerezi beklemiyor; oturum çözmüyor, çerez yazmıyor. Koşum anahtarı sunucuda dakikaya
+  yuvarlanıyor (aynı dakikada replay ikinci kayıt oluşturmuyor).
+- **Devre kesici akışa bağlandı:** `PRICE_JUMP` artık gerçek alımda çalışıyor; referans
+  yalnızca aynı sağlayıcının aynı piyasadaki güncel kaydından alınıyor.
+- **Karantina kalıcı (0016):** `price_quote_quarantine` append-only tablosu; ürün, sebep,
+  fiyat, zaman ve eşleme sürümü saklanıyor. Yönetim ekranında listeleniyor.
+- **Ingestion RPC sertleştirildi:** sağlayıcı durumu, para birimi, fiyat işareti, makas
+  yönü, zaman damgası, katalog üyeliği ve yinelenen kanonik ürün veritabanında da denetleniyor.
+- **Adapter semantiği:** genel REST okuyucu `PrototypeJsonProvider` oldu ve fixture ile
+  doğrulanmış sözleşme beyanı olmadan LICENSED olmuyor; `timestampProvenance` eklendi
+  (eksik zaman artık `fetchedAt` ile doldurulmuyor); para birimi yanıttan doğrulanıyor;
+  çalışmayan XML/WebSocket yetenekleri `advertisedCapabilities`'e ayrıldı.
+- **Sarraf Pro üretim eşlemesi boşaltıldı:** tahmini semboller kaldırıldı.
+- **Yönetici portföyü** hedef kullanıcının aktif kaynağını kullanıyor (eski test sağlayıcısı değil).
+- **Açık global varsayılan kaynak:** "listedeki ilk açık kaynak" davranışı kaldırıldı.
+- **Test verisi kapısı ayrıldı:** `PRICE_ALLOW_MOCK_PROVIDER`; üretim dağıtımında hiçbir
+  override açamıyor ve katalog eşitlemesi açık kalmış test kaynağını zorla kapatıyor.
+- **TOTP replay koruması:** `last_used_counter` ile aynı kod ikinci kez kabul edilmiyor.
+- **KAYSARDER kurum adı düzeltildi:** Kayseri Sarraflar ve Kuyumcular Derneği.
+- **Sarraf TV fizibilitesi:** deneysel araç (`npm run price:sarraf-feasibility`) ve
+  varsayılan olarak KAPALI deneysel toplayıcı. Üretime bağlanmadı.
+  Sonuç `OK`: ekran normal tarayıcı oturumunda okundu, 4 üründe alış/satış ekranla birebir
+  doğrulandı, 10 dakikada 5 fiyat güncellemesi gözlendi, CAPTCHA etkileşimi istenmedi
+  (sayfa reCAPTCHA yüklüyor; aşılmadı). 8 satır bilerek çözülmedi.
+- **Doğrulama:** 543 birim testi (30 dosya), 242 pgTAP, gerçek JWT sondası (46), sağlayıcı
+  sözleşme testleri (55), fiyat alımı duman testi, muhasebe doğrulama/duman testleri,
+  Playwright (279 geçti, 3 atlandı, 0 başarısız).
+
 ## Uzak ortam doğrulaması (dış hesap girişi bekliyor)
 
 Migration'lar, RPC'ler, tetikleyiciler, grant'lar ve RLS **yerel Supabase yığınında**
 doğrulandı (0.6). Uzak (staging/production) proje henüz yok; ilk iş bu boşluğu
 kapatmaktır.
 
-1. Uzak Supabase projesi aç, `0001` → `0015` migration'larını sırayla uygula (`npm run staging:migrate`).
+1. Uzak Supabase projesi aç, `0001` → `0016` migration'larını sırayla uygula (`npm run staging:migrate`).
 2. Aynı projeye karşı `npm run test:db` mantığını (pgTAP) ve `npm run test:data-api`
    sondasını çalıştır (sonda için proje URL / anahtar / JWT secret ortam değişkenleri).
 3. `npm run admin:create` ile gerçek yönetici hesabını oluştur; gerekirse `npm run admin:repair`.
@@ -171,7 +205,7 @@ kapatmaktır.
   "tüm cihazlardan çıkış" 0.6'da tamamlandı; `AuthService.listOwnSessions` hazır.
 - Denetim kaydı için dışa aktarma ve saklama politikası.
 
-## Sprint 3.1 — Gerçek sağlayıcı aktivasyonu (lisans bekliyor)
+## Sprint 3.2 — Gerçek sağlayıcı aktivasyonu (lisans bekliyor)
 
 **Ön koşul: lisans veya yazılı izin.** İzinsiz scraping yapılmayacak. Kod tarafı hazırdır;
 kalan işler tamamen dış sözleşmeye bağlıdır.
@@ -184,6 +218,19 @@ kalan işler tamamen dış sözleşmeye bağlıdır.
   `*_REDISTRIBUTION_ALLOWED=true` sunucu ortamına yazılır, sembol eşlemesi doğrulanır,
   `npm run price:contract` canlı bölümü çalıştırılır, yönetim ekranından kaynak açılır.
 - Kalıcı WebSocket akışı gerektiren sağlayıcı için ayrı worker çalışma zamanı.
+- Sözleşme geldiğinde `src/prices/providers/contracts.ts` içine sağlayıcıya ÖZGÜ sürüm ve
+  fixture eklenir; `*_CONTRACT_VERSION` ile beyan edilir. Taslak adapter tek başına yetmez.
+
+## Sarraf TV kapalı pilotu (fizibilite başarılı; karar bekliyor)
+
+Ekran normal tarayıcı oturumunda okunabildi ve değerler ekranla birebir doğrulandı.
+Kalan adımlar:
+
+- Yeni/eski ayrımı yazmayan satırların (ÇEYREK / YARIM / TAM ALTIN) teyidi.
+- Tek fiyatlı satırların (HAS, 22/14/8 AYAR) alış mı satış mı olduğunun teyidi.
+- Sayfanın yüklediği bot koruması altyapısının kalıcı toplayıcı için riski.
+- Yayın/lisans izni (ekran gözlemi ticari yayın hakkı vermez).
+- Kararlılık ölçümü: özel staging + KAYSARDER ekranıyla eşzamanlı karşılaştırma.
 
 ## Sprint 4 — Ürün derinleştirme
 

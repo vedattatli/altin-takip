@@ -25,12 +25,14 @@ import {
   type PriceSnapshotRecord,
   type ProductPosition,
 } from "@/domain/accounting";
-import { getProduct } from "@/domain/catalog";
+import { GOLD_PRODUCTS, getProduct } from "@/domain/catalog";
 import type { PortfolioMeta } from "@/domain/types";
 import {
   ProviderNotSelectableError,
   type IngestionPayload,
+  type IngestionQuoteInput,
   type IngestionResult,
+  type QuarantineRow,
   type PricePreferenceResult,
   type PricePreferenceRow,
   type PriceSourceEventRow,
@@ -149,6 +151,7 @@ interface StoreShape {
   priceRuns: StoredPriceRun[];
   pricePreferences: StoredPricePreference[];
   priceSourceEvents: StoredPriceSourceEvent[];
+  priceQuarantine: StoredPriceQuarantine[];
   /** Yönetici ikinci faktörü (Sprint 3). Secret ŞİFRELİ; kurtarma kodları özet. */
   mfaCredentials: StoredMfaCredential[];
   mfaRecoveryCodes: StoredRecoveryCode[];
@@ -162,6 +165,8 @@ interface StoredMfaCredential {
   lastVerifiedAt: string | null;
   failedAttempts: number;
   lockedUntil: string | null;
+  /** Başarıyla kullanılan son TOTP zaman adımı; aynı kod tekrar kabul edilmez. */
+  lastUsedCounter: number | null;
 }
 
 interface StoredRecoveryCode {
@@ -173,9 +178,28 @@ interface StoredRecoveryCode {
 interface StoredPriceProvider extends ProviderSyncInput {
   enabled: boolean;
   userSelectable: boolean;
+  /** Açık global varsayılan (en fazla bir sağlayıcıda true). */
+  isDefault: boolean;
   mappingVersion: string;
   mappingCount: number;
   health: ProviderStateRow["health"];
+}
+
+/** Karantina kaydı: append-only; ham yanıt saklanmaz. */
+interface StoredPriceQuarantine {
+  id: string;
+  ingestionRunId: string;
+  providerCode: string;
+  marketId: string;
+  canonicalProductId: string;
+  rejectionCode: string;
+  liquidationPrice: string | null;
+  replacementPrice: string | null;
+  currency: string | null;
+  providerTimestamp: string | null;
+  fetchedAt: string | null;
+  mappingVersion: string | null;
+  createdAt: string;
 }
 
 interface StoredPriceQuote extends StoredQuoteRow {
@@ -211,7 +235,10 @@ interface StoredPriceSourceEvent extends PriceSourceEventRow {
   portfolioId: string;
 }
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 6;
+
+/** Katalogdaki geçerli ürün kimlikleri; bilinmeyen ürün karantinaya alınır. */
+const GOLD_PRODUCT_IDS = new Set(GOLD_PRODUCTS.map((product) => product.id));
 
 function emptyStore(): StoreShape {
   return {
@@ -228,6 +255,7 @@ function emptyStore(): StoreShape {
     priceRuns: [],
     pricePreferences: [],
     priceSourceEvents: [],
+    priceQuarantine: [],
     mfaCredentials: [],
     mfaRecoveryCodes: [],
   };
@@ -1134,6 +1162,7 @@ export class LocalAuthBackend implements AuthBackend {
       providerType: provider.providerType,
       enabled: provider.enabled,
       userSelectable: provider.userSelectable,
+      isDefault: provider.isDefault === true,
       licenseStatus: provider.licenseStatus,
       licenseReference: provider.licenseReference,
       redistributionAllowed: provider.redistributionAllowed,
@@ -1163,15 +1192,19 @@ export class LocalAuthBackend implements AuthBackend {
       const existing = this.providerRow(input.code);
       const licensed = input.licenseStatus === "LICENSED" || input.licenseStatus === "DEV_ONLY";
       if (existing) {
+        const wasDefault = existing.isDefault === true;
         Object.assign(existing, input);
         // Lisans kaybedilirse kaynak otomatik olarak kapanır (fail closed).
         existing.enabled = existing.enabled && licensed;
         existing.userSelectable = existing.userSelectable && existing.enabled;
+        // Kapanan kaynak global varsayılan olarak da kalamaz.
+        existing.isDefault = wasDefault && existing.enabled && existing.userSelectable;
       } else {
         this.store.priceProviders.push({
           ...input,
           enabled: false,
           userSelectable: false,
+          isDefault: false,
           mappingVersion: "none",
           mappingCount: 0,
           health: null,
@@ -1214,6 +1247,8 @@ export class LocalAuthBackend implements AuthBackend {
     }
     provider.enabled = enabled;
     provider.userSelectable = userSelectable;
+    // Kapatılan veya kullanıcıya kapatılan kaynak varsayılan olamaz.
+    if (!provider.enabled || !provider.userSelectable) provider.isDefault = false;
     this.write();
     return this.toProviderState(provider);
   }
@@ -1235,10 +1270,86 @@ export class LocalAuthBackend implements AuthBackend {
       };
     }
 
+    // Sunucu RPC'siyle AYNI kurallar: kapalı/lisanssız/referans kaynak yazamaz.
+    if (!provider.enabled) {
+      throw new ProviderNotSelectableError(code, "Kapalı sağlayıcı fiyat yazamaz.");
+    }
+    if (provider.licenseStatus !== "LICENSED" && provider.licenseStatus !== "DEV_ONLY") {
+      throw new ProviderNotSelectableError(code, "Lisanssız sağlayıcı fiyat yazamaz.");
+    }
+    if (provider.licenseStatus === "LICENSED" && !provider.redistributionAllowed) {
+      throw new ProviderNotSelectableError(code, "Yeniden gösterim izni olmayan sağlayıcı fiyat yazamaz.");
+    }
+    if (provider.capabilities.includes("REFERENCE_ONLY")) {
+      throw new ProviderNotSelectableError(code, "Referans kaynağı değerleme fiyatı yazamaz.");
+    }
+
     const runId = randomUUID();
     const startedAt = this.nowISO();
     let staleCount = 0;
+
+    const quarantine = (entry: {
+      canonicalProductId: string;
+      code: string;
+      liquidationPrice?: string | null;
+      replacementPrice?: string | null;
+      currency?: string | null;
+      providerTimestamp?: string | null;
+      fetchedAt?: string | null;
+      mappingVersion?: string | null;
+    }) => {
+      this.store.priceQuarantine.push({
+        id: randomUUID(),
+        ingestionRunId: runId,
+        providerCode: code,
+        marketId: provider.marketId,
+        canonicalProductId: entry.canonicalProductId,
+        rejectionCode: entry.code,
+        liquidationPrice: entry.liquidationPrice ?? null,
+        replacementPrice: entry.replacementPrice ?? null,
+        currency: entry.currency ?? null,
+        providerTimestamp: entry.providerTimestamp ?? null,
+        fetchedAt: entry.fetchedAt ?? null,
+        mappingVersion: entry.mappingVersion ?? null,
+        createdAt: this.nowISO(),
+      });
+    };
+
+    for (const entry of payload.quarantined) quarantine(entry);
+
+    const seen = new Set<string>();
+    const accepted: IngestionQuoteInput[] = [];
     for (const quote of payload.quotes) {
+      const liquidation = Number(quote.liquidationPrice);
+      const replacement = Number(quote.replacementPrice);
+      const providerTs = Date.parse(quote.providerTimestamp ?? "");
+      let reject: string | null = null;
+      if (!GOLD_PRODUCT_IDS.has(quote.canonicalProductId)) reject = "PRODUCT_UNKNOWN";
+      else if (seen.has(quote.canonicalProductId)) reject = "DUPLICATE_CANONICAL_PRODUCT";
+      else if (!Number.isFinite(liquidation) || !Number.isFinite(replacement) || liquidation <= 0 || replacement <= 0)
+        reject = "PRICE_NOT_POSITIVE";
+      else if (replacement < liquidation) reject = "INVERTED_SPREAD";
+      else if (!Number.isFinite(providerTs)) reject = "TIMESTAMP_INVALID";
+      else if (providerTs > Date.parse(this.nowISO()) + 5 * 60_000) reject = "TIMESTAMP_FUTURE";
+
+      if (reject) {
+        quarantine({
+          canonicalProductId: quote.canonicalProductId,
+          code: reject,
+          liquidationPrice: quote.liquidationPrice,
+          replacementPrice: quote.replacementPrice,
+          currency: "TRY",
+          providerTimestamp: quote.providerTimestamp,
+          fetchedAt: quote.fetchedAt,
+          mappingVersion: quote.mappingVersion,
+        });
+        continue;
+      }
+      seen.add(quote.canonicalProductId);
+      accepted.push(quote);
+    }
+
+    for (const quote of accepted) {
       const row: StoredPriceQuote = {
         providerCode: code,
         canonicalProductId: quote.canonicalProductId,
@@ -1247,7 +1358,9 @@ export class LocalAuthBackend implements AuthBackend {
         replacementPrice: quote.replacementPrice,
         currency: "TRY",
         upstreamSourceId: quote.upstreamSourceId,
-        providerTimestamp: quote.providerTimestamp,
+        // Buraya yalnızca kalite kapısından geçmiş kayıtlar gelir; zamanı olmayan
+        // kayıt daha önce karantinaya alınmıştır.
+        providerTimestamp: quote.providerTimestamp ?? "",
         fetchedAt: quote.fetchedAt,
         status: quote.status,
         mappingVersion: quote.mappingVersion,
@@ -1262,9 +1375,9 @@ export class LocalAuthBackend implements AuthBackend {
       else this.store.priceQuotes.push(row);
     }
 
-    const rejected = payload.quarantined.length;
+    const rejected = this.store.priceQuarantine.filter((row) => row.ingestionRunId === runId).length;
     const status =
-      payload.status === "unavailable" || payload.quotes.length === 0
+      payload.status === "unavailable" || accepted.length === 0
         ? "FAILED"
         : payload.status === "partial" || rejected > 0
           ? "PARTIAL"
@@ -1276,17 +1389,16 @@ export class LocalAuthBackend implements AuthBackend {
       status,
       startedAt,
       completedAt: this.nowISO(),
-      quoteCount: payload.quotes.length,
+      quoteCount: accepted.length,
       rejectedCount: rejected,
       latencyMs: payload.latencyMs,
       safeErrorCode: payload.safeErrorCode,
     });
     provider.health = {
-      status: payload.quotes.length > 0 && rejected === 0 ? "ok" : payload.quotes.length > 0 ? "degraded" : "unavailable",
-      lastSuccessAt: payload.quotes.length > 0 ? this.nowISO() : (provider.health?.lastSuccessAt ?? null),
-      lastErrorAt:
-        payload.quotes.length === 0 || rejected > 0 ? this.nowISO() : (provider.health?.lastErrorAt ?? null),
-      coverageCount: payload.quotes.length,
+      status: accepted.length > 0 && rejected === 0 ? "ok" : accepted.length > 0 ? "degraded" : "unavailable",
+      lastSuccessAt: accepted.length > 0 ? this.nowISO() : (provider.health?.lastSuccessAt ?? null),
+      lastErrorAt: accepted.length === 0 || rejected > 0 ? this.nowISO() : (provider.health?.lastErrorAt ?? null),
+      coverageCount: accepted.length,
       staleCount,
       quarantinedCount: rejected,
       latencyMs: payload.latencyMs,
@@ -1297,10 +1409,57 @@ export class LocalAuthBackend implements AuthBackend {
       runId,
       status,
       skipped: false,
-      quoteCount: payload.quotes.length,
+      quoteCount: accepted.length,
       rejectedCount: rejected,
       replayed: false,
     };
+  }
+
+  async listPriceQuarantine(code: string | null, limit = 50): Promise<QuarantineRow[]> {
+    this.refresh();
+    const capped = Math.max(1, Math.min(limit, 200));
+    return this.store.priceQuarantine
+      .filter((row) => (code === null ? true : row.providerCode === code))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .slice(0, capped)
+      .map((row) => ({
+        providerCode: row.providerCode,
+        marketId: row.marketId,
+        canonicalProductId: row.canonicalProductId,
+        rejectionCode: row.rejectionCode,
+        liquidationPrice: row.liquidationPrice,
+        replacementPrice: row.replacementPrice,
+        currency: row.currency,
+        providerTimestamp: row.providerTimestamp,
+        fetchedAt: row.fetchedAt,
+        mappingVersion: row.mappingVersion,
+        createdAt: row.createdAt,
+      }));
+  }
+
+  async setDefaultPriceProvider(code: string | null): Promise<string | null> {
+    this.refresh();
+    if (code === null) {
+      for (const provider of this.store.priceProviders) provider.isDefault = false;
+      this.write();
+      return null;
+    }
+    const provider = this.providerRow(code);
+    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
+    if (!provider.enabled || !provider.userSelectable) {
+      throw new ProviderNotSelectableError(code, "Kapalı bir kaynak varsayılan yapılamaz.");
+    }
+    if (provider.capabilities.includes("REFERENCE_ONLY")) {
+      throw new ProviderNotSelectableError(code, "Referans kaynağı varsayılan yapılamaz.");
+    }
+    for (const candidate of this.store.priceProviders) candidate.isDefault = candidate.code === code;
+    this.write();
+    return code;
+  }
+
+  async defaultPriceProvider(): Promise<string | null> {
+    this.refresh();
+    return this.store.priceProviders.find((provider) => provider.isDefault)?.code ?? null;
   }
 
   async currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null> {
@@ -1450,6 +1609,7 @@ export class LocalAuthBackend implements AuthBackend {
       lastVerifiedAt: null,
       failedAttempts: 0,
       lockedUntil: null,
+      lastUsedCounter: null,
     };
     if (existing) Object.assign(existing, record);
     else this.store.mfaCredentials.push(record);
@@ -1484,6 +1644,20 @@ export class LocalAuthBackend implements AuthBackend {
     if (success) row.lastVerifiedAt = at;
     this.write();
     return { ...row };
+  }
+
+  async claimMfaCounter(userId: string, counter: number): Promise<boolean> {
+    // Yerel arka uçta yazma işlemleri kullanıcı başına sıraya alınır; bu yüzden
+    // oku-karşılaştır-yaz dizisi sunucudaki atomik UPDATE ile aynı garantiyi verir.
+    return this.serialize(userId, () => {
+      this.refresh();
+      const row = this.store.mfaCredentials.find((credential) => credential.userId === userId);
+      if (!row) return false;
+      if (row.lastUsedCounter !== null && counter <= row.lastUsedCounter) return false;
+      row.lastUsedCounter = counter;
+      this.write();
+      return true;
+    });
   }
 
   async replaceRecoveryCodes(userId: string, hashes: readonly string[]): Promise<void> {

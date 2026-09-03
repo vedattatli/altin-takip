@@ -6,11 +6,24 @@ import {
   type ProviderConfigValidation,
   type ProviderDescriptor,
   type ProviderSnapshot,
+  type TimestampProvenance,
 } from "../contract";
 import { BaseProvider, decimalOrNull, hashPayload, isFlagTrue, isoOrNull, readEnv } from "./base";
+import { findVerifiedContract, type VerifiedContract } from "./contracts";
 
 /**
- * Yapılandırılabilir REST sağlayıcı adapter'ı.
+ * TASLAK (PROTOTYPE) JSON ADAPTER'I — ÜRETİM ADAPTERI DEĞİLDİR.
+ *
+ * Bu sınıf birden çok sağlayıcı için TAHMİNİ alan adları dener
+ * (symbol|code|kod|name, bid|buy|alis, ask|sell|satis...). Böyle bir "esnek"
+ * okuma, sözleşmesi doğrulanmamış bir API'de sessizce YANLIŞ sütunu okuyabilir;
+ * alış/satış ters düşerse kullanıcı yanlış kâr/zarar görür.
+ *
+ * Bu yüzden kapı iki katmanlıdır:
+ *   1. Ortam değişkenleri tam olmalı (adres, anahtar, lisans).
+ *   2. Sağlayıcıya ÖZGÜ, doğrulanmış bir sözleşme sürümü (`contractVersion`)
+ *      ve fixture'ı bulunmalı. Yoksa yalnızca API_URL ve API_KEY girilmesi bu
+ *      adapter'ı üretimde LICENSED yapmaz; NOT_CONFIGURED kalır.
  *
  * Endpoint UYDURULMAZ: taban adres operatörün elindeki resmî sözleşmeden gelir
  * (`*_API_URL`). Adres yoksa sağlayıcı NOT_CONFIGURED kalır ve hiçbir istek atılmaz.
@@ -45,6 +58,14 @@ export interface RestProviderConfig {
   /** Sağlayıcının kendi upstream kaynağını seçmek için (opsiyonel). */
   sourceEnv?: string;
   staleAfterMs?: number;
+  /**
+   * Operatörün sözleşme sürümünü beyan ettiği ortam değişkeni ADI.
+   *
+   * Değer, `VERIFIED_CONTRACTS` içindeki fixture ile doğrulanmış bir sürüme
+   * eşit olmalıdır. Yalnızca URL ve API anahtarı girilmesi bu adapter'ı üretim
+   * adapter'ı YAPMAZ.
+   */
+  contractVersionEnv?: string;
 }
 
 interface RawRecord {
@@ -66,6 +87,7 @@ const ASK_KEYS = ["ask", "sell", "selling", "satis", "satış", "sellPrice"] as 
 const TIME_KEYS = ["timestamp", "time", "updatedAt", "updated_at", "tarih", "date", "lastUpdate"] as const;
 const STALE_KEYS = ["stale", "isStale", "outdated"] as const;
 const SOURCE_KEYS = ["source", "sourceId", "source_id", "kaynak", "upstream"] as const;
+const CURRENCY_KEYS = ["currency", "curr", "paraBirimi", "para_birimi"] as const;
 
 /** Sağlayıcı yanıtını kayıt listesine çevirir (dizi, sarmalanmış dizi veya sembol anahtarlı nesne). */
 export function extractRecords(payload: unknown): RawRecord[] {
@@ -87,7 +109,7 @@ export function extractRecords(payload: unknown): RawRecord[] {
   return entries.map(([symbol, value]) => ({ symbol, ...(value as RawRecord) }));
 }
 
-export class RestQuoteProvider extends BaseProvider {
+export class PrototypeJsonProvider extends BaseProvider {
   constructor(private readonly config: RestProviderConfig) {
     super({
       descriptor: config.descriptor,
@@ -102,6 +124,7 @@ export class RestQuoteProvider extends BaseProvider {
       this.config.urlEnv,
       this.config.apiKeyEnv,
       this.config.licenseEnv,
+      ...(this.config.contractVersionEnv ? [this.config.contractVersionEnv] : []),
       ...(this.config.extraRequiredEnv ?? []),
     ];
   }
@@ -110,9 +133,30 @@ export class RestQuoteProvider extends BaseProvider {
     return readEnv(this.config.licenseEnv) || null;
   }
 
+  /** Operatörün beyan ettiği sözleşme sürümü (yoksa boş dize). */
+  private declaredContract(): string {
+    return this.config.contractVersionEnv ? readEnv(this.config.contractVersionEnv) : "";
+  }
+
+  /**
+   * Sağlayıcıya özgü doğrulanmış sözleşme var mı?
+   * Hem KODDAKİ fixture listesi hem ORTAMDAKİ beyan gerekir.
+   */
+  private verifiedContract(): VerifiedContract | null {
+    const declared = this.declaredContract();
+    if (declared === "") return null;
+    return findVerifiedContract(this.providerId, declared);
+  }
+
+  get contractVerified(): boolean {
+    return this.verifiedContract() !== null;
+  }
+
   licenseStatus(): LicenseStatus {
     const missing = this.missingEnv(this.requiredEnvNames());
     if (missing.length > 0) return "NOT_CONFIGURED";
+    // Doğrulanmış sözleşme olmadan taslak adapter üretim adapter'ı sayılmaz.
+    if (!this.contractVerified) return "NOT_CONFIGURED";
     // Yeniden gösterim izni AÇIKÇA "true" değilse lisanslı sayılmaz (fail closed).
     if (!isFlagTrue(this.config.redistributionEnv)) return "LICENSE_REQUIRED";
     return "LICENSED";
@@ -122,6 +166,19 @@ export class RestQuoteProvider extends BaseProvider {
     const issues = this.missingEnv(this.requiredEnvNames());
     if (issues.length > 0) {
       return { ok: false, licenseStatus: "NOT_CONFIGURED", issues };
+    }
+    if (!this.contractVerified) {
+      return {
+        ok: false,
+        licenseStatus: "NOT_CONFIGURED",
+        issues: [
+          {
+            variable: this.config.contractVersionEnv ?? "PROVIDER_CONTRACT_VERSION",
+            message:
+              "Beyan edilen sözleşme sürümü, fixture ile doğrulanmış sürümler arasında değil. Taslak adapter bu hâliyle üretimde kullanılamaz.",
+          },
+        ],
+      };
     }
     if (!isFlagTrue(this.config.redistributionEnv)) {
       return {
@@ -151,7 +208,23 @@ export class RestQuoteProvider extends BaseProvider {
     const replacementPrice = decimalOrNull(pick(record, ASK_KEYS));
     if (!liquidationPrice || !replacementPrice) return null;
 
-    const providerTimestamp = isoOrNull(pick(record, TIME_KEYS)) ?? context.fetchedAt;
+    // ZAMAN: sağlayıcı zaman bildirmezse GÖZLEM ZAMANI YAZILMAZ. Aksi hâlde bir
+    // saat önceki fiyat "az önce güncellendi" gibi görünür ve tazelik kontrolü
+    // anlamsızlaşırdı. Zamanı olmayan kayıt kalite kapısından geçemez.
+    const providerTimestamp = isoOrNull(pick(record, TIME_KEYS));
+    const timestampProvenance: TimestampProvenance = providerTimestamp ? "UPSTREAM" : "UNKNOWN";
+
+    // PARA BİRİMİ: yanıttan okunur. Yanıtta yoksa yalnızca sözleşmede sabit
+    // olduğu DOĞRULANMIŞSA TRY kabul edilir; aksi hâlde kayıt atlanır.
+    const rawCurrency = pick(record, CURRENCY_KEYS);
+    const currency =
+      typeof rawCurrency === "string" && rawCurrency.trim() !== ""
+        ? rawCurrency.trim().toUpperCase()
+        : (this.verifiedContract()?.currencyFixedToTry ?? false)
+          ? "TRY"
+          : null;
+    if (currency !== "TRY") return null;
+
     const staleFlag = pick(record, STALE_KEYS);
     const upstream = pick(record, SOURCE_KEYS);
     const configuredSource = this.config.sourceEnv ? readEnv(this.config.sourceEnv) : "";
@@ -166,6 +239,7 @@ export class RestQuoteProvider extends BaseProvider {
       replacementPrice,
       currency: "TRY",
       providerTimestamp,
+      timestampProvenance,
       fetchedAt: context.fetchedAt,
       status: staleFlag === true ? "stale" : "ok",
       staleAfterMs: this.staleAfterMs,

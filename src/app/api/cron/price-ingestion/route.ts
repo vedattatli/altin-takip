@@ -1,51 +1,39 @@
-import { NextResponse } from "next/server";
-
 import { getPriceIngestionService } from "@/server/auth";
 import { ok } from "@/server/http";
-import { timingSafeEqualString } from "@/server/security/csrf";
-import { apiRoute } from "@/server/security/route";
+import { machineRoute } from "@/server/security/machine-route";
 
 /**
  * Zamanlanmış fiyat alımı.
  *
+ * - MAKİNE ucudur: `machineRoute` kullanır, tarayıcı CSRF çerezi veya oturum
+ *   BEKLEMEZ. `apiRoute` ile sarılsaydı zamanlayıcının elinde çerez olmadığı
+ *   için istek doğru secret'la bile CSRF aşamasında reddedilirdi.
  * - Secret ile korunur (`PRICE_CRON_SECRET`); yoksa uç KAPALIDIR (fail closed).
- * - Idempotenttir: aynı koşum anahtarı iki kez uygulanmaz.
+ * - Idempotenttir: koşum anahtarı sunucuda dakikaya yuvarlanarak üretilir, aynı
+ *   dakikada tekrarlanan çağrı ikinci fiyat geçmişi satırı oluşturmaz.
  * - Yalnızca etkin ve lisanslı sağlayıcılar çekilir; test sağlayıcısı üretimde çalışmaz.
- * - Yanıt secret veya ham payload İÇERMEZ.
+ * - Yanıt secret, upstream adres veya ham payload İÇERMEZ.
  */
 export const dynamic = "force-dynamic";
 
-function authorized(request: Request): boolean {
-  const secret = (process.env.PRICE_CRON_SECRET ?? "").trim();
-  if (secret === "") return false;
-  const header = request.headers.get("authorization") ?? "";
-  const bearer = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  const custom = (request.headers.get("x-cron-secret") ?? "").trim();
-  // Sabit süreli karşılaştırma: secret uzunluğu/önekі zamanlama ile sızmaz.
-  return timingSafeEqualString(bearer, secret) || timingSafeEqualString(custom, secret);
-}
-
-export const POST = apiRoute(async (request) => {
-  if (!authorized(request)) {
-    return NextResponse.json(
-      { error: "Bu uç yalnızca zamanlanmış görev tarafından çağrılabilir.", code: "forbidden" },
-      { status: 403, headers: { "Cache-Control": "private, no-store" } },
-    );
-  }
-  const service = getPriceIngestionService();
-  await service.syncCatalog();
-  const outcomes = await service.ingestEnabled();
-  return ok(
-    {
+export const POST = machineRoute(
+  { secretEnv: "PRICE_CRON_SECRET", runKeyPrefix: "price-ingestion" },
+  async (_request, _context, machine) => {
+    const service = getPriceIngestionService();
+    await service.syncCatalog();
+    const outcomes = await service.ingestEnabled({ runKey: machine.runKey });
+    return ok({
+      runKey: machine.runKey,
+      minute: machine.minuteIso,
       providers: outcomes.map((outcome) => ({
         providerCode: outcome.providerCode,
         attempted: outcome.attempted,
         status: outcome.result?.status ?? "SKIPPED",
         accepted: outcome.accepted,
         quarantined: outcome.quarantined.length,
+        replayed: outcome.result?.replayed ?? false,
         safeErrorCode: outcome.safeErrorCode,
       })),
-    },
-    { headers: { "Cache-Control": "private, no-store" } },
-  );
-});
+    });
+  },
+);

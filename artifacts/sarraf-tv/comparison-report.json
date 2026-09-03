@@ -1,0 +1,158 @@
+{
+  "generatedAt": "2026-09-03T09:27:13.233Z",
+  "outcome": "OK",
+  "reason": "Ekran normal tarayıcı oturumunda okunabildi ve değerler birebir doğrulandı.",
+  "snapshots": [
+    {
+      "at": "2026-09-03T09:17:12.447Z",
+      "quoteCount": 4,
+      "unresolved": [
+        {
+          "rawProductName": "HAS",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "22 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "14 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "8 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "ATA - REŞAT LİRA",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "ATA - REŞAT BEŞLİ",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "24 AYAR PAKETLİ",
+          "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+        },
+        {
+          "rawProductName": "KÜLÇE GÜMÜŞ",
+          "reason": "ALTIN_DEĞİL"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-03T09:22:12.685Z",
+      "quoteCount": 4,
+      "unresolved": [
+        {
+          "rawProductName": "HAS",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "22 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "14 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "8 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "ATA - REŞAT LİRA",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "ATA - REŞAT BEŞLİ",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "24 AYAR PAKETLİ",
+          "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+        },
+        {
+          "rawProductName": "KÜLÇE GÜMÜŞ",
+          "reason": "ALTIN_DEĞİL"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-03T09:27:12.924Z",
+      "quoteCount": 4,
+      "unresolved": [
+        {
+          "rawProductName": "HAS",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "22 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "14 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "8 AYAR",
+          "reason": "ALIŞ_SATIŞ_BAŞLIĞI_YOK"
+        },
+        {
+          "rawProductName": "ATA - REŞAT LİRA",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "ATA - REŞAT BEŞLİ",
+          "reason": "TEK_SATIRDA_İKİ_ÜRÜN"
+        },
+        {
+          "rawProductName": "24 AYAR PAKETLİ",
+          "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ"
+        },
+        {
+          "rawProductName": "KÜLÇE GÜMÜŞ",
+          "reason": "ALTIN_DEĞİL"
+        }
+      ]
+    }
+  ],
+  "comparison": [
+    {
+      "pair": "1-2",
+      "differences": 0,
+      "detail": []
+    },
+    {
+      "pair": "2-3",
+      "differences": 4,
+      "detail": [
+        {
+          "productId": "yeni-ceyrek",
+          "field": "replacementPrice",
+          "a": "11450",
+          "b": "11400"
+        },
+        {
+          "productId": "yeni-yarim",
+          "field": "replacementPrice",
+          "a": "22900",
+          "b": "22800"
+        },
+        {
+          "productId": "yeni-tam",
+          "field": "replacementPrice",
+          "a": "45800",
+          "b": "45600"
+        },
+        {
+          "productId": "gremse-altin",
+          "field": "replacementPrice",
+          "a": "114500",
+          "b": "114000"
+        }
+      ]
+    }
+  ]
+}

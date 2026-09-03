@@ -243,6 +243,32 @@ Arayüz yönlendirmesine tek başına güvenme.
 - **Alım merkezîdir.** Tarayıcı sağlayıcıya bağlanmaz. Yeni sağlayıcı eklerken istek ömrü içinde
   kalıcı WebSocket açma; `price_ingestion_apply` yolunu (advisory lock + `run_key`) atlama.
 - `PRICE_CRON_SECRET` tanımsızsa `/api/cron/price-ingestion` kapalıdır; bu davranışı değiştirme.
+- **Zamanlanmış (makine) uçları `machineRoute` kullanır, `apiRoute` DEĞİL.** `apiRoute` tarayıcı
+  CSRF çerezi ister; zamanlayıcıda çerez yoktur ve istek doğru secret'la bile reddedilir.
+  Makine ucu oturum çözmez, çerez yazmaz. Normal mutation uçlarının CSRF'ini gevşetme.
+- **Koşum anahtarını istemciden alma.** Sunucu dakikaya yuvarlayarak üretir; aynı dakikadaki
+  tekrar çağrı ikinci kayıt oluşturmamalıdır.
+- **Devre kesiciyi akışa bağlı tut.** `evaluateSnapshot` çağrısına `previousLiquidation`
+  verilmezse `PRICE_JUMP` testte çalışır ama gerçek alımda ÇALIŞMAZ. Referans yalnızca aynı
+  sağlayıcının aynı piyasadaki güncel kaydından alınır.
+- **Karantina kaydı kalıcıdır.** Yalnızca sayı tutma; ürün, sebep, fiyat, zaman, eşleme sürümü
+  ve koşum yazılır. Ham payload, adres ve anahtar SAKLANMAZ. Kayıtlar append-only'dir.
+- **`providerTimestamp` eksikse `fetchedAt` yazma.** `timestampProvenance` "UNKNOWN" olur ve
+  quote kalite kapısından geçemez. Bayat veriyi "az önce üretilmiş" gösterme.
+- **Para birimini yanıttan doğrula.** Alan yoksa yalnızca sözleşme TL garantisi veriyorsa
+  (`currencyFixedToTry`) TRY kabul edilir; aksi hâlde kayıt atlanır.
+- **Taslak adapter üretim adapter'ı değildir.** `PrototypeJsonProvider` yalnızca hem
+  `VERIFIED_CONTRACTS` içinde fixture'ı olan hem de `*_CONTRACT_VERSION` ile beyan edilen bir
+  sürümle LICENSED olur. Yalnızca URL+anahtar girilmesi kaynağı AÇMAZ.
+- **`capabilities` yalnızca çalışan yetenekleri listeler.** Sağlayıcının sunduğunu söylediği
+  ama adapter'ı olmayanlar `advertisedCapabilities`'e yazılır. `requiresPersistentWorker`
+  yalnızca aktif mod WebSocket ise true olur.
+- **Global varsayılan kaynak AÇIKTIR.** "Listedeki ilk açık kaynak" davranışı ekleme; varsayılan
+  yoksa kaynak atanmaz. Kullanıcının kendi tercihi global varsayılan değişince DEĞİŞMEZ.
+- **Yönetici başka kullanıcının portföyünü HEDEFİN aktif kaynağıyla görür.** `getPriceProvider()`
+  ile eski test sağlayıcısına dönme.
+- **Sarraf Pro üretim eşlemesi boştur.** Yetkili sözleşme gelmeden tahmini sembol ekleme.
+  Ekran gözlem eşlemesi ayrı dosyadadır ve üretim yolunda kullanılmaz.
 - **Test sağlayıcısının üretim kapısı tek yerdedir** (`src/prices/dev-gate.ts`). Yeni bir
   `NODE_ENV === "production"` kontrolü yazma; `devOnlyProviderBlocked()` kullan. Kapı yalnızca
   var olan test kaçış kapısıyla (`AUTH_ALLOW_LOCAL_BACKEND`) açılır; başka bir bayrak ekleme.
@@ -267,6 +293,21 @@ Arayüz yönlendirmesine tek başına güvenme.
   hedefin oturumlarını kapatır. Parola değişimi MFA'yı sessizce kaldırmaz.
 - `e2e/totp.ts` test tarafı bağımsız üreteçtir; `src/server/auth/totp.ts` "server-only" kalmalıdır.
   İkisinin eşliği `tests/price-sources.test.ts` §5'te doğrulanır.
+- **Aynı TOTP kodu iki kez kabul edilmez.** `verifyTotp` eşleşen sayacı döndürür;
+  `claimMfaCounter` sayacı ATOMİK olarak talep eder (tek koşullu UPDATE). Oku-sonra-yaz
+  yapma: iki eşzamanlı istek aynı kodu geçirebilirdi.
+
+## Deneysel araçlar
+
+- `tools/experimental/` altındaki araçlar ÜRETİM YOLUNUN PARÇASI DEĞİLDİR. Sağlayıcı kaydına
+  otomatik ekleme, kullanıcı portföyüne bağlama.
+- Sarraf TV ekran toplayıcısı yalnızca `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` iken ve üretim
+  dağıtımı DIŞINDA çalışır. Veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir; "resmî API" denmez.
+- **CAPTCHA/bot koruması aşılmaz.** Etkileşim istenirse sonuç BLOCKED'dır. Sayfanın yüklediği
+  koruma altyapısı raporlanır ama delinmez.
+- Artefaktlara cookie, authorization, token veya kişisel veri yazma; yazmadan önce
+  `findForbiddenTraces` ile tara.
+- Ekran yapısı beklenen imzaya uymazsa fail closed ol: yanlış fiyat üretmek yerine hiç üretme.
 
 ## Arayüz kuralları
 
