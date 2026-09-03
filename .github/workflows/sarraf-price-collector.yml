@@ -1,0 +1,78 @@
+# Sarraf TV Kayseri — ücretsiz bulut fiyat toplayıcısı
+#
+# Sürekli çalışan bir worker DEĞİLDİR. Her koşum bağımsızdır: Ubuntu runner
+# Chromium'u açar, ekranı bir kez okur, imzalı gözlemi uygulamanın HMAC makine
+# ucuna gönderir ve kapanır. Kimsenin bilgisayarının açık olması gerekmez.
+#
+# Maliyet: GitHub Actions ücretsiz kotası içinde kalır (aşağıdaki nota bakın).
+# Docker imajı ÇEKİLMEZ; yalnız Chromium indirilir ve önbelleğe alınır.
+
+name: Sarraf fiyat toplayıcı
+
+on:
+  # Elle çalıştırma: doğrulama ve acil güncelleme için.
+  workflow_dispatch:
+  schedule:
+    # Saat başı yoğunluğundan kaçınmak için 17. dakika. GitHub zamanlanmış
+    # koşumları yoğun anlarda geciktirebilir; bu best-effort bir programdır.
+    - cron: "17 * * * *"
+
+# Aynı anda tek koşum: önceki koşum sürerken ikincisi paralel fiyat göndermesin.
+concurrency:
+  group: sarraf-price-collector
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    # Takılırsa kotayı tüketmesin. Normal koşum ~1 dakikadır.
+    timeout-minutes: 6
+
+    steps:
+      - name: Depoyu al
+        uses: actions/checkout@v4
+
+      - name: Node kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Bağımlılıklar
+        run: npm ci --no-audit --no-fund
+
+      - name: Chromium önbelleği
+        id: chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Chromium kurulumu
+        if: steps.chromium-cache.outputs.cache-hit != 'true'
+        # YALNIZ Chromium; başka tarayıcı indirilmez.
+        run: npx playwright install --with-deps chromium
+
+      - name: Fiyatı topla ve gönder
+        env:
+          APP_BASE_URL: ${{ secrets.ALTIN_TAKIP_APP_URL }}
+          PRICE_SCREEN_WORKER_SECRET: ${{ secrets.PRICE_SCREEN_WORKER_SECRET }}
+          PRICE_SCREEN_WORKER_ID: ${{ secrets.PRICE_SCREEN_WORKER_ID }}
+          SARRAF_SCREEN_URL: ${{ secrets.SARRAF_SCREEN_URL }}
+          APP_DEPLOYMENT_ENV: private-pilot
+          PRICE_EXPERIMENTAL_SARRAF_SCREEN: "true"
+          PRICE_EXPERIMENTAL_PRIVATE_PILOT: "true"
+        run: npm run price:sarraf:collect-once
+
+      # Not: Toplayıcı çıkış kodları
+      #   0  — fiyat kabul edildi
+      #   75 — geçici (kira başkasında, ekran okunamadı, kabul edilen fiyat yok)
+      #   76 — CAPTCHA etkileşim istedi; ÇÖZÜLMEZ, koşum başarısız sayılır
+      #   1  — yapılandırma veya beklenmeyen hata
+      #
+      # 75 durumunda koşum başarısız görünür ve bu KASITLIDIR: fiyat
+      # gelmediğinde bunu sessizce başarı saymak yanlış olur. Uygulama zaten
+      # fiyatı bayat olarak işaretler ve başka kaynağa DÜŞMEZ.

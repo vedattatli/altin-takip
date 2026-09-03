@@ -22,7 +22,7 @@ import {
 } from "./mappings";
 import { PrototypeJsonProvider } from "./rest-provider";
 import {
-  SCREEN_OBSERVATION_MAX_AGE_MS,
+  SCREEN_OBSERVATION_FRESH_MS,
   screenCollectorEnabled,
 } from "./sarraf-tv-screen-collector";
 import { SARRAF_TV_SCREEN_MAPPING_VERSION } from "./sarraf-tv-screen-mapping";
@@ -195,7 +195,7 @@ class ScreenObservationProvider extends BaseProvider {
       descriptor: requireProviderDescriptor("sarraf-tv-kayseri-screen"),
       mapping: {},
       mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
-      staleAfterMs: SCREEN_OBSERVATION_MAX_AGE_MS,
+      staleAfterMs: SCREEN_OBSERVATION_FRESH_MS,
     });
   }
 

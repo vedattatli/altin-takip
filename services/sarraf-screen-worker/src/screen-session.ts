@@ -133,6 +133,26 @@ export class ScreenSession {
     return this.verifiedLabels;
   }
 
+  /**
+   * Açılıştaki ağ yanıtı (yön kanıtı) yakalandı mı?
+   *
+   * Tek seferlik bulut koşumu bunu BEKLEMELİDİR: yanıt sayfa yüklenirken bir
+   * kez gelir ve yakalanamazsa GREMSE yalnız EXACT güvenine düşer, değerlemeye
+   * giremez ve koşum boşa gider.
+   */
+  get networkBootstrapReady(): boolean {
+    return this.networkRows.some((row) => !row.isFooter && isTwoSidedRow(row));
+  }
+
+  /** Ağ yanıtını sınırlı süre bekler. Gelmezse false döner; uydurma yapılmaz. */
+  async waitForNetworkBootstrap(budgetMs: number): Promise<boolean> {
+    const deadline = Date.now() + Math.max(0, budgetMs);
+    while (!this.networkBootstrapReady && Date.now() < deadline) {
+      await this.page?.waitForTimeout(1_000);
+    }
+    return this.networkBootstrapReady;
+  }
+
   async open(): Promise<void> {
     this.context = await this.browser.newContext({
       locale: "tr-TR",

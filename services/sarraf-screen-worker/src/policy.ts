@@ -52,7 +52,7 @@ export function backoffMs(attempt: number, jitter = Math.random()): number {
  * Gözlem "taze" mi? Uygulama tarafındaki 120 sn'lik sınırla AYNI eşiktir;
  * worker bayat bir gözlemi göndermeye çalışıp boşuna reddedilmez.
  */
-export const OBSERVATION_MAX_AGE_MS = 120_000;
+export const OBSERVATION_MAX_AGE_MS = 180 * 60_000;
 
 export function observationFresh(observedAt: number, now: number): boolean {
   const age = now - observedAt;

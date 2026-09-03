@@ -33,7 +33,8 @@
     "price:sarraf-feasibility:headless": "node -r ./scripts/node-server-only-stub.cjs --import tsx tools/experimental/sarraf-tv-kayseri/feasibility.ts --mode=headless",
     "price:sarraf-feasibility:strict": "node -r ./scripts/node-server-only-stub.cjs --import tsx tools/experimental/sarraf-tv-kayseri/feasibility.ts --mode=headless --strict",
     "price:smoke": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/price-ingestion-smoke.ts",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle"
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle",
+    "price:sarraf:collect-once": "node --import tsx services/sarraf-screen-worker/src/collect-once.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

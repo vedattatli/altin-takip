@@ -110,8 +110,15 @@ describe("3. gözlem tazeliği", () => {
     expect(observationFresh(now - 30_000, now)).toBe(true);
   });
 
-  it("120 saniyeden eski gözlem bayattır", () => {
-    expect(observationFresh(now - 120_001, now)).toBe(false);
+  it("180 dakikadan eski gözlem kabul edilmez", () => {
+    // Zamanlanmış bulut toplayıcısı saatte bir çalışır; eski 120 saniyelik
+    // eşik bu modelde her fiyatı reddederdi.
+    expect(observationFresh(180 * 60_000 + 1_000, now)).toBe(false);
+    expect(observationFresh(now - (180 * 60_000 + 1_000), now)).toBe(false);
+  });
+
+  it("saatlik koşum aralığındaki gözlem taze sayılır", () => {
+    expect(observationFresh(now - 60 * 60_000, now)).toBe(true);
   });
 
   it("gelecekten gelen gözlem taze SAYILMAZ", () => {

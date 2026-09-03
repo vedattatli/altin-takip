@@ -746,7 +746,8 @@ describe("9. deneysel ekran toplayıcısı", () => {
           ...observation,
           canonicalProductId: "gremse-altin",
           mappingConfidence: "NETWORK_VERIFIED",
-          observedAt: new Date(NOW - 5 * 60_000).toISOString(),
+          // 180 dakikalik kabul sinirinin UZERINDE: bulut modelinde bile bayat.
+          observedAt: new Date(NOW - 200 * 60_000).toISOString(),
         },
       ],
       unresolved: [],
@@ -756,6 +757,30 @@ describe("9. deneysel ekran toplayıcısı", () => {
     });
     expect(result.quotes).toHaveLength(0);
     expect(result.unresolved.some((row) => row.reason === "GOZLEM_BAYAT")).toBe(true);
+  });
+
+  it("saatlik bulut koşumundaki gözlem KABUL edilir", () => {
+    // Zamanlanmış toplayıcı saatte bir çalışır ve GitHub gecikebilir; 65
+    // dakikalık bir gözlem reddedilirse fiyat hiç görünmez.
+    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
+    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
+    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    const result = collectScreenQuotes({
+      headers: ["ALIŞ", "SATIŞ"],
+      observations: [
+        {
+          ...observation,
+          canonicalProductId: "gremse-altin",
+          mappingConfidence: "NETWORK_VERIFIED",
+          observedAt: new Date(NOW - 65 * 60_000).toISOString(),
+        },
+      ],
+      unresolved: [],
+      captchaSeen: false,
+      ingestionRunId: "run-2",
+      now: () => NOW,
+    });
+    expect(result.quotes).toHaveLength(1);
   });
 
   it("ekran kaynağı, resmî API sağlayıcısından AYRI kimlik taşır", () => {

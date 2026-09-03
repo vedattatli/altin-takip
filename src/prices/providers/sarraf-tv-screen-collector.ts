@@ -34,7 +34,26 @@ export const SARRAF_TV_DISCLAIMER =
   "Sarraf TV Kayseri ekranından normal tarayıcı oturumuyla gözlenen deneysel fiyat verisidir. Resmî API değildir.";
 
 /** Gözlemin en fazla ne kadar eski olabileceği (deneysel gözlem politikası). */
-export const SCREEN_OBSERVATION_MAX_AGE_MS = 120_000;
+/**
+ * ZAMANLANMIŞ BULUT TOPLAYICISI İÇİN BAYATLIK EŞİKLERİ
+ *
+ * Fiyat artık sürekli çalışan bir worker'dan değil, saatte bir çalışan
+ * ücretsiz bir bulut görevinden gelir. GitHub zamanlanmış koşumları yoğun
+ * anlarda gecikebilir; eski 120 saniyelik eşik bu modelde her fiyatı
+ * reddederdi.
+ *
+ * Politika:
+ *   0–90 dk    Güncel
+ *   90–180 dk  Bayat (kullanıcıya açıkça bayat gösterilir)
+ *   >180 dk    Kullanılamıyor (fiyat kabul EDİLMEZ)
+ *
+ * Bayat fiyat "güncel" gibi gösterilmez ve hiçbir koşulda başka kaynağa
+ * veya test verisine düşülmez.
+ */
+export const SCREEN_OBSERVATION_FRESH_MS = 90 * 60_000;
+
+/** Bu yaşın üstündeki gözlem hiç kabul edilmez. */
+export const SCREEN_OBSERVATION_MAX_AGE_MS = 180 * 60_000;
 
 export type CollectorStatus = "DISABLED" | "OK" | "PARTIAL" | "UNAVAILABLE" | "BLOCKED";
 
@@ -165,7 +184,8 @@ export function collectScreenQuotes(input: CollectorInput): CollectorResult {
       timestampProvenance: provenance,
       fetchedAt: observation.observedAt,
       status: "ok",
-      staleAfterMs: SCREEN_OBSERVATION_MAX_AGE_MS,
+      // UI 90 dakikadan sonra BAYAT gösterir; kabul sınırı 180 dakikadır.
+      staleAfterMs: SCREEN_OBSERVATION_FRESH_MS,
       rawPayloadHash: null,
       mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
       licenseReference: null,
