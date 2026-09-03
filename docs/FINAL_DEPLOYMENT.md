@@ -29,11 +29,11 @@ Fiyat kaynağının ölçülmüş sınırları: [PRICE_SOURCE_STATUS.md](PRICE_S
 | --- | --- | --- |
 | Supabase | Postgres veritabanı | Evet (pilot ölçeği) |
 | Vercel | Web uygulaması | Evet |
-| Railway veya Render | Ekran worker'ı (kalıcı container) | **Hayır** — kalıcı çalışan container ücretlidir |
+| GitHub Actions | Ekran fiyat toplayıcısı (zamanlanmış görev) | **Evet** — ücretsiz kota içinde; kalıcı container YOK |
 
-> Worker ücretli kaynak gerektirir. Bu masrafı onaylamadan container'ı
-> başlatmayın. Worker olmadan uygulama çalışır; yalnızca Kayseri ekran
-> fiyatları gelmez ve ürünler "fiyat alınamıyor" uyarısı gösterir.
+> Fiyat toplama ücretsizdir: GitHub Actions'ta saatte bir çalışan
+> tek seferlik bir görevdir. Kalıcı container, ücretli plan veya kişisel
+> bilgisayara kurulum GEREKMEZ. Ayrıntı: `docs/CLOUD_PRICE_COLLECTOR.md`.
 
 ### Terminal oturumları
 
@@ -155,7 +155,7 @@ Worker olmadan uygulama tamamen çalışır; yalnızca Kayseri fiyatları gelmez
 
 ```bash
 railway init
-railway up --dockerfile services/sarraf-screen-worker/Dockerfile
+gh workflow run sarraf-price-collector.yml --repo <kullanici>/altin-takip --ref main
 ```
 
 ### Ortam değişkenleri
@@ -178,7 +178,7 @@ railway up --dockerfile services/sarraf-screen-worker/Dockerfile
 
 1. `https://<worker-adresi>/healthz` → `200`
 2. `/yonetim/deneysel-kaynak` → "Tarayıcı worker durumu" kirayı tutuyor gösterir
-3. Son gözlem zamanı 60 saniyeden yenidir
+3. Son gözlem zamanı 90 dakikadan yenidir (saatlik bulut koşumu; gecikebilir)
 
 ---
 
@@ -232,7 +232,7 @@ Sırayla yapın. Her adımın karşısındaki sonucu görmelisiniz.
 | Ne | Nasıl |
 | --- | --- |
 | Pilot kullanıcısını durdur | İzin listesinden kapat |
-| Fiyat kaynağını durdur | Worker container'ını durdur |
+| Fiyat kaynağını durdur | GitHub Actions iş akışını devre dışı bırak |
 | Uygulamayı geri al | `npx vercel rollback` |
 | Veritabanını geri al | **Migration'lar geri alınamaz.** Yedekten dönülür. |
 

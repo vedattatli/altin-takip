@@ -10,7 +10,7 @@ Belirti → neden → yapılacak. Her bölüm bağımsız okunabilir.
 | --- | --- | --- |
 | Web uygulaması | Vercel | Arayüz + API uçları |
 | Veritabanı | Supabase (Postgres) | Defter, portföy, fiyat, denetim kayıtları |
-| Ekran worker'ı | Ayrı container (Railway/Render) | Kalıcı Chromium ile Kayseri ekranını okur |
+| Fiyat toplayıcı | GitHub Actions (zamanlanmış) | Saatte bir Chromium açar, Kayseri ekranını okur, kapanır |
 
 Worker **ayrı** bir servistir çünkü Vercel fonksiyonu içinde kalıcı bir tarayıcı
 çalıştırılamaz. Worker'a **Supabase anahtarı verilmez**; yalnızca imzalı bir
@@ -74,7 +74,7 @@ davranıştır ve worker bundan kurtulacak şekilde yazıldı. Arada bir yeniden
 başlatma normaldir.
 
 Sorun sayılacak eşik: dakikada birden fazla yeniden başlatma. O durumda
-container'ın bellek sınırına bakın (`MEMORY_LIMIT_MB`, varsayılan 900) ve
+GitHub Actions koşum kaydına bakın (`Actions` sekmesi) ve
 platformda ayrılan belleği artırın. Çökme her olduğunda o tur fiyat
 üretilmez ve açılış imzası yeniden öğrenilir; kullanıcı tarafında bu, fiyatın
 1–2 dakika gelmemesi olarak görünür ve **uydurma fiyat gösterilmez**.
@@ -231,5 +231,6 @@ kullanıcıları kapatın.
 Bu, kullanıcıları başka bir kaynağa **düşürmez**; fiyat gösterilmez ve nedeni
 yazılır. Portföy verisi, defter ve geçmiş **etkilenmez**.
 
-Worker'ı da durdurmak isterseniz container'ı durdurun. Uygulama tarafında
+Fiyat toplamayı da durdurmak isterseniz GitHub Actions iş akışını devre dışı
+bırakın. Uygulama tarafında
 hiçbir şey bozulmaz; fiyatlar bayatlar ve gösterilmez.
