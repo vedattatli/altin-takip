@@ -13,6 +13,7 @@ import { isReservedUsername, validateUsername } from "@/auth/username";
 import { valuePositions } from "@/domain/accounting";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
 import { approvalAppliesToCurrentMapping } from "@/prices/providers/sarraf-tv-screen-mapping";
+import { PLAN_PROVIDER_CODES } from "@/prices/valuation-plan";
 import { adminScope, type AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
@@ -168,10 +169,35 @@ export class AdminService {
       await this.audit(actor, "price.experimental_access", null, false, { providerCode: code, userId });
       throw notFound("Kullanıcı bulunamadı.");
     }
+    /*
+     * İZİN PLANIN TAMAMI İÇİN VERİLİR.
+     *
+     * Hibrit değerleme üç kaynağı BİRLİKTE kullanır: Kayseri ekranı, Kapalıçarşı
+     * tablosu ve Türkiye geneli. Yalnızca birine izin verilirse portföyün bir
+     * kısmı fiyatlanır, kalanı "fiyat yok" görünür — kullanıcı uygulamayı bozuk
+     * sanar. Üretimde tam olarak bu yaşandı: ekran kaynağına izin vardı, gram
+     * altının geldiği Kapalıçarşı kaynağına yoktu.
+     *
+     * Bu bir gizli genişletme DEĞİLDİR: yönetim ekranı izni "plan kaynakları"
+     * olarak adlandırır ve hangi kaynakları kapsadığını yazar. Plan dışı bir
+     * kaynak için istek gelirse yalnızca o kaynak için uygulanır.
+     */
+    const codes = (PLAN_PROVIDER_CODES as readonly string[]).includes(code)
+      ? [...PLAN_PROVIDER_CODES]
+      : [code];
     try {
-      await this.backend.setExperimentalAccess(userId, code, enabled, actor.profile.id, reason, expiresAt);
+      for (const providerCode of codes) {
+        await this.backend.setExperimentalAccess(
+          userId,
+          providerCode,
+          enabled,
+          actor.profile.id,
+          reason,
+          expiresAt,
+        );
+      }
       await this.audit(actor, "price.experimental_access", target, true, {
-        providerCode: code,
+        providerCode: codes.join(","),
         enabled,
         expiresAt: expiresAt ?? "none",
       });

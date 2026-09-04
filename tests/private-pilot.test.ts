@@ -11,8 +11,10 @@ import {
   SARRAF_TV_SCREEN_MAPPING_VERSION,
 } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { evaluateQuote, type QuoteRejectionCode } from "@/prices/quality";
+import { PLAN_PROVIDER_CODES } from "@/prices/valuation-plan";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { PriceIngestionService } from "@/server/prices/ingestion-service";
+import { AdminService } from "@/server/admin/admin-service";
 import { PriceSourceService } from "@/server/prices/price-source-service";
 import { ScreenWorkerService, SCREEN_PROVIDER_CODE, leaseTokenOf } from "@/server/prices/screen-worker-service";
 import type { ScreenWorkerPayload } from "@/server/prices/types";
@@ -23,7 +25,7 @@ import {
   verifyWorkerSignature,
 } from "@/server/security/worker-signature";
 import { signRequest } from "../services/sarraf-screen-worker/src/signing";
-import { userActor } from "./actors";
+import { adminActor, userActor } from "./actors";
 
 /**
  * SPRINT 3.2 — SARRAF TV KAYSERİ ÖZEL PİLOTU
@@ -233,6 +235,40 @@ describe("3. deneysel erişim izin listesi", () => {
     });
     return { admin, user, sources: new PriceSourceService(backend) };
   }
+
+  /*
+   * ÜRETİMDE YAŞANDI: ekran kaynağına izin vardı, gram altının geldiği
+   * Kapalıçarşı kaynağına yoktu. Portföyün bir kısmı fiyatlandı, gram
+   * "fiyat yok" kaldı ve kullanıcı uygulamayı bozuk sandı. Hibrit değerleme
+   * üç kaynağı BİRLİKTE kullanır; izin de plan bütünü için verilir.
+   */
+  it("plan kaynağına izin verilince plandaki DİĞER kaynaklara da verilir", async () => {
+    const { admin, user } = await setup();
+    const service = new AdminService(backend);
+    await service.setExperimentalAccess(
+      adminActor(admin),
+      user.id,
+      SCREEN_PROVIDER_CODE,
+      true,
+      "ozel pilot",
+      null,
+    );
+
+    for (const code of PLAN_PROVIDER_CODES) {
+      expect(await backend.experimentalAccessAllowed(user.id, code), code).toBe(true);
+    }
+  });
+
+  it("izin geri alınınca plandaki bütün kaynaklar kapanır", async () => {
+    const { admin, user } = await setup();
+    const service = new AdminService(backend);
+    await service.setExperimentalAccess(adminActor(admin), user.id, SCREEN_PROVIDER_CODE, true, "ac", null);
+    await service.setExperimentalAccess(adminActor(admin), user.id, SCREEN_PROVIDER_CODE, false, "kapat", null);
+
+    for (const code of PLAN_PROVIDER_CODES) {
+      expect(await backend.experimentalAccessAllowed(user.id, code), code).toBe(false);
+    }
+  });
 
   it("izin verilmeden kaynak listede görünmez ve seçilemez", async () => {
     const { user, sources } = await setup();

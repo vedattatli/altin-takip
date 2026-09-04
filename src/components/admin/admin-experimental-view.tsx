@@ -168,9 +168,15 @@ export function AdminExperimentalView({
 
       <Card className="p-4" data-testid="experimental-access">
         <p className="text-sm font-semibold text-ink">Kullanıcı izin listesi</p>
-        <p className="mt-1 text-xs text-muted">
+        <p className="mt-1 break-words text-xs text-muted">
           Kullanıcı bu kaynağı kendi kendine açamaz. İzin kaldırılırsa başka kaynağa geçilmez;
           değerleme boş kalır.
+        </p>
+        <p className="mt-1 break-words text-xs text-muted">
+          <span className="font-medium text-ink">İzin, değerleme planının ÜÇ kaynağı için birden verilir:</span>{" "}
+          Kayseri ekranı, Kapalıçarşı tablosu ve Türkiye geneli. Hibrit değerleme üçünü birlikte
+          kullanır; yalnız birine izin verilirse portföyün bir kısmı fiyatsız kalır ve uygulama
+          bozuk görünür.
         </p>
         <div className="mt-3 flex w-full flex-wrap items-end gap-2">
           <label className="text-xs text-subtle">
