@@ -79,7 +79,7 @@ export class ScreenWorkerService {
     const rows = await this.backend.listMappingApprovals(SCREEN_PROVIDER_CODE);
     const map = new Map<string, MappingConfidence>();
     for (const row of rows) {
-      if (!approvalAppliesToCurrentMapping(row.mappingVersion)) continue;
+      if (!approvalAppliesToCurrentMapping(row.mappingVersion, row.canonicalProductId)) continue;
       map.set(row.canonicalProductId, "OPERATOR_VERIFIED");
     }
     return map;
@@ -223,6 +223,21 @@ export class ScreenWorkerService {
     payload: ScreenWorkerPayload,
     collected: { quotes: readonly NormalizedQuote[]; unresolved: readonly { rawProductName: string; reason: string }[] },
   ): Promise<void> {
+    /*
+     * BOŞ GÖZLEM SON İYİ SATIRLARIN ÜSTÜNE YAZILMAZ.
+     *
+     * ÖLÇÜLDÜ (2026-09-04T05:26Z): sayfa yavaş açıldığında tablo yapısı hazır,
+     * fiyat hücreleri boş gelir. O koşumda 12 satırın 12'si çözülemedi
+     * (`products:0`) ve bu boş liste kaydedildi — panelde bütün fiyatlar "—"
+     * oldu, kullanıcı uygulamayı bozuk sandı.
+     *
+     * Tek bir ürün bile çözülememişse elimizde "ekranda fiyat yok" bilgisi
+     * değil, HİÇ BİLGİ yoktur. Böyle bir durumda eskiyi silmek, bilmediğimizi
+     * bilgiymiş gibi kaydetmek olur. Worker da artık bunu göndermiyor; bu
+     * ikinci savunma hattıdır (eski bir worker sürümü hâlâ gönderebilir).
+     */
+    if (payload.observations.length === 0) return;
+
     const accepted = new Set(collected.quotes.map((quote) => quote.canonicalProductId));
     const rows: ScreenRawRow[] = [];
 

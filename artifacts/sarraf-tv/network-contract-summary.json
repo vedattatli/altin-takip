@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-03T22:30:57.000Z",
+  "generatedAt": "2026-09-04T06:48:06.635Z",
   "mode": "headless",
   "note": "Yalnızca GÖZLEM. Bu uçlar tarayıcı dışında çağrılmadı, tekrar oynatılmadı. Değerler varsayılan olarak yazılmaz; hassas alanlar REDACTED işaretlidir.",
   "priceListPath": "interactive.sarraf.pro/price/list",
@@ -122,7 +122,7 @@
               {
                 "name": "buying",
                 "type": "number",
-                "sample": 6955
+                "sample": 6926
               },
               {
                 "name": "buyingLabor",
@@ -221,7 +221,7 @@
               {
                 "name": "sales",
                 "type": "number",
-                "sample": 6955
+                "sample": 6926
               },
               {
                 "name": "salesLabor",
@@ -257,7 +257,7 @@
               {
                 "name": "updatedAt",
                 "type": "string",
-                "sample": "2026-09-03T22:20:44.374Z"
+                "sample": "2026-09-04T06:37:54.157Z"
               },
               {
                 "name": "userId",
@@ -293,7 +293,7 @@
               {
                 "name": "buying",
                 "type": "number",
-                "sample": 6882.18
+                "sample": 6853.75
               },
               {
                 "name": "buyings",
@@ -346,7 +346,7 @@
               {
                 "name": "selling",
                 "type": "number",
-                "sample": 6968.76
+                "sample": 6939.68
               },
               {
                 "name": "sellings",
@@ -378,7 +378,7 @@
               {
                 "name": "updatedAt",
                 "type": "string",
-                "sample": "2026-09-03T22:20:43.244Z"
+                "sample": "2026-09-04T06:37:53.128Z"
               }
             ]
           }

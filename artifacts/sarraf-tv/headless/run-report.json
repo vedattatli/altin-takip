@@ -1,14 +1,14 @@
 {
   "mode": "headless",
   "outcome": "PARTIAL_OK",
-  "reason": "4 ürün okundu ve doğrulandı; 8 satır bilerek çözülmedi.",
-  "startedAt": "2026-09-03T22:20:39.953Z",
-  "finishedAt": "2026-09-03T22:30:56.999Z",
-  "durationSeconds": 617,
+  "reason": "7 ürün okundu ve doğrulandı; 6 satır bilerek çözülmedi.",
+  "startedAt": "2026-09-04T06:37:49.071Z",
+  "finishedAt": "2026-09-04T06:48:06.634Z",
+  "durationSeconds": 618,
   "browserVersion": "151.0.7922.34",
   "launchOk": true,
   "launchError": null,
-  "firstPriceMs": 5411,
+  "firstPriceMs": 5346,
   "closeReason": "normal",
   "closeError": null,
   "captchaInteractionRequired": false,
@@ -18,80 +18,165 @@
   ],
   "screen": {
     "rowCount": 12,
-    "resolvedCount": 4,
-    "unresolvedCount": 8,
+    "resolvedCount": 7,
+    "unresolvedCount": 6,
     "insideIframe": false,
     "canvasOnly": false,
     "hiddenMoneyCount": 0,
     "signature": "headers:buy,sell|rows:12|directional:8",
-    "autoUpdates": 0
+    "autoUpdates": 18
   },
   "timestamp": {
     "providerTimestampProven": true,
     "providerTimestampSource": "interactive.sarraf.pro/price/list → updatedAt",
-    "providerTimestampSample": "2026-09-03T22:20:44.374Z",
+    "providerTimestampSample": "2026-09-04T06:37:54.157Z",
     "observedAtKnown": true
   },
-  "bootstrapCheckedAt": "2026-09-03T22:20:53.110Z",
+  "bootstrapCheckedAt": "2026-09-04T06:38:02.034Z",
   "bootstrapVerifiedLabels": [
     "ÇEYREK",
     "YARIM",
     "TAM ALTIN",
-    "GREMSE"
+    "GREMSE",
+    "ATA - REŞAT LİRA",
+    "ATA - REŞAT BEŞLİ"
   ],
   "confidence": {
     "CONVENTION": 3,
-    "NETWORK_VERIFIED": 1
+    "NETWORK_VERIFIED": 1,
+    "GROUPED_EXPLICIT": 3
   },
   "comparison": [
     {
       "pair": "1-2",
-      "differences": 0,
-      "detail": []
+      "differences": 8,
+      "detail": [
+        {
+          "productId": "yeni-ceyrek",
+          "field": "replacementPrice",
+          "a": "11500",
+          "b": "11550"
+        },
+        {
+          "productId": "yeni-yarim",
+          "field": "replacementPrice",
+          "a": "23000",
+          "b": "23100"
+        },
+        {
+          "productId": "yeni-tam",
+          "field": "replacementPrice",
+          "a": "46000",
+          "b": "46200"
+        },
+        {
+          "productId": "gremse-altin",
+          "field": "replacementPrice",
+          "a": "115000",
+          "b": "115500"
+        },
+        {
+          "productId": "ata-altin",
+          "field": "replacementPrice",
+          "a": "47450",
+          "b": "47500"
+        },
+        {
+          "productId": "resat-altin",
+          "field": "replacementPrice",
+          "a": "47450",
+          "b": "47500"
+        },
+        {
+          "productId": "besli-altin",
+          "field": "liquidationPrice",
+          "a": "225900",
+          "b": "226000"
+        },
+        {
+          "productId": "besli-altin",
+          "field": "replacementPrice",
+          "a": "242450",
+          "b": "242550"
+        }
+      ]
     },
     {
       "pair": "2-3",
-      "differences": 0,
-      "detail": []
+      "differences": 8,
+      "detail": [
+        {
+          "productId": "yeni-ceyrek",
+          "field": "replacementPrice",
+          "a": "11550",
+          "b": "11500"
+        },
+        {
+          "productId": "yeni-yarim",
+          "field": "replacementPrice",
+          "a": "23100",
+          "b": "23000"
+        },
+        {
+          "productId": "yeni-tam",
+          "field": "replacementPrice",
+          "a": "46200",
+          "b": "46000"
+        },
+        {
+          "productId": "gremse-altin",
+          "field": "replacementPrice",
+          "a": "115500",
+          "b": "115000"
+        },
+        {
+          "productId": "ata-altin",
+          "field": "replacementPrice",
+          "a": "47500",
+          "b": "47450"
+        },
+        {
+          "productId": "resat-altin",
+          "field": "replacementPrice",
+          "a": "47500",
+          "b": "47450"
+        },
+        {
+          "productId": "besli-altin",
+          "field": "liquidationPrice",
+          "a": "226000",
+          "b": "225900"
+        },
+        {
+          "productId": "besli-altin",
+          "field": "replacementPrice",
+          "a": "242550",
+          "b": "242400"
+        }
+      ]
     }
   ],
   "snapshots": [
     {
-      "at": "2026-09-03T22:20:53.110Z",
+      "at": "2026-09-04T06:38:02.035Z",
       "signature": "headers:buy,sell|rows:12|directional:8",
-      "domQuoteCount": 4,
-      "networkQuoteCount": 4,
+      "domQuoteCount": 7,
+      "networkQuoteCount": 7,
       "unresolved": [
-        {
-          "rawProductName": "ATA - REŞAT LİRA",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "45400",
-            "47650"
-          ]
-        },
-        {
-          "rawProductName": "ATA - REŞAT BEŞLİ",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "226850",
-            "243450"
-          ]
-        },
         {
           "rawProductName": "24 AYAR PAKETLİ",
           "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
           "observedValues": [
-            "6860",
-            "7050"
+            "6840",
+            "7020"
           ]
         },
         {
           "rawProductName": "KÜLÇE GÜMÜŞ",
           "reason": "ALTIN_DEĞİL",
           "observedValues": [
-            "97096",
-            "106977"
+            "95934",
+            "105715"
           ]
         },
         {
@@ -115,41 +200,25 @@
       "networkDomMismatches": []
     },
     {
-      "at": "2026-09-03T22:25:55.012Z",
+      "at": "2026-09-04T06:43:04.005Z",
       "signature": "headers:buy,sell|rows:12|directional:8",
-      "domQuoteCount": 4,
-      "networkQuoteCount": 4,
+      "domQuoteCount": 7,
+      "networkQuoteCount": 7,
       "unresolved": [
-        {
-          "rawProductName": "ATA - REŞAT LİRA",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "45400",
-            "47650"
-          ]
-        },
-        {
-          "rawProductName": "ATA - REŞAT BEŞLİ",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "226850",
-            "243400"
-          ]
-        },
         {
           "rawProductName": "24 AYAR PAKETLİ",
           "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
           "observedValues": [
-            "6860",
-            "7050"
+            "6840",
+            "7020"
           ]
         },
         {
           "rawProductName": "KÜLÇE GÜMÜŞ",
           "reason": "ALTIN_DEĞİL",
           "observedValues": [
-            "97081",
-            "106963"
+            "96206",
+            "106002"
           ]
         },
         {
@@ -173,41 +242,25 @@
       "networkDomMismatches": []
     },
     {
-      "at": "2026-09-03T22:30:56.801Z",
+      "at": "2026-09-04T06:48:05.979Z",
       "signature": "headers:buy,sell|rows:12|directional:8",
-      "domQuoteCount": 4,
-      "networkQuoteCount": 4,
+      "domQuoteCount": 7,
+      "networkQuoteCount": 7,
       "unresolved": [
-        {
-          "rawProductName": "ATA - REŞAT LİRA",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "45450",
-            "47650"
-          ]
-        },
-        {
-          "rawProductName": "ATA - REŞAT BEŞLİ",
-          "reason": "TEK_SATIRDA_İKİ_ÜRÜN",
-          "observedValues": [
-            "226900",
-            "243450"
-          ]
-        },
         {
           "rawProductName": "24 AYAR PAKETLİ",
           "reason": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
           "observedValues": [
-            "6860",
-            "7050"
+            "6830",
+            "7020"
           ]
         },
         {
           "rawProductName": "KÜLÇE GÜMÜŞ",
           "reason": "ALTIN_DEĞİL",
           "observedValues": [
-            "97148",
-            "107018"
+            "96144",
+            "105941"
           ]
         },
         {

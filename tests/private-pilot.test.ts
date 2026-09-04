@@ -438,9 +438,9 @@ describe("6. worker ucu tarayıcı yüzeyinden ayrıdır", () => {
 
 describe("7. yönetici onayı ve eşleme sürümü", () => {
   it("onay yalnızca GÜNCEL eşleme sürümünde geçerlidir", () => {
-    expect(approvalAppliesToCurrentMapping(SARRAF_TV_SCREEN_MAPPING_VERSION)).toBe(true);
-    expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3")).toBe(false);
-    expect(approvalAppliesToCurrentMapping("")).toBe(false);
+    expect(approvalAppliesToCurrentMapping(SARRAF_TV_SCREEN_MAPPING_VERSION, "yeni-ceyrek")).toBe(true);
+    expect(approvalAppliesToCurrentMapping("bilinmeyen-surum", "yeni-ceyrek")).toBe(false);
+    expect(approvalAppliesToCurrentMapping("", "yeni-ceyrek")).toBe(false);
   });
 
   /*
@@ -453,14 +453,84 @@ describe("7. yönetici onayı ve eşleme sürümü", () => {
    */
   it("fiyat yolu sürüm karşılaştırmasını satır içinde tekrar etmez", () => {
     const source = readFileSync(join(process.cwd(), "src/server/prices/screen-worker-service.ts"), "utf8");
-    expect(source).toMatch(/approvalAppliesToCurrentMapping\(row\.mappingVersion\)/);
+    expect(source).toMatch(/approvalAppliesToCurrentMapping\(row\.mappingVersion, row\.canonicalProductId\)/);
     expect(source).not.toMatch(/row\.mappingVersion !== SARRAF_TV_SCREEN_MAPPING_VERSION/);
+  });
+
+  /*
+   * Onay bir CÜMLEDİR: "ekranda ÇEYREK yazan satır, Yeni Çeyrek ürünüdür."
+   * Sürüm 3'ten 4'e geçerken DEĞİŞEN TEK ŞEY ATA-REŞAT satırlarının
+   * GROUPED_EXPLICIT olmasıydı; CONVENTION tablosu aynı kaldı. Bu yüzden o üç
+   * ürün için sürüm 3'te verilmiş onay hâlâ aynı şeyi söyler ve geçerlidir.
+   * Denklik tablosunda ADI GEÇMEYEN ürün için eski onay geçersizdir.
+   */
+  it("sürüm 3 onayı yalnızca eşlemesi değişmemiş ürünler için geçerlidir", () => {
+    for (const productId of ["yeni-ceyrek", "yeni-yarim", "yeni-tam"]) {
+      expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3", productId), productId).toBe(true);
+    }
+    expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3", "ata-altin")).toBe(false);
+    expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3", "gram-altin")).toBe(false);
+    // Ürün verilmezse eski sürüm asla geçerli sayılmaz.
+    expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3")).toBe(false);
+  });
+
+  /*
+   * ÜRETİMDE YAŞANDI (2026-09-04T05:26Z): sayfa yavaş açıldı, tablo yapısı
+   * hazırdı ama fiyat hücreleri boştu. 12 satırın 12'si çözülemedi
+   * (`products:0, unresolved:12`) ve bu BOŞ liste kaydedildi; panelde bütün
+   * fiyatlar "—" oldu, uygulama bozuk göründü.
+   *
+   * Hiç ürün çözülememişse elde "fiyat yok" bilgisi değil HİÇ BİLGİ yoktur;
+   * son iyi gözlem silinmez.
+   */
+  it("boş gözlem son iyi ekran satırlarının üstüne yazmaz", async () => {
+    const service = new ScreenWorkerService(backend, { now: () => NOW });
+    await backend.setScreenRows(
+      SCREEN_PROVIDER_CODE,
+      [
+        {
+          rawLabel: "ÇEYREK",
+          buy: "10950",
+          sell: "11500",
+          single: null,
+          canonicalProductId: "yeni-ceyrek",
+          confidence: "OPERATOR_VERIFIED",
+          usedInValuation: true,
+          reason: null,
+        },
+      ],
+      "sig",
+      nowIso,
+    );
+
+    const lease = await service.acquireLease("w1");
+    const payload: ScreenWorkerPayload = {
+      workerId: "w1",
+      workerVersion: "1.0.0",
+      browserVersion: "test",
+      mappingVersion: SARRAF_TV_SCREEN_MAPPING_VERSION,
+      screenSignature: "sig",
+      headers: ["ALIŞ", "SATIŞ"],
+      observedAt: nowIso,
+      captchaSeen: false,
+      observations: [],
+      unresolved: [
+        { rawProductName: "ÇEYREK", reason: "SAYI_OKUNAMADI", observedValues: [] },
+        { rawProductName: "YARIM", reason: "SAYI_OKUNAMADI", observedValues: [] },
+      ],
+      restartCount: 0,
+    };
+    await service.ingest(payload, lease.leaseToken ?? "", "run-empty");
+
+    const stored = await backend.screenRows(SCREEN_PROVIDER_CODE);
+    expect(stored?.rows).toHaveLength(1);
+    expect(stored?.rows[0]).toMatchObject({ rawLabel: "ÇEYREK", buy: "10950", sell: "11500" });
   });
 
   it("yönetim ekranı eski sürümdeki onayı geçerli göstermez", () => {
     const source = readFileSync(join(process.cwd(), "src/components/admin/admin-experimental-view.tsx"), "utf8");
     // Sürüm karşılaştırması yapılıyor ve sonucu satırın görünümünü belirliyor.
-    expect(source).toMatch(/row\.mappingVersion !== mappingVersion/);
+    expect(source).toMatch(/row\.appliesToCurrentMapping === false/);
     expect(source).toMatch(/Geçersiz — eski eşleme sürümü/);
     expect(source).toMatch(/stale-approval-warning/);
   });

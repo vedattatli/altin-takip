@@ -31,6 +31,16 @@ const PROVIDER_CODE = "sarraf-tv-kayseri-screen";
 /** Zamanlanmış çalıştırma için kısa kira: sonraki koşumu kilitlemesin. */
 const LEASE_TTL_SECONDS = 120;
 
+/**
+ * Hiç ürün çözülemeyen okuma kaç kez tekrarlansın ve arada ne kadar beklensin.
+ *
+ * Ölçüm: yavaş açılışta tablo yapısı hazır, hücreler boş geliyor. Sayfa
+ * değerleri saniyeler içinde dolduruyor; iki kısa tekrar yetiyor. Kira 120 sn
+ * olduğu için toplam bekleme onun altında kalmalıdır.
+ */
+const EMPTY_READ_RETRIES = 2;
+const EMPTY_READ_RETRY_MS = 4_000;
+
 interface Config {
   appUrl: string;
   secret: string;
@@ -119,11 +129,42 @@ async function main(): Promise<void> {
     const networkReady = await session.waitForNetworkBootstrap(config.readBudgetMs);
     log("network_bootstrap", { ready: networkReady });
 
-    const observation = await session.observe(null);
+    /*
+     * BOŞ GÖZLEM GÖNDERİLMEZ.
+     *
+     * ÖLÇÜLDÜ (2026-09-04T05:26Z koşumu): sayfa yavaş açıldığında tablo YAPISI
+     * hazır olur ama fiyat HÜCRELERİ henüz boştur. O koşumda imza beklendiği
+     * gibiydi (`rows:12|directional:8`), başlıklar ALIŞ/SATIŞ okundu, yön
+     * çözüldü — ama 12 satırın 12'si de SAYI_OKUNAMADI ile düştü
+     * (`products:0, unresolved:12`). Gözlem yine de gönderildi ve ekrandaki
+     * son İYİ satırların üstüne yazdı: panelde bütün fiyatlar "—" oldu.
+     *
+     * Yapı okunup tek bir ürün bile çözülemiyorsa bu "fiyat yok" değil,
+     * "HENÜZ okunmadı" demektir. Kısa bekleyip yeniden okunur; yine boşsa
+     * hiçbir şey gönderilmez ve son iyi gözlem yerinde kalır. Bayatlık kuralı
+     * zaten sunucuda uygulanıyor — yanlış olan, boş veriyi taze sanmaktı.
+     */
+    let observation = await session.observe(null);
+    for (let attempt = 1; attempt <= EMPTY_READ_RETRIES; attempt += 1) {
+      if (!observation.ok || observation.quotes.length > 0) break;
+      log("observation_empty_retry", { attempt, unresolved: observation.unresolved.length });
+      await new Promise((resolve) => setTimeout(resolve, EMPTY_READ_RETRY_MS));
+      observation = await session.observe(null);
+    }
+
     if (!observation.ok) {
       // FAIL CLOSED: fiyat GÖNDERİLMEZ. Sunucudaki bayatlık kuralı devreye girer.
       log("observation_failed", { reason: observation.reason ?? "UNKNOWN", captcha: observation.captchaSeen });
       process.exit(observation.reason === "CAPTCHA" ? 76 : 75);
+    }
+
+    if (observation.quotes.length === 0) {
+      log("observation_empty", {
+        unresolved: observation.unresolved.length,
+        headers: observation.headers.join("|"),
+        signature: observation.signature,
+      });
+      process.exit(75); // EX_TEMPFAIL: eski gözlem korunur, bir sonraki koşum dener.
     }
     log("observation_ok", {
       products: observation.quotes.length,

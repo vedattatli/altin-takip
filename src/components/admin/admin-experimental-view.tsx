@@ -45,6 +45,12 @@ export interface ApprovalRow {
   evidenceObservedAt: string | null;
   approvedBy: string | null;
   approvedAt: string;
+  /**
+   * Bu onay DEĞERLEMEDE geçerli mi? Kararı sunucu verir
+   * (`approvalAppliesToCurrentMapping`); ekran kendi başına sürüm
+   * karşılaştırmaz, yoksa fiyat yolundan sapar.
+   */
+  appliesToCurrentMapping: boolean;
 }
 
 export interface UserOption {
@@ -89,13 +95,12 @@ export function AdminExperimentalView({
   const [error, setError] = useState<string | null>(null);
 
   /*
-   * Onay, eşleme tablosunun BELİRLİ BİR SÜRÜMÜ için verilir; fiyat yolu
-   * (`approvalAppliesToCurrentMapping`) başka sürümde alınmış onayı yok sayar.
-   * Bu ekran eskiden sürüme hiç bakmıyor ve hepsini yeşil gösteriyordu — yani
-   * yönetici "onaylı" görürken ürün fiyatsız kalıyordu. Aynı kural burada da
-   * uygulanır ki ekran ile hesap aynı şeyi söylesin.
+   * Geçersiz onaylar: fiyat yolu bunları saymıyor. Karar sunucudan gelir
+   * (`appliesToCurrentMapping`); bu ekran sürümü kendi başına karşılaştırmaz,
+   * yoksa hesapla ekran birbirinden sapar — ki tam olarak bu yaşandı:
+   * yönetici yeşil "onaylı" görürken ürün fiyatsız kalıyordu.
    */
-  const staleApprovals = approvals.filter((row) => row.mappingVersion !== mappingVersion);
+  const staleApprovals = approvals.filter((row) => row.appliesToCurrentMapping === false);
 
   async function reload() {
     const [state, list] = await Promise.all([
@@ -364,7 +369,7 @@ export function AdminExperimentalView({
               </thead>
               <tbody className="text-muted">
                 {approvals.map((row) => {
-                  const stale = row.mappingVersion !== mappingVersion;
+                  const stale = row.appliesToCurrentMapping === false;
                   return (
                   <tr key={`${row.rawLabel}-${row.mappingVersion}`} data-testid={stale ? "approval-stale" : "approval-active"}>
                     <td className="py-1 pr-3 break-words">{row.rawLabel}</td>

@@ -70,8 +70,35 @@ export function isValuationReady(confidence: MappingConfidence): boolean {
  * onaylar sürüm 4'te sessizce yok sayıldı, ekran "onaylı" derken ÇEYREK /
  * YARIM / TAM fiyatsız kaldı ve kimse nedenini göremedi.
  */
-export function approvalAppliesToCurrentMapping(approvalMappingVersion: string): boolean {
-  return approvalMappingVersion === SARRAF_TV_SCREEN_MAPPING_VERSION;
+/**
+ * SÜRÜM DENKLİĞİ — eski sürümde alınmış onay hangi ürünler için geçerliliğini korur.
+ *
+ * Onay bir CÜMLEDİR: "ekranda ÇEYREK yazan satır, Yeni Çeyrek ürünüdür."
+ * O cümle değişmediyse onay da geçerlidir. Tablonun GENEL sürümünün artması
+ * tek başına cümleyi değiştirmez — eskiden öyle sayılıyordu ve ilgisiz bir
+ * satır eklendiğinde bütün onaylar sessizce düşüyordu.
+ *
+ * 3 → 4 arasındaki TEK fark (commit 7a51e82): "ATA - REŞAT LİRA" ve
+ * "ATA - REŞAT BEŞLİ" satırları SARRAF_TV_SCREEN_UNMAPPED_REASONS'tan çıkıp
+ * SARRAF_TV_SCREEN_MAPPING_GROUPED'a girdi. CONVENTION tablosu
+ * (ÇEYREK / YARIM / TAM) bit bazında AYNI kaldı; o üç ürün için sürüm 3'te
+ * verilmiş onay bugün de birebir aynı şeyi söylüyor.
+ *
+ * BU TABLO ELLE VE KANITLA GENİŞLETİLİR. Sürüm atlamasında ilgili satırın
+ * eşlemesi DEĞİŞTİYSE buraya yazılmaz; onay yeniden alınır. "Çalışsın diye"
+ * girdi eklemek, yöneticinin onaylamadığı bir eşlemeyi değerlemeye sokmaktır.
+ */
+const APPROVAL_COMPATIBLE_VERSIONS: Readonly<Record<string, readonly string[]>> = {
+  "sarraf-tv-screen-observed-3": ["yeni-ceyrek", "yeni-yarim", "yeni-tam"],
+};
+
+export function approvalAppliesToCurrentMapping(
+  approvalMappingVersion: string,
+  canonicalProductId?: string,
+): boolean {
+  if (approvalMappingVersion === SARRAF_TV_SCREEN_MAPPING_VERSION) return true;
+  if (canonicalProductId === undefined) return false;
+  return APPROVAL_COMPATIBLE_VERSIONS[approvalMappingVersion]?.includes(canonicalProductId) === true;
 }
 
 /**

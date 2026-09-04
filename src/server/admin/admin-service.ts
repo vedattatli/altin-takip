@@ -12,6 +12,7 @@ import {
 import { isReservedUsername, validateUsername } from "@/auth/username";
 import { valuePositions } from "@/domain/accounting";
 import type { AdminUserPortfolioView } from "@/domain/admin-view";
+import { approvalAppliesToCurrentMapping } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { adminScope, type AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
@@ -182,6 +183,15 @@ export class AdminService {
   }
 
   /** Onaylanmış ekran eşlemeleri. */
+  /**
+   * Onay listesi, her satırın DEĞERLEMEDE GEÇERLİ OLUP OLMADIĞI ile birlikte
+   * döner.
+   *
+   * Bu alan olmadan yönetim ekranı bütün onayları geçerli sanıyordu: fiyat
+   * yolu eski sürümdeki onayları atarken ekran onları yeşil OPERATOR_VERIFIED
+   * gösteriyor, ürün fiyatsız kalıyor ve sebebi hiçbir yerde görünmüyordu.
+   * Karar tek kaynaktan (`approvalAppliesToCurrentMapping`) gelir.
+   */
   async listMappingApprovals(actor: AdminActor, code: string): Promise<unknown> {
     const rows = await this.backend.listMappingApprovals(code);
     await this.audit(actor, "price.mapping_approve", null, true, {
@@ -189,7 +199,10 @@ export class AdminService {
       action: "list",
       count: rows.length,
     });
-    return rows;
+    return rows.map((row) => ({
+      ...row,
+      appliesToCurrentMapping: approvalAppliesToCurrentMapping(row.mappingVersion, row.canonicalProductId),
+    }));
   }
 
   /**

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-03T22:30:56.999Z",
+  "generatedAt": "2026-09-04T06:48:06.634Z",
   "mode": "headless",
   "target": "https://tv.sarraf.pro/?code=383838&mode=frame&slug=kayseri",
   "requests": [
@@ -49,16 +49,6 @@
     },
     {
       "host": "tv.sarraf.pro",
-      "pathTemplate": "/lib/assets/wav/coin010061.wav",
-      "method": "GET",
-      "resourceType": "xhr",
-      "queryKeys": [],
-      "status": 200,
-      "contentType": "audio/wav",
-      "count": 1
-    },
-    {
-      "host": "tv.sarraf.pro",
       "pathTemplate": "/lib/assets/wav/cash010061.wav",
       "method": "GET",
       "resourceType": "xhr",
@@ -69,7 +59,17 @@
     },
     {
       "host": "tv.sarraf.pro",
-      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-400-normal010061.woff2",
+      "pathTemplate": "/lib/assets/wav/coin010061.wav",
+      "method": "GET",
+      "resourceType": "xhr",
+      "queryKeys": [],
+      "status": 200,
+      "contentType": "audio/wav",
+      "count": 1
+    },
+    {
+      "host": "tv.sarraf.pro",
+      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-ext-400-normal010061.woff2",
       "method": "GET",
       "resourceType": "font",
       "queryKeys": [],
@@ -79,7 +79,7 @@
     },
     {
       "host": "tv.sarraf.pro",
-      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-ext-400-normal010061.woff2",
+      "pathTemplate": "/lib/assets/woff2/cal-sans-latin-400-normal010061.woff2",
       "method": "GET",
       "resourceType": "font",
       "queryKeys": [],
