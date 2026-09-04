@@ -133,7 +133,7 @@ export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
 
 // ---------------------------------------------------------------------------
 
-export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-2";
+export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-3";
 
 /**
  * ANLIK ALTIN "KAPALIÇARŞI ÖNERİLEN" TABLOSU → KANONİK ÜRÜNLER
@@ -148,7 +148,17 @@ export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-2";
  *   HGUMUSTRY / HXAGUSD  gümüştür, altın portföyüne katılmaz
  *   HXAUXAG              orandır, fiyat değildir
  *   HONS                 dolar bazlı ons; TL ürün değildir
- *   HAYAR22              tabloda "22 Ayar Altın" hurda/işlenmiş ayrımı yazmıyor
+ *
+ * SÜRÜM 3: HAYAR22 (22 Ayar Altın) EKLENDİ.
+ *
+ * Daha önce "tabloda hurda/işlenmiş ayrımı yazmıyor" gerekçesiyle dışarıda
+ * bırakılmıştı; asıl sorun katalogda yalnızca "22 Ayar Bilezik" olmasıydı ve
+ * bilezik işçilik payı taşıdığı için hurda fiyatıyla eşleşmiyordu. Katalogda
+ * artık ayrı bir "22 Ayar Altın" (gram) ürünü var ve bu satır ona eşlenir.
+ *
+ * Ölçüm (2026-09-04): 6279.18 / 6492.15, makas ~%3,4. Gram altın 6868 × 0,916
+ * = 6291 TL saf altın karşılığı; alış onun hemen altında, satış üstünde. Yani
+ * gerçek bir alış/satış makası (14 ayar satırındaki karışıklık burada yok).
  *   HCEYREK_ESKI         aşağıda ayrı ele alınıyor
  *   HAYAR14              SÜRÜM 2'DE ÇIKARILDI — aşağıdaki ölçüme bakın
  *
@@ -173,6 +183,7 @@ export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-2";
 export const ANLIK_ALTIN_MAPPING: Readonly<Record<string, string>> = {
   HGRAM: "gram-altin",
   HHAS: "has-altin",
+  HAYAR22: "altin-22-ayar",
   HCEYREK: "yeni-ceyrek",
   HCEYREK_ESKI: "eski-ceyrek",
   HYARIM: "yeni-yarim",

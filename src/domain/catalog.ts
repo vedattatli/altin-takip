@@ -28,6 +28,14 @@ const ENTRIES: readonly CatalogEntry[] = [
   { id: "kulce-ozel-gramaj", name: "Özel Gramajlı Külçe", category: "kulce", unit: "gram", milyem: 0.999, gramWeight: 1 },
 
   // --- Ayarlı takı / hurda ---
+  /*
+   * "22 Ayar Altın" ile "22 Ayar Bilezik" AYRI ürünlerdir ve bilerek ayrı
+   * durur. Piyasada 22 ayar gram altın (hurda/külçe niteliğinde) iki yönlü
+   * fiyatlanır; bilezik ise aynı ayarda olsa da İŞÇİLİK payı taşır ve aynı
+   * fiyattan alınıp satılmaz. İkisini tek ürüne indirmek, bileziği hurda
+   * fiyatıyla değerlemek olurdu.
+   */
+  { id: "altin-22-ayar", name: "22 Ayar Altın", category: "ayarli", unit: "gram", milyem: 0.916, gramWeight: 1 },
   { id: "bilezik-22-ayar", name: "22 Ayar Bilezik", category: "ayarli", unit: "gram", milyem: 0.916, gramWeight: 1 },
   { id: "altin-18-ayar", name: "18 Ayar Altın", category: "ayarli", unit: "gram", milyem: 0.75, gramWeight: 1 },
   { id: "altin-14-ayar", name: "14 Ayar Altın", category: "ayarli", unit: "gram", milyem: 0.585, gramWeight: 1 },

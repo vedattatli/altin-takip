@@ -1,9 +1,24 @@
 -- =============================================================================
--- Altın Takip — 0003 Referans veriler
+-- 0025 — KATALOĞA "22 AYAR ALTIN" EKLENDİ
 --
--- BU DOSYA OTOMATİK ÜRETİLİR. Elle düzenlemeyin.
--- Kaynak: src/domain/catalog.ts  ve  src/prices/mock-provider.ts
--- Yeniden üretmek için: npm run db:catalog
+-- Katalogda yalnızca "22 Ayar Bilezik" vardı. İkisi AYRI ürünlerdir ve ayrı
+-- kalır: 22 ayar gram altın (hurda/külçe niteliğinde) piyasada iki yönlü
+-- fiyatlanır; bilezik aynı ayarda olsa da İŞÇİLİK payı taşır ve aynı fiyattan
+-- alınıp satılmaz. Bileziği hurda fiyatıyla değerlemek yanlış olurdu.
+--
+-- Ölçüm (2026-09-04, Kapalıçarşı tablosu): "22 Ayar Altın" 6279.18 / 6492.15,
+-- makas ~%3,4. Gram altın 6868 × 0,916 = 6291 TL saf altın karşılığı; alış
+-- bunun hemen altında, satış üstünde. Yani bu satır GERÇEK bir alış/satış
+-- makasıdır (14 ayar satırındaki %32'lik hurda-alış / perakende-satış
+-- karışıklığı burada YOKTUR).
+--
+-- NEDEN AYRI MIGRATION: 0003 otomatik üretilir ve yalnızca temiz kurulumda
+-- çalışır; zaten uygulanmış veritabanları yeni ürünü ancak buradan alır.
+--
+-- NEDEN KATALOĞUN TAMAMI: yeni ürün 4. sıraya girdiği için SONRAKİ bütün
+-- ürünlerin sort_order değeri kaydı. Tek satır eklemek veritabanını kaynak
+-- kodundaki katalogdan sessizce saptırırdı. Blok idempotenttir ve
+-- src/domain/catalog.ts'ten üretilmiştir (npm run db:catalog).
 -- =============================================================================
 
 insert into public.gold_products
@@ -39,23 +54,3 @@ on conflict (id) do update set
   gram_weight = excluded.gram_weight,
   pure_gold_per_unit = excluded.pure_gold_per_unit,
   sort_order = excluded.sort_order;
-
--- Fiyat kaynağı. is_real_market_data = false olduğu sürece arayüz bu veriyi
--- "Test Verisi" olarak etiketlemek ZORUNDADIR.
-insert into public.price_sources
-  (id, label, market, is_real_market_data, disclaimer, stale_after_seconds)
-values
-  (
-    'mock',
-    'Test Verisi',
-    'TEST',
-    false,
-    'Bu fiyatlar test amaçlı üretilmiş örnek verilerdir. Gerçek piyasa fiyatı değildir, alım satım kararı için kullanılmamalıdır.',
-    300
-  )
-on conflict (id) do update set
-  label = excluded.label,
-  market = excluded.market,
-  is_real_market_data = excluded.is_real_market_data,
-  disclaimer = excluded.disclaimer,
-  stale_after_seconds = excluded.stale_after_seconds;
