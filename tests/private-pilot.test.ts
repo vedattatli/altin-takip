@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NormalizedQuote } from "@/prices/contract";
 import { PROVIDER_DESCRIPTORS } from "@/prices/descriptors";
 import { createProvider } from "@/prices/providers";
+import {
+  approvalAppliesToCurrentMapping,
+  SARRAF_TV_SCREEN_MAPPING_VERSION,
+} from "@/prices/providers/sarraf-tv-screen-mapping";
 import { evaluateQuote, type QuoteRejectionCode } from "@/prices/quality";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { PriceIngestionService } from "@/server/prices/ingestion-service";
@@ -429,5 +433,35 @@ describe("6. worker ucu tarayıcı yüzeyinden ayrıdır", () => {
       expect(source, file).not.toMatch(/apiRoute/);
       expect(source, file).toMatch(/verifyWorkerSignature/);
     }
+  });
+});
+
+describe("7. yönetici onayı ve eşleme sürümü", () => {
+  it("onay yalnızca GÜNCEL eşleme sürümünde geçerlidir", () => {
+    expect(approvalAppliesToCurrentMapping(SARRAF_TV_SCREEN_MAPPING_VERSION)).toBe(true);
+    expect(approvalAppliesToCurrentMapping("sarraf-tv-screen-observed-3")).toBe(false);
+    expect(approvalAppliesToCurrentMapping("")).toBe(false);
+  });
+
+  /*
+   * ÜRETİMDE YAŞANDI: onaylar sürüm 3'te alınmıştı, kod sürüm 4'e geçti.
+   * Fiyat yolu onayları sessizce düşürdü, yönetim ekranı ise hepsini yeşil
+   * "OPERATOR_VERIFIED" göstermeye devam etti. Yönetici "onaylı" görürken
+   * ÇEYREK / YARIM / TAM fiyatsız kaldı ve sebebi hiçbir yerde yazmıyordu.
+   *
+   * Kural artık tek fonksiyondadır ve ekran da aynı karşılaştırmayı yapar.
+   */
+  it("fiyat yolu sürüm karşılaştırmasını satır içinde tekrar etmez", () => {
+    const source = readFileSync(join(process.cwd(), "src/server/prices/screen-worker-service.ts"), "utf8");
+    expect(source).toMatch(/approvalAppliesToCurrentMapping\(row\.mappingVersion\)/);
+    expect(source).not.toMatch(/row\.mappingVersion !== SARRAF_TV_SCREEN_MAPPING_VERSION/);
+  });
+
+  it("yönetim ekranı eski sürümdeki onayı geçerli göstermez", () => {
+    const source = readFileSync(join(process.cwd(), "src/components/admin/admin-experimental-view.tsx"), "utf8");
+    // Sürüm karşılaştırması yapılıyor ve sonucu satırın görünümünü belirliyor.
+    expect(source).toMatch(/row\.mappingVersion !== mappingVersion/);
+    expect(source).toMatch(/Geçersiz — eski eşleme sürümü/);
+    expect(source).toMatch(/stale-approval-warning/);
   });
 });

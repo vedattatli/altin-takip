@@ -59,6 +59,22 @@ export function isValuationReady(confidence: MappingConfidence): boolean {
 }
 
 /**
+ * Yönetici onayı GÜNCEL eşleme sürümüne mi ait?
+ *
+ * Onay, eşleme tablosunun belirli bir sürümü için verilir. Tablo değişince
+ * eski onay düşer ve ürün değerlemeye giremez.
+ *
+ * BU KURAL TEK YERDE DURMALIDIR. Daha önce karşılaştırma fiyat yolunda satır
+ * içinde yazılıydı; yönetim ekranı ise sürüme hiç bakmadan bütün onayları
+ * yeşil "OPERATOR_VERIFIED" diye gösteriyordu. Sonuç: sürüm 3'te alınmış
+ * onaylar sürüm 4'te sessizce yok sayıldı, ekran "onaylı" derken ÇEYREK /
+ * YARIM / TAM fiyatsız kaldı ve kimse nedenini göremedi.
+ */
+export function approvalAppliesToCurrentMapping(approvalMappingVersion: string): boolean {
+  return approvalMappingVersion === SARRAF_TV_SCREEN_MAPPING_VERSION;
+}
+
+/**
  * Başlık kanonik ürünü tek anlamlı belirtiyor.
  *
  * "22 AYAR": ekranda 22 ayar gram fiyatıdır; katalogdaki tek 22 ayar ürünü

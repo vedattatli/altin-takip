@@ -8,7 +8,7 @@ import {
   type CollectorObservation,
 } from "@/prices/providers/sarraf-tv-screen-collector";
 import {
-  SARRAF_TV_SCREEN_MAPPING_VERSION,
+  approvalAppliesToCurrentMapping,
   type MappingConfidence,
 } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { evaluateSnapshot } from "@/prices/quality";
@@ -79,7 +79,7 @@ export class ScreenWorkerService {
     const rows = await this.backend.listMappingApprovals(SCREEN_PROVIDER_CODE);
     const map = new Map<string, MappingConfidence>();
     for (const row of rows) {
-      if (row.mappingVersion !== SARRAF_TV_SCREEN_MAPPING_VERSION) continue;
+      if (!approvalAppliesToCurrentMapping(row.mappingVersion)) continue;
       map.set(row.canonicalProductId, "OPERATOR_VERIFIED");
     }
     return map;

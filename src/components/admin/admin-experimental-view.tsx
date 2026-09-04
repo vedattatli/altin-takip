@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { apiFetch } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
-import { Alert, Card, SectionTitle } from "../ui";
+import { Alert, Card, cx, SectionTitle } from "../ui";
 
 /**
  * Yönetici — Deneysel Kayseri Ekran Kaynağı (özel pilot).
@@ -87,6 +87,15 @@ export function AdminExperimentalView({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Onay, eşleme tablosunun BELİRLİ BİR SÜRÜMÜ için verilir; fiyat yolu
+   * (`approvalAppliesToCurrentMapping`) başka sürümde alınmış onayı yok sayar.
+   * Bu ekran eskiden sürüme hiç bakmıyor ve hepsini yeşil gösteriyordu — yani
+   * yönetici "onaylı" görürken ürün fiyatsız kalıyordu. Aynı kural burada da
+   * uygulanır ki ekran ile hesap aynı şeyi söylesin.
+   */
+  const staleApprovals = approvals.filter((row) => row.mappingVersion !== mappingVersion);
 
   async function reload() {
     const [state, list] = await Promise.all([
@@ -322,6 +331,21 @@ export function AdminExperimentalView({
           </button>
         </div>
 
+        {staleApprovals.length > 0 ? (
+          <div className="mt-3 rounded-md border border-notice-line bg-notice-soft p-3" data-testid="stale-approval-warning">
+            <p className="text-xs font-semibold text-notice">
+              {staleApprovals.length} onay eski eşleme sürümünde alınmış — değerlemeye GİRMİYOR.
+            </p>
+            <p className="mt-1 break-words text-xs text-muted">
+              Onay, eşleme tablosunun belirli bir sürümü için verilir. Tablo değiştiğinde eski onay
+              düşer ve o ürünler fiyatsız kalır. Şu an kullanılan sürüm{" "}
+              <span className="break-words font-medium text-ink">{mappingVersion}</span>. Aşağıdaki
+              satırlarda &quot;Yeniden onayla&quot;ya basın, ekrandaki güncel alış/satış değerlerini
+              yazın ve onaylayın.
+            </p>
+          </div>
+        ) : null}
+
         {approvals.length === 0 ? (
           <p className="mt-3 text-xs text-subtle">Onaylanmış eşleme yok.</p>
         ) : (
@@ -339,11 +363,15 @@ export function AdminExperimentalView({
                 </tr>
               </thead>
               <tbody className="text-muted">
-                {approvals.map((row) => (
-                  <tr key={`${row.rawLabel}-${row.mappingVersion}`}>
+                {approvals.map((row) => {
+                  const stale = row.mappingVersion !== mappingVersion;
+                  return (
+                  <tr key={`${row.rawLabel}-${row.mappingVersion}`} data-testid={stale ? "approval-stale" : "approval-active"}>
                     <td className="py-1 pr-3 break-words">{row.rawLabel}</td>
                     <td className="py-1 pr-3">{row.canonicalProductId}</td>
-                    <td className="py-1 pr-3 text-positive">{row.confidence}</td>
+                    <td className={cx("py-1 pr-3", stale ? "text-notice" : "text-positive")}>
+                      {stale ? "Geçersiz — eski eşleme sürümü" : row.confidence}
+                    </td>
                     <td className="tabular py-1 pr-3">
                       {row.evidenceLiquidation ?? "—"} / {row.evidenceReplacement ?? "—"}
                     </td>
@@ -352,30 +380,54 @@ export function AdminExperimentalView({
                     </td>
                     <td className="py-1 pr-3">{row.approvedBy ?? "—"}</td>
                     <td className="py-1 pr-3">
-                      <button
-                        type="button"
-                        className="btn btn-ghost min-h-8 px-2 py-0.5 text-xs"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(async () => {
-                            await apiFetch("/api/admin/price-sources/mappings", {
-                              method: "PUT",
-                              body: JSON.stringify({
-                                rawLabel: row.rawLabel,
-                                canonicalProductId: row.canonicalProductId,
-                                mappingVersion: row.mappingVersion,
-                                revoke: true,
-                              }),
-                            });
-                            return "Onay geri alındı.";
-                          })
-                        }
-                      >
-                        Geri al
-                      </button>
+                      <div className="flex flex-wrap gap-1">
+                        {stale ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost min-h-8 px-2 py-0.5 text-xs"
+                            data-testid="reapprove-mapping"
+                            onClick={() => {
+                              // Ham ad ve ürün doldurulur; KANIT DOLDURULMAZ.
+                              // Eski kanıt eski gözlemdir: yönetici ekrandaki
+                              // güncel alış/satışı kendisi yazmalıdır.
+                              setLabel(row.rawLabel);
+                              setProductId(row.canonicalProductId);
+                              setLiquidation("");
+                              setReplacement("");
+                              setNotice(
+                                `"${row.rawLabel}" forma taşındı. Ekrandaki güncel alış/satış değerlerini yazıp onaylayın.`,
+                              );
+                            }}
+                          >
+                            Yeniden onayla
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn-ghost min-h-8 px-2 py-0.5 text-xs"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(async () => {
+                              await apiFetch("/api/admin/price-sources/mappings", {
+                                method: "PUT",
+                                body: JSON.stringify({
+                                  rawLabel: row.rawLabel,
+                                  canonicalProductId: row.canonicalProductId,
+                                  mappingVersion: row.mappingVersion,
+                                  revoke: true,
+                                }),
+                              });
+                              return "Onay geri alındı.";
+                            })
+                          }
+                        >
+                          Geri al
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
