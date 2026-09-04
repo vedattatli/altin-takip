@@ -34,32 +34,33 @@ import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
 import { PortfolioChart } from "./portfolio-chart";
 import { PriceSourceLine } from "./price-source-line";
-import { Card, DeltaValue, EmptyState, SectionTitle, cx } from "./ui";
+import { Card, DeltaValue, EmptyState, SectionTitle, cx, moneySizeClass } from "./ui";
 
 const PRICE_UNAVAILABLE = PRICE_UNAVAILABLE_LABEL;
 
 function StatCard({
   label,
   value,
+  valueText,
   hint,
   emphasis,
   testId,
 }: {
   label: string;
   value: ReactNode;
+  /** Punto seçimi için düz metin; `value` bir bileşense verilmelidir. */
+  valueText?: string;
   hint?: string;
   emphasis?: boolean;
   testId: string;
 }) {
+  const sizing = moneySizeClass(valueText ?? (typeof value === "string" ? value : ""), emphasis === true);
   return (
     <Card className={cx("p-4", emphasis && "border-accent-line bg-accent-soft")}>
       <p className="text-xs font-semibold uppercase tracking-wide text-subtle">{label}</p>
       <p
         data-testid={testId}
-        className={cx(
-          "tabular mt-1.5 font-semibold tracking-tight text-ink",
-          emphasis ? "text-2xl sm:text-3xl" : "text-xl sm:text-2xl",
-        )}
+        className={cx("tabular stat-value mt-1.5 font-semibold tracking-tight text-ink", sizing)}
       >
         {value}
       </p>
@@ -366,7 +367,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         {isSimple ? (
           <Card className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Kâr/Zarar{partialSuffix}</p>
-            <p data-testid="stat-simple-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+            <p
+                data-testid="stat-simple-pnl"
+                className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalPnl)))}
+              >
               {isEmpty || priceOk ? (
                 <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
               ) : (
@@ -386,7 +390,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
                 Gerçekleşmemiş K/Z{partialSuffix}
               </p>
-              <p data-testid="stat-unrealized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+              <p
+                data-testid="stat-unrealized"
+                className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalUnrealizedPnl)))}
+              >
                 {isEmpty || priceOk ? (
                   <DeltaValue
                     value={summary.totalUnrealizedPnl}
@@ -405,7 +412,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
             </Card>
             <Card className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmiş K/Z</p>
-              <p data-testid="stat-realized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+              <p
+                data-testid="stat-realized"
+                className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalRealizedPnl)))}
+              >
                 <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
               </p>
               <p className="mt-1 text-xs text-muted">
@@ -415,7 +425,10 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
             </Card>
             <Card className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z{partialSuffix}</p>
-              <p data-testid="stat-total-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+              <p
+                data-testid="stat-total-pnl"
+                className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalPnl)))}
+              >
                 {isEmpty || priceOk ? (
                   <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
                 ) : (

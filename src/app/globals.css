@@ -98,6 +98,25 @@ body {
   font-feature-settings: "tnum" 1;
 }
 
+/*
+ * PARASAL BÜYÜK RAKAM — METNİN UZUNLUĞUNA GÖRE ÖLÇEKLENİR.
+ *
+ * Sabit punto ile "₺8.958.184,32" gibi 8+ haneli tutarlar kartın dışına taşıp
+ * SON BASAMAKLARI kaybediyordu; kullanıcı eksik sayı okuyordu.
+ *
+ * Neden kap sorgusu (`cqi`) DEĞİL: sorun kutunun darlığı değil, metnin
+ * uzunluğu. Geniş bir kartta bile 14 haneli tutar taşar. Punto bu yüzden
+ * React tarafında METNİN UZUNLUĞUNA göre seçilir (`moneySizeClass`), böylece
+ * karar deterministiktir ve ölçüm/JS hilesi gerektirmez.
+ *
+ * `overflow-wrap: anywhere` son güvenlik ağıdır: tarayıcı "1.234.567,89"
+ * içinde kırma noktası bulamaz; taşıp basamak kaybetmektense alta sarsın.
+ */
+.stat-value {
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

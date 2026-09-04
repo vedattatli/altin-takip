@@ -196,3 +196,24 @@ export function DeltaValue({
     </span>
   );
 }
+
+/**
+ * PARASAL RAKAMIN PUNTOSU — METNİN UZUNLUĞUNA GÖRE.
+ *
+ * "₺8.958.184,32" (13 karakter) sabit puntoda kartı taşırıyor ve son
+ * basamaklar görünmüyordu. Eksik okunan bir tutar, yanlış bir tutardır.
+ *
+ * Ölçüm/JS hilesi yok: karar yalnızca karakter sayısına bakar, bu yüzden
+ * sunucu ve istemci render'ı aynı sonucu verir (hidrasyon uyuşmazlığı olmaz).
+ * Eşikler Türkçe biçimlendirmeye göre seçildi:
+ *   ₺123.456,78      → 11  (rahat)
+ *   ₺8.958.184,32    → 13  (milyon)
+ *   -₺1.129.215,66   → 14  (işaretli milyon)
+ *   ₺123.456.789,01  → 15+ (yüz milyon)
+ */
+export function moneySizeClass(text: string, emphasis = false): string {
+  const length = text.length;
+  if (length >= 16) return emphasis ? "text-lg sm:text-xl" : "text-base sm:text-lg";
+  if (length >= 13) return emphasis ? "text-xl sm:text-2xl" : "text-lg sm:text-xl";
+  return emphasis ? "text-2xl sm:text-3xl" : "text-xl sm:text-2xl";
+}
