@@ -23,7 +23,14 @@ const URL = env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/, "");
 const KEY = env.SUPABASE_SECRET_KEY;
 
 const PROVIDER = "sarraf-tv-kayseri-screen";
-const MAPPING_VERSION = "sarraf-tv-screen-observed-3";
+/*
+ * Eşleme sürümü 4'e yükseldi (ATA - REŞAT satırları GROUPED_EXPLICIT oldu).
+ * Onaylar SÜRÜME bağlıdır: sürüm değişince eski onaylar geçersiz sayılır ve
+ * eşleme yeniden onaylanmadan değerlemeye giremez. Bu kasıtlıdır — eşleme
+ * tablosu değişmişken eski onayı taşımak, onaylanmamış bir eşlemeyi
+ * onaylanmış göstermek olurdu.
+ */
+const MAPPING_VERSION = "sarraf-tv-screen-observed-4";
 
 /** Onaylanacak eşlemeler: ham ekran etiketi → uygulama ürünü. */
 const APPROVALS = [
