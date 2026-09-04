@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { getProduct } from "@/domain/catalog";
 import { TruncgilProvider } from "@/prices/providers/truncgil-provider";
 import { TRUNCGIL_MAPPING } from "@/prices/providers/mappings";
 
@@ -86,13 +87,27 @@ describe("2. sembol beyaz listesi", () => {
     for (const key of ENV_KEYS) delete process.env[key];
   });
 
-  it("gümüş ve endeks satırları ALTIN ÜRÜNÜNE YAZILMAZ", async () => {
+  /*
+   * Gümüş ve döviz artık KENDİ ürünlerine yazılır (gumus-gram, usd, eur).
+   * Değişmeyen kural şu: bir ALTIN ürününe yazılmazlar ve "has altın"
+   * gramına katılmazlar (milyem 0). Endeks/emtia satırları ise hiçbir ürüne
+   * yazılmaz — kaynak onları "Gold" etiketlese bile.
+   */
+  it("gümüş ve döviz ALTIN ürününe yazılmaz; endeksler hiç yazılmaz", async () => {
     const snapshot = await providerWith(PAYLOAD).fetchSnapshot([]);
     const ids = snapshot.quotes.map((quote) => quote.canonicalProductId);
-    // Kaynak bunları "Gold" etiketliyor; yine de girmemeliler.
-    expect(ids).not.toContain("gumus");
-    expect(ids.some((id) => id.includes("gumus") || id.includes("xu100"))).toBe(false);
+
+    // Endeks/emtia hiçbir ürüne girmez.
+    expect(ids.some((id) => id.includes("xu100") || id.includes("brent") || id.includes("bitcoin"))).toBe(
+      false,
+    );
     expect(ids).toContain("gram-altin");
+
+    // Gümüş ve döviz altın ürününe DEĞİL, kendi ürünlerine yazılır.
+    for (const id of ["gumus-gram", "usd", "eur"]) {
+      const product = getProduct(id);
+      expect(product?.pureGoldPerUnit, id).toBe(0);
+    }
   });
 
   it("beyaz listedeki her sembol kanonik ürüne çözülür", () => {

@@ -34,6 +34,8 @@ const SPREAD_BY_CATEGORY: Record<string, number> = {
   kulce: 0.008,
   ziynet: 0.014,
   ayarli: 0.035,
+  gumus: 0.04,
+  doviz: 0.002,
 };
 
 /** Ziynet altınlarında has değerinin üzerine binen basım/rağbet primi. */
@@ -42,6 +44,22 @@ const PREMIUM_BY_CATEGORY: Record<string, number> = {
   kulce: 1.002,
   ziynet: 1.035,
   ayarli: 0.985,
+  gumus: 1.0,
+  doviz: 1.0,
+};
+
+/**
+ * ALTIN OLMAYAN ÜRÜNLER için birim referans fiyatı (TL).
+ *
+ * Bu ürünlerin `pureGoldPerUnit` değeri 0'dır (altın içermezler), bu yüzden
+ * altın gramından TÜRETİLEMEZLER. Test verisi sağlayıcısı onlara kendi kaba
+ * referansını verir; sayılar GERÇEK PİYASA VERİSİ DEĞİLDİR ve arayüzde zaten
+ * "Test Verisi" etiketiyle görünür.
+ */
+const NON_GOLD_UNIT_TRY: Record<string, number> = {
+  "gumus-gram": 100,
+  usd: 48,
+  eur: 56,
 };
 
 /** Fiyatları 30 saniyelik dilimlere sabitler; aynı dilimde aynı sonuç döner. */
@@ -120,7 +138,10 @@ export class MockPriceProvider implements PriceProvider {
 
       const spread = SPREAD_BY_CATEGORY[product.category] ?? 0.01;
       const premium = PREMIUM_BY_CATEGORY[product.category] ?? 1;
-      const unitMid = mid * product.pureGoldPerUnit * premium;
+      // Altın olmayan ürün altın gramından türetilemez; kendi referansı kullanılır.
+      const nonGoldUnit = NON_GOLD_UNIT_TRY[productId];
+      const unitMid =
+        nonGoldUnit === undefined ? mid * product.pureGoldPerUnit * premium : nonGoldUnit * premium;
 
       quotes[productId] = {
         productId,

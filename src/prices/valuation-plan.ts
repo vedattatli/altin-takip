@@ -62,6 +62,13 @@ export type PlanProviderCode = (typeof PLAN_PROVIDER_CODES)[number];
  *
  * Türkiye geneli akışından gelenler (ilk iki kaynakta hiç yok):
  *   Cumhuriyet, Hamit, İkibuçuk, 18 Ayar
+ *   Dolar, Euro — Kapalıçarşı tablosunda döviz satırı YOK (sayfanın başka bir
+ *                 bloğunda; okunan tabloya ait değil)
+ *
+ * ALTIN OLMAYANLAR (değere girer, has altın gramına GİRMEZ):
+ *   Gram Gümüş  — Kapalıçarşı, ~%7,4 makas (bayi fiyatı)
+ *   Dolar, Euro — Türkiye geneli, ~%0,02 makas (PİYASA REFERANS KURU;
+ *                 banka/döviz bürosu tezgâh fiyatı değildir)
  *
  * HİÇBİR KAYNAKTA OLMAYANLAR (bilerek fiyatsız):
  *   kulce-24-ayar, kulce-ozel-gramaj — hiçbir kaynak külçe satırı yayımlamıyor
@@ -96,6 +103,11 @@ export const VALUATION_SOURCE_PLAN: Readonly<Record<string, PlanProviderCode>> =
   "altin-22-ayar": KAPALICARSI_PROVIDER_CODE,
 
   // --- Türkiye geneli ---
+  // --- Altın olmayan varlıklar ---
+  "gumus-gram": KAPALICARSI_PROVIDER_CODE,
+  usd: TURKIYE_PROVIDER_CODE,
+  eur: TURKIYE_PROVIDER_CODE,
+
   "cumhuriyet-altini": TURKIYE_PROVIDER_CODE,
   "hamit-altin": TURKIYE_PROVIDER_CODE,
   "ikibucuk-altin": TURKIYE_PROVIDER_CODE,

@@ -16,7 +16,23 @@ function quote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-const productRows = GOLD_PRODUCTS.map(
+/*
+ * 0003 YALNIZCA ALTIN ÜRÜNLERİNİ İÇERİR.
+ *
+ * 0001'deki kısıtlar bu noktada hâlâ dardır: kategori yalnız
+ * (gram, kulce, ziynet, ayarli) olabilir ve `milyem > 0` şarttır. Gümüş ve
+ * döviz bu kısıtlara UYMAZ (milyem 0). Migration'lar sırayla koştuğu için
+ * 0003'e eklenirlerse temiz kurulum 0001'den hemen sonra patlar.
+ *
+ * Bu yüzden altın olmayan ürünler kısıtları genişleten kendi migration'ında
+ * (0026) eklenir. Katalog yine TEK KAYNAKTAN yönetilir; burada yalnızca
+ * tarihsel sıra korunur.
+ */
+const LEGACY_CATEGORIES = ["gram", "kulce", "ziynet", "ayarli"];
+
+const productRows = GOLD_PRODUCTS.filter((product) =>
+  LEGACY_CATEGORIES.includes(product.category),
+).map(
   (product) =>
     `  (${quote(product.id)}, ${quote(product.name)}, ${quote(product.category)}, ` +
     `${quote(product.unit)}, ${product.milyem}, ${product.gramWeight}, ` +

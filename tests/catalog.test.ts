@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { valuePositions } from "@/domain/accounting";
 import { GOLD_PRODUCTS, getProduct, productsByCategory, requireProduct } from "@/domain/catalog";
 
 /** Ürün kataloğunda bulunması zorunlu ürünler (gereksinim listesi). */
@@ -64,10 +65,69 @@ describe("altın ürün kataloğu", () => {
     expect(grouped).toHaveLength(GOLD_PRODUCTS.length);
   });
 
-  it("SQL referans dosyası katalogla aynı ürünleri içerir", () => {
-    const sql = readFileSync("supabase/migrations/0003_seed_reference_data.sql", "utf8");
+  /*
+   * 0003 YALNIZCA ALTIN ürünlerini içerir; 0001'deki kısıtlar o noktada hâlâ
+   * dardır (kategori dört değer, milyem > 0). Gümüş ve döviz kısıtları
+   * genişleten 0026'da eklenir. Katalogdaki HER ürün ikisinden birinde
+   * bulunmak ZORUNDADIR: aksi hâlde temiz kurulumda ürün eksik kalır.
+   */
+  it("katalogdaki her ürün bir migration'da seed edilir", () => {
+    const seed = readFileSync("supabase/migrations/0003_seed_reference_data.sql", "utf8");
+    const nonGold = readFileSync("supabase/migrations/0026_silver_and_fx.sql", "utf8");
     for (const product of GOLD_PRODUCTS) {
-      expect(sql).toContain(`'${product.id}'`);
+      const found = seed.includes(`'${product.id}'`) || nonGold.includes(`'${product.id}'`);
+      expect(found, product.id).toBe(true);
+    }
+  });
+
+  it("altın olmayan ürün 0003'e SIZMAZ (kısıtlar oraya izin vermez)", () => {
+    const seed = readFileSync("supabase/migrations/0003_seed_reference_data.sql", "utf8");
+    for (const id of ["gumus-gram", "usd", "eur"]) {
+      expect(seed.includes(`'${id}'`), id).toBe(false);
+    }
+  });
+});
+
+/**
+ * ALTIN OLMAYAN VARLIKLAR — GÜMÜŞ VE DÖVİZ
+ *
+ * Bunlar portföy DEĞERİNE girer ama "has altın" gramına GİRMEZ. Bu bir
+ * gösterim tercihi değil DOĞRULUK meselesidir: gümüşü veya doları has altın
+ * gramına eklemek, "108 gr has altın" satırını yalan hâle getirirdi.
+ */
+describe("altın olmayan varlıklar", () => {
+  const NON_GOLD = ["gumus-gram", "usd", "eur"];
+
+  it("saf altın karşılıkları SIFIRDIR", () => {
+    for (const id of NON_GOLD) {
+      const product = getProduct(id);
+      expect(product, id).toBeDefined();
+      expect(product?.pureGoldPerUnit, id).toBe(0);
+      expect(product?.milyem, id).toBe(0);
+    }
+  });
+
+  it("has altın toplamına KATILMAZLAR", () => {
+    const positions = NON_GOLD.map((productId) => ({
+      productId,
+      quantity: "100",
+      remainingCostBasis: "10000",
+      averageCost: "100",
+      realizedPnl: "0",
+      holdingCostOrigins: { actual: true, estimated: false, baseline: false },
+      realizedPnlOrigins: { actual: false, estimated: false, baseline: false },
+      activeTransactionCount: 1,
+      lastLedgerSequence: 1,
+    }));
+    const summary = valuePositions(positions, null, Date.now());
+    // Elde varlık var ama saf altın SIFIR.
+    expect(summary.totalPureGoldGrams).toBe("0");
+  });
+
+  it("altın ürünleri bu listeye karışmaz", () => {
+    for (const product of GOLD_PRODUCTS) {
+      if (NON_GOLD.includes(product.id)) continue;
+      expect(product.pureGoldPerUnit, product.id).toBeGreaterThan(0);
     }
   });
 });

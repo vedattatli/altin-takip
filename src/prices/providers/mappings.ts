@@ -79,7 +79,7 @@ export const SARRAFPRO_MAPPING: Readonly<Record<string, string>> = {};
 
 // ---------------------------------------------------------------------------
 
-export const TRUNCGIL_MAPPING_VERSION = "truncgil-v4-1";
+export const TRUNCGIL_MAPPING_VERSION = "truncgil-v4-2";
 
 /**
  * TRUNCGIL SEMBOLLERİ → KANONİK ÜRÜNLER
@@ -113,6 +113,21 @@ export const TRUNCGIL_MAPPING: Readonly<Record<string, string>> = {
   IKIBUCUKALTIN: "ikibucuk-altin",
   BESLIALTIN: "besli-altin",
   GREMSEALTIN: "gremse-altin",
+
+  /*
+   * SÜRÜM 2: ALTIN OLMAYAN VARLIKLAR.
+   *
+   * Bunlar portföy DEĞERİNE girer, "has altın" gramına GİRMEZ (milyem 0).
+   * Makasları çok dardır (USD ~%0,015) çünkü bunlar PİYASA REFERANS KURUDUR;
+   * bir bankanın veya döviz bürosunun tezgâh fiyatı DEĞİLDİR. Arayüz kaynağı
+   * açıkça yazar, kullanıcı bunu bilerek kullanır.
+   *
+   * Ölçüm (2026-09-04): USD 48,4387/48,4458 · EUR 56,298/56,3089 ·
+   * GUMUS 103,99/104,08.
+   */
+  USD: "usd",
+  EUR: "eur",
+  GUMUS: "gumus-gram",
 };
 
 /**
@@ -133,7 +148,7 @@ export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
 
 // ---------------------------------------------------------------------------
 
-export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-3";
+export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-4";
 
 /**
  * ANLIK ALTIN "KAPALIÇARŞI ÖNERİLEN" TABLOSU → KANONİK ÜRÜNLER
@@ -145,7 +160,8 @@ export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-3";
  * Beyaz liste AÇIKTIR: listede olmayan sembol sessizce başka ürüne yazılmaz.
  *
  * Eşlenmeyenler ve nedeni:
- *   HGUMUSTRY / HXAGUSD  gümüştür, altın portföyüne katılmaz
+ *   HXAGUSD              dolar bazlı gümüş onsu; TL ürün değildir
+ *   HGUMUSTRY            SÜRÜM 4'TE EKLENDİ (gümüş; altın DEĞİL, aşağıya bakın)
  *   HXAUXAG              orandır, fiyat değildir
  *   HONS                 dolar bazlı ons; TL ürün değildir
  *
@@ -184,6 +200,14 @@ export const ANLIK_ALTIN_MAPPING: Readonly<Record<string, string>> = {
   HGRAM: "gram-altin",
   HHAS: "has-altin",
   HAYAR22: "altin-22-ayar",
+  /*
+   * SÜRÜM 4: GÜMÜŞ. Altın DEĞİLDİR; portföy değerine girer, "has altın"
+   * gramına girmez (milyem 0). Ölçüm (2026-09-04): 96,612 / 103,733 —
+   * makas ~%7,4, yani gerçek bir bayi makası. Döviz bu tabloda YOKTUR
+   * (HUSDTRY/HEURTRY sayfanın başka bir bloğundadır ve okunmaz); dolar ve
+   * euro Türkiye geneli akışından gelir.
+   */
+  HGUMUSTRY: "gumus-gram",
   HCEYREK: "yeni-ceyrek",
   HCEYREK_ESKI: "eski-ceyrek",
   HYARIM: "yeni-yarim",

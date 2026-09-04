@@ -2,7 +2,15 @@
 export type MeasureUnit = "gram" | "adet";
 
 /** Ürün grubu — listeleme ve filtreleme için kullanılır. */
-export type ProductCategory = "gram" | "ziynet" | "kulce" | "ayarli";
+/**
+ * Ürün kategorileri.
+ *
+ * "gumus" ve "doviz" ALTIN DEĞİLDİR. Bu ürünler portföy DEĞERİNE girer ama
+ * "has altın" gramına GİRMEZ: milyem değerleri 0'dır, dolayısıyla
+ * `pureGoldPerUnit` de 0 olur ve toplam saf altın hesabını kirletmezler.
+ * Aksi hâlde "108 gr has altın" gibi bir satır yalan söylerdi.
+ */
+export type ProductCategory = "gram" | "ziynet" | "kulce" | "ayarli" | "gumus" | "doviz";
 
 export interface GoldProduct {
   /** Kalıcı kimlik. Veritabanı ve fiyat sağlayıcı bu kimliği kullanır. Asla değiştirilmez. */

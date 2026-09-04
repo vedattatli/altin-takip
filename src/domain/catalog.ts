@@ -55,6 +55,20 @@ const ENTRIES: readonly CatalogEntry[] = [
   { id: "ikibucuk-altin", name: "İkibuçuk Altın", category: "ziynet", unit: "adet", milyem: 0.916, gramWeight: 18.04 },
   { id: "besli-altin", name: "Beşli Altın", category: "ziynet", unit: "adet", milyem: 0.916, gramWeight: 36.08 },
   { id: "gremse-altin", name: "Gremse Altın", category: "ziynet", unit: "adet", milyem: 0.916, gramWeight: 36.08 },
+
+  /*
+   * --- ALTIN OLMAYAN VARLIKLAR ---
+   *
+   * Gümüş ve döviz portföy DEĞERİNE girer, "has altın" gramına GİRMEZ.
+   * milyem = 0 olduğu için `pureGoldPerUnit` de 0 olur ve saf altın toplamı
+   * kirlenmez. Bu, gösterim tercihi değil DOĞRULUK meselesidir: gümüşü has
+   * altın gramına eklemek toplamı yalan hâle getirirdi.
+   *
+   * Döviz "adet" birimiyle tutulur; 1 adet = 1 birim para (1 USD, 1 EUR).
+   */
+  { id: "gumus-gram", name: "Gram Gümüş", category: "gumus", unit: "gram", milyem: 0, gramWeight: 1 },
+  { id: "usd", name: "Amerikan Doları", category: "doviz", unit: "adet", milyem: 0, gramWeight: 0 },
+  { id: "eur", name: "Euro", category: "doviz", unit: "adet", milyem: 0, gramWeight: 0 },
 ];
 
 function round4(value: number): number {
@@ -87,9 +101,26 @@ export const CATEGORY_LABELS: Record<ProductCategory, string> = {
   kulce: "Külçe",
   ayarli: "Ayarlı Altın",
   ziynet: "Ziynet Altın",
+  gumus: "Gümüş",
+  doviz: "Döviz",
 };
 
-export const CATEGORY_ORDER: readonly ProductCategory[] = ["gram", "kulce", "ziynet", "ayarli"];
+export const CATEGORY_ORDER: readonly ProductCategory[] = [
+  "gram",
+  "kulce",
+  "ziynet",
+  "ayarli",
+  "gumus",
+  "doviz",
+];
+
+/** Bu kategoriler ALTIN DEĞİLDİR; has altın gramına katılmazlar. */
+export const NON_GOLD_CATEGORIES: readonly ProductCategory[] = ["gumus", "doviz"];
+
+export function isGoldProduct(productId: string): boolean {
+  const product = BY_ID.get(productId);
+  return product ? !NON_GOLD_CATEGORIES.includes(product.category) : false;
+}
 
 export function productsByCategory(): { category: ProductCategory; label: string; products: GoldProduct[] }[] {
   return CATEGORY_ORDER.map((category) => ({

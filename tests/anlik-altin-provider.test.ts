@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { getProduct } from "@/domain/catalog";
 import {
   AnlikAltinProvider,
   parseAnlikAltinTable,
@@ -182,12 +183,26 @@ describe("5. fiyat üretimi", () => {
     expect(ceyrek?.replacementPrice).toBe("11359");
   });
 
-  it("gümüş ve oran satırları altın ürününe YAZILMAZ", async () => {
+  /*
+   * Gümüş artık KENDİ ürününe yazılır (gumus-gram) — altın ürününe değil.
+   * "Altın/Gümüş" ORANI ve dolar bazlı ons satırları hâlâ hiçbir ürüne
+   * eşlenmez: oran fiyat değildir, ons ise TL ürünü değildir.
+   */
+  it("gümüş kendi ürününe yazılır; oran ve ons satırları hiç yazılmaz", async () => {
     const snapshot = await providerWith(PAGE).fetchSnapshot([]);
     const ids = snapshot.quotes.map((quote) => quote.canonicalProductId);
-    expect(ids.some((id) => id.includes("gumus"))).toBe(false);
-    // "Altın/Gümüş" bir orandır; hiçbir ürüne eşlenmez.
-    expect(snapshot.quotes.every((quote) => Number(quote.liquidationPrice) > 100)).toBe(true);
+
+    // Gümüş bir ALTIN ürününe yazılmadı.
+    const goldIds = ids.filter((id) => id !== "gumus-gram");
+    expect(goldIds.some((id) => id.includes("gumus"))).toBe(false);
+
+    // Oran ve ons satırları hiçbir ürüne eşlenmez.
+    expect(ids.some((id) => id.includes("ons") || id.includes("xau") || id.includes("xag"))).toBe(false);
+
+    // Gümüş varsa has altın gramına KATILMAZ.
+    if (ids.includes("gumus-gram")) {
+      expect(getProduct("gumus-gram")?.pureGoldPerUnit).toBe(0);
+    }
   });
 
   it("zaman damgası kökeni OBSERVED'dır; sağlayıcı damgası gibi sunulmaz", async () => {
