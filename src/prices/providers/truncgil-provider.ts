@@ -6,7 +6,6 @@ import {
   type ProviderSnapshot,
 } from "../contract";
 import { requireProviderDescriptor } from "../descriptors";
-import { experimentalScreenAllowed } from "../dev-gate";
 import { BaseProvider, hashPayload } from "./base";
 import { TRUNCGIL_GROUPED_MAPPING, TRUNCGIL_MAPPING, TRUNCGIL_MAPPING_VERSION } from "./mappings";
 
@@ -93,27 +92,16 @@ export class TruncgilProvider extends BaseProvider {
   }
 
   /**
-   * Yeniden gösterim izni beyan EDİLMEMİŞTİR; bu yüzden kaynak lisanslı
-   * sayılmaz. Özel pilot kapısı açıkken deneysel olarak kullanılabilir.
+   * Yeniden gösterim izni beyan EDİLMEMİŞTİR; kaynak LİSANSLI SAYILMAZ.
+   * Kullanılabilirliği ortam bayrağına bağlı değildir; yönetici açar/kapatır.
    */
   licenseStatus(): LicenseStatus {
-    return experimentalScreenAllowed() ? "EXPERIMENTAL_PRIVATE" : "NOT_CONFIGURED";
+    return "EXPERIMENTAL_PRIVATE";
   }
 
   validateConfiguration(): ProviderConfigValidation {
-    const allowed = experimentalScreenAllowed();
-    return {
-      ok: allowed,
-      licenseStatus: this.licenseStatus(),
-      issues: allowed
-        ? []
-        : [
-            {
-              variable: "APP_DEPLOYMENT_ENV",
-              message: "Truncgil kaynağı yalnızca özel pilot ortamında kullanılabilir.",
-            },
-          ],
-    };
+    // Ücretsiz ve anahtarsız açık akış: yapılandırma gerektirmez.
+    return { ok: true, licenseStatus: this.licenseStatus(), issues: [] };
   }
 
   listSupportedProducts(): readonly string[] {
@@ -129,14 +117,6 @@ export class TruncgilProvider extends BaseProvider {
   }
 
   async fetchSnapshot(_productIds: readonly string[], options: FetchOptions = {}): Promise<ProviderSnapshot> {
-    if (!experimentalScreenAllowed()) {
-      return this.unavailableSnapshot(
-        "Truncgil kaynağı bu ortamda kullanılamaz.",
-        "NOT_CONFIGURED",
-        options,
-      );
-    }
-
     const started = Date.now();
     const doFetch = this.options.fetchImpl ?? fetch;
     let payload: unknown;

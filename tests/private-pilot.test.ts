@@ -270,18 +270,16 @@ describe("3. deneysel erişim izin listesi", () => {
     }
   });
 
-  it("izin verilmeden kaynak listede görünmez ve seçilemez", async () => {
+  /*
+   * KULLANICI BAZLI İZİN LİSTESİ KALDIRILDI.
+   *
+   * Tek karar noktası yöneticinin `enabled` bayrağıdır. İkinci bir kapı
+   * katmanı yalnızca arıza üretiyordu: izin verilmemiş kaynaktaki ürünler
+   * sessizce fiyatsız kalıyor, kullanıcı uygulamayı bozuk sanıyordu.
+   * Uygulamada herkese açık kayıt yok; hesapları yalnızca yönetici açar.
+   */
+  it("kaynak açıksa listede görünür ve seçilebilir", async () => {
     const { user, sources } = await setup();
-    const options = await sources.listSelectableSources(userActor(user));
-    expect(options.some((option) => option.providerCode === SCREEN_PROVIDER_CODE)).toBe(false);
-    await expect(sources.selectSource(userActor(user), SCREEN_PROVIDER_CODE, "test")).rejects.toMatchObject({
-      status: 409,
-    });
-  });
-
-  it("yönetici izin verince kaynak görünür ve seçilebilir", async () => {
-    const { admin, user, sources } = await setup();
-    await backend.setExperimentalAccess(user.id, SCREEN_PROVIDER_CODE, true, admin.id, "pilot", null);
     const options = await sources.listSelectableSources(userActor(user));
     expect(options.some((option) => option.providerCode === SCREEN_PROVIDER_CODE)).toBe(true);
     await expect(sources.selectSource(userActor(user), SCREEN_PROVIDER_CODE, "pilot")).resolves.toMatchObject({
@@ -289,32 +287,28 @@ describe("3. deneysel erişim izin listesi", () => {
     });
   });
 
-  it("izin geri alınınca BAŞKA kaynağa geçilmez; kaynak yok sayılır", async () => {
-    const { admin, user, sources } = await setup();
-    await backend.setExperimentalAccess(user.id, SCREEN_PROVIDER_CODE, true, admin.id, "pilot", null);
+  it("kaynak KAPALIYSA listede görünmez", async () => {
+    const { user, sources } = await setup();
+    await backend.setPriceProviderFlags(SCREEN_PROVIDER_CODE, false, false);
+    const options = await sources.listSelectableSources(userActor(user));
+    expect(options.some((option) => option.providerCode === SCREEN_PROVIDER_CODE)).toBe(false);
+  });
+
+  /*
+   * SESSİZ FALLBACK YASAĞI KALDIRILMADI. İzin katmanı gitti ama "kaynak veri
+   * vermiyorsa başkasına geçilmez" kuralı aynen duruyor: kaynak kapatılınca
+   * açık olan BAŞKA bir kaynağın fiyatı kullanıcıya yazılmaz.
+   */
+  it("kaynak kapatılınca BAŞKA kaynağa sessizce geçilmez", async () => {
+    const { user, sources } = await setup();
     await sources.selectSource(userActor(user), SCREEN_PROVIDER_CODE, "pilot");
     // Başka bir kaynak da açık olsun ki "sessizce ona geçmediği" görülsün.
     await backend.setPriceProviderFlags("mock", true, true);
     await backend.setDefaultPriceProvider("mock");
 
-    await backend.setExperimentalAccess(user.id, SCREEN_PROVIDER_CODE, false, admin.id, "kapatıldı", null);
-    expect(await sources.resolveActiveProviderCode(userActor(user))).toBeNull();
+    await backend.setPriceProviderFlags(SCREEN_PROVIDER_CODE, false, false);
     const active = await sources.activeSnapshot(userActor(user));
-    expect(active.snapshot).toBeNull();
-    expect(active.source.status).toBe("not_selected");
-  });
-
-  it("başka kullanıcının izni bu kullanıcıya geçmez", async () => {
-    const { admin, user, sources } = await setup();
-    const other = await backend.createUser({
-      username: "digeri",
-      displayName: "Diğeri",
-      temporaryPassword: "Kuyumcu7Defter",
-      role: "user",
-    });
-    await backend.setExperimentalAccess(other.id, SCREEN_PROVIDER_CODE, true, admin.id, "pilot", null);
-    const options = await sources.listSelectableSources(userActor(user));
-    expect(options.some((option) => option.providerCode === SCREEN_PROVIDER_CODE)).toBe(false);
+    expect(active.source.providerCode).not.toBe("mock");
   });
 });
 
@@ -387,15 +381,23 @@ describe("5. sağlayıcı kimliği ve güvenlik yüzeyi", () => {
     expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
   });
 
-  it("herkese açık üretimde deneysel kaynak açılamaz", () => {
+  /*
+   * LİSANS DURUMU ORTAM AYARI DEĞİLDİR.
+   *
+   * Kaynağın yeniden yayım izni yoktur; bu her ortamda aynıdır. Eskiden ortam
+   * bayrağı eksikse kaynak "NOT_CONFIGURED" görünüyordu — yani lisans beyanı
+   * bir ayara bağlıydı. Ayar kalktı, beyan kaldı: kaynak her koşulda lisanssız
+   * etiketlenir ve LİSANSLI SAYILMAZ.
+   */
+  it("lisans durumu ortamdan bağımsızdır ve LİSANSLI olmaz", () => {
     const env = process.env as Record<string, string | undefined>;
-    env.APP_DEPLOYMENT_ENV = "public-production";
-    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("NOT_CONFIGURED");
-  });
-
-  it("ortam beyan edilmezse deneysel kaynak açılamaz (fail closed)", () => {
-    delete (process.env as Record<string, string | undefined>).APP_DEPLOYMENT_ENV;
-    expect(createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus()).toBe("NOT_CONFIGURED");
+    for (const value of ["public-production", "production", undefined]) {
+      if (value === undefined) delete env.APP_DEPLOYMENT_ENV;
+      else env.APP_DEPLOYMENT_ENV = value;
+      const status = createProvider(SCREEN_PROVIDER_CODE)!.licenseStatus();
+      expect(status, String(value)).toBe("EXPERIMENTAL_PRIVATE");
+      expect(status, String(value)).not.toBe("LICENSED");
+    }
   });
 
   it("özel pilotta VERCEL_ENV=production kaynağı engellemez", () => {
@@ -440,7 +442,7 @@ describe("5. sağlayıcı kimliği ve güvenlik yüzeyi", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("5b. deneysel kaynak yönetim ekranından ETKİNLEŞTİRİLEBİLİR", () => {
+describe("5b. lisanssız kaynak yönetim ekranından ETKİNLEŞTİRİLEBİLİR", () => {
   /*
    * ÜRETİMDE YAŞANDI: Kapalıçarşı kaynağı kapalı kaldı, gram altın fiyatsız
    * göründü ve yönetici kaynağı açamadı — "Etkinleştir" düğmesi sürekli devre
@@ -452,7 +454,7 @@ describe("5b. deneysel kaynak yönetim ekranından ETKİNLEŞTİRİLEBİLİR", (
    * Arayüz düğmeyi `selectable`e bakarak kapatıyordu. Sunucu ve veritabanı
    * kısıtı ise etkinleştirmeye izin veriyordu.
    */
-  it("deneysel kaynak: selectable false ama canEnable true", async () => {
+  it("lisanssız kaynak hem seçilebilir hem etkinleştirilebilir", async () => {
     const ingestion = new PriceIngestionService(backend);
     await ingestion.syncCatalog();
     const rows = await new PriceSourceService(backend).adminProviderState();
@@ -461,7 +463,7 @@ describe("5b. deneysel kaynak yönetim ekranından ETKİNLEŞTİRİLEBİLİR", (
       const row = rows.find((candidate) => candidate.code === code);
       expect(row, code).toBeDefined();
       expect(row?.licenseStatus, code).toBe("EXPERIMENTAL_PRIVATE");
-      expect(row?.selectable, `${code}: genel listede seçilebilir GÖRÜNMEMELİ`).toBe(false);
+      expect(row?.selectable, `${code}: kullanılabilir olmalı`).toBe(true);
       expect(row?.canEnable, `${code}: yönetici etkinleştirebilmeli`).toBe(true);
     }
   });

@@ -26,7 +26,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           Fiyat kaynakları
         </Link>
         <Link href="/yonetim/deneysel-kaynak" className="btn btn-secondary min-h-11">
-          Deneysel kaynak
+          Kayseri ekranı
         </Link>
       </nav>
       {children}

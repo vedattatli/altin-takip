@@ -591,7 +591,7 @@ describe("8. Sarraf TV ekran okuma mantığı", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("9. deneysel ekran toplayıcısı", () => {
+describe("9. ekran toplayıcısı", () => {
   const observation = {
     canonicalProductId: "yeni-ceyrek",
     mappingConfidence: "CONVENTION" as const,
@@ -600,18 +600,17 @@ describe("9. deneysel ekran toplayıcısı", () => {
     observedAt: nowIso,
   };
 
-  it("bayrak açık değilse çalışmaz", () => {
-    const result = collectScreenQuotes({
-      headers: ["ALIŞ", "SATIŞ"],
-      observations: [observation],
-      unresolved: [],
-      captchaSeen: false,
-      ingestionRunId: null,
-    });
-    expect(result.status).toBe("DISABLED");
-    expect(result.quotes).toHaveLength(0);
-  });
-
+  /*
+   * ORTAM BAYRAĞI KAPISI KALDIRILDI.
+   *
+   * Toplayıcı eskiden üç ortam değişkenine bağlıydı
+   * (APP_DEPLOYMENT_ENV=private-pilot + iki bayrak). Biri eksik kalınca kaynak
+   * SESSİZCE ölüyor, kullanıcı fiyatların neden gelmediğini hiçbir yerde
+   * göremiyordu. Üretimde tam olarak bu tür sessiz kapanmalar yaşandı.
+   *
+   * Artık tek koşul worker sırrının tanımlı olmasıdır: o yoksa imzalı makine
+   * ucu zaten çalışamaz, yani kapı GERÇEK bir teknik gereklilik.
+   */
   function collectWith(): string {
     return collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
@@ -622,62 +621,36 @@ describe("9. deneysel ekran toplayıcısı", () => {
     }).status;
   }
 
-  it("herkese açık üretimde bayrak YOK SAYILIR", () => {
-    // Ürün kararı: kaynak public-production'da hiçbir bayrakla açılamaz.
-    process.env.APP_DEPLOYMENT_ENV = "public-production";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+  it("worker sırrı yoksa toplayıcı kapalıdır", () => {
+    delete process.env.PRICE_SCREEN_WORKER_SECRET;
     expect(collectWith()).toBe("DISABLED");
   });
 
-  it("APP_DEPLOYMENT_ENV tanımsızsa fail closed olur", () => {
+  it("worker sırrı varsa ortam bayrağı ARANMAZ", () => {
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
+    // Eskiden bu üçlü olmadan kapalıydı; artık ilgisizdir.
     delete process.env.APP_DEPLOYMENT_ENV;
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
-    expect(collectWith()).toBe("DISABLED");
-  });
-
-  it("tanınmayan ortam adı fail closed olur", () => {
-    // Yazım hatası kaynağı AÇMAZ.
-    process.env.APP_DEPLOYMENT_ENV = "private_pilot";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
-    expect(collectWith()).toBe("DISABLED");
-  });
-
-  it("tek bayrak yetmez: ikinci anahtar eksikse kapalıdır", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    delete process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT;
-    expect(collectWith()).toBe("DISABLED");
-
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
     delete process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN;
-    expect(collectWith()).toBe("DISABLED");
-  });
-
-  it("VERCEL_ENV=production TEK BAŞINA özel pilotu engellemez", () => {
-    // Barındırma hedefi "production" olsa da ürün ortamı özel pilot olabilir.
-    process.env.VERCEL_ENV = "production";
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    delete process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT;
     expect(collectWith()).not.toBe("DISABLED");
   });
 
-  it("özel pilotta bile test verisi sağlayıcısı KAPALI kalır", () => {
-    // Deneysel kaynağın açılması mock'u açmaz; iki kapı ayrıdır.
+  it("VERCEL_ENV=production toplayıcıyı kapatmaz", () => {
+    // Barındırma hedefi ile fiyat toplama ayrı kavramlardır.
     process.env.VERCEL_ENV = "production";
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
+    expect(collectWith()).not.toBe("DISABLED");
+  });
+
+  it("gerçek kaynak açık olsa da test verisi sağlayıcısı KAPALI kalır", () => {
+    // Gerçek kaynağın açılması mock'u açmaz; iki kapı ayrıdır.
+    process.env.VERCEL_ENV = "production";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     expect(devOnlyProviderBlocked()).toBe(true);
   });
 
   it("CAPTCHA görülürse UNAVAILABLE/BLOCKED döner; aşma denenmez", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [observation],
@@ -691,9 +664,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   });
 
   it("ekran imzası değişirse fail closed olur", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     expect(screenSignatureValid(["FİYAT"], 3)).toBe(false);
     const result = collectScreenQuotes({
       headers: ["FİYAT"],
@@ -707,9 +678,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   });
 
   it("CONVENTION eşlemesi onaysız değerlemeye GİRMEZ", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [observation],
@@ -723,9 +692,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   });
 
   it("yönetici onayı CONVENTION eşlemesini kullanılabilir yapar", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [observation],
@@ -743,9 +710,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   });
 
   it("NETWORK_VERIFIED eşleme onaysız kullanılabilir", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [{ ...observation, canonicalProductId: "gremse-altin", mappingConfidence: "NETWORK_VERIFIED" }],
@@ -758,9 +723,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   });
 
   it("bayat gözlem reddedilir", () => {
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-  process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-  process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [
@@ -784,9 +747,7 @@ describe("9. deneysel ekran toplayıcısı", () => {
   it("saatlik bulut koşumundaki gözlem KABUL edilir", () => {
     // Zamanlanmış toplayıcı saatte bir çalışır ve GitHub gecikebilir; 65
     // dakikalık bir gözlem reddedilirse fiyat hiç görünmez.
-    process.env.APP_DEPLOYMENT_ENV = "private-pilot";
-    process.env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    process.env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
+    process.env.PRICE_SCREEN_WORKER_SECRET = "test-worker-secret";
     const result = collectScreenQuotes({
       headers: ["ALIŞ", "SATIŞ"],
       observations: [
@@ -817,22 +778,22 @@ describe("9. deneysel ekran toplayıcısı", () => {
     expect(screen!.technicalName).toContain("ekran gözlemi");
   });
 
-  it("herkese açık üretimde deneysel kaynak lisanslı görünmez ve seçilemez", () => {
+  /*
+   * Kaynak LİSANSSIZDIR ve öyle etiketlenir; ama kullanımı engellenmez.
+   * Ortam bayrağı kapısı kaldırıldı: barındırma ortamı ne olursa olsun lisans
+   * durumu aynı kalır, çünkü lisans bir OLGUDUR, ortam ayarı değil.
+   */
+  it("kaynak her ortamda lisanssız etiketlenir ve kullanılabilir", () => {
     const env = process.env as Record<string, string | undefined>;
     env.APP_DEPLOYMENT_ENV = "public-production";
-    env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
     env.VERCEL_ENV = "production";
     const view = describeProvider("sarraf-tv-kayseri-screen")!;
-    expect(view.licenseStatus).toBe("NOT_CONFIGURED");
-    expect(view.selectable).toBe(false);
+    expect(view.licenseStatus).toBe("EXPERIMENTAL_PRIVATE");
+    expect(view.selectable).toBe(true);
   });
 
-  it("özel pilotta kaynak EXPERIMENTAL_PRIVATE görünür ama genel listeye AÇILMAZ", () => {
+  it("kaynak lisanslı SAYILMAZ (gerçek piyasa verisi etiketi almaz)", () => {
     const env = process.env as Record<string, string | undefined>;
-    env.APP_DEPLOYMENT_ENV = "private-pilot";
-    env.PRICE_EXPERIMENTAL_SARRAF_SCREEN = "true";
-    env.PRICE_EXPERIMENTAL_PRIVATE_PILOT = "true";
     env.VERCEL_ENV = "production";
     const view = describeProvider("sarraf-tv-kayseri-screen")!;
     expect(view.licenseStatus).toBe("EXPERIMENTAL_PRIVATE");

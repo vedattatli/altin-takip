@@ -66,26 +66,17 @@ export interface ProductOption {
 
 export function AdminExperimentalView({
   initialWorker,
-  initialAccess,
   initialApprovals,
-  users,
   products,
   mappingVersion,
-  enabledInEnvironment,
 }: {
   initialWorker: WorkerStateView | null;
-  initialAccess: AccessRow[];
   initialApprovals: ApprovalRow[];
-  users: UserOption[];
   products: ProductOption[];
   mappingVersion: string;
-  enabledInEnvironment: boolean;
 }) {
   const [worker, setWorker] = useState(initialWorker);
-  const [access, setAccess] = useState(initialAccess);
   const [approvals, setApprovals] = useState(initialApprovals);
-  const [userId, setUserId] = useState(users[0]?.id ?? "");
-  const [reason, setReason] = useState("");
   const [label, setLabel] = useState("");
   const [productId, setProductId] = useState(products[0]?.id ?? "");
   const [liquidation, setLiquidation] = useState("");
@@ -107,7 +98,6 @@ export function AdminExperimentalView({
       apiFetch<{ access: AccessRow[]; worker: WorkerStateView | null }>("/api/admin/price-sources/experimental"),
       apiFetch<ApprovalRow[]>("/api/admin/price-sources/mappings"),
     ]);
-    setAccess(state.access);
     setWorker(state.worker);
     setApprovals(list);
   }
@@ -129,17 +119,10 @@ export function AdminExperimentalView({
   return (
     <div className="space-y-5" data-testid="admin-experimental">
       <SectionTitle
-        title="Deneysel Kayseri Ekran Kaynağı"
-        description="Sarraf TV Kayseri ekran gözlemi. Resmî API değildir, lisanslı veri değildir; yalnızca izin verilen portföylerde kullanılır."
+        title="Kayseri Ekran Kaynağı"
+        description="Sarraf TV Kayseri ekran gözlemi. Resmî API değildir ve lisanslı veri değildir; bu not bilerek durur."
       />
 
-      {!enabledInEnvironment ? (
-        <Alert tone="notice">
-          Bu ortamda deneysel kaynak kapalıdır. Açmak için sunucuda
-          <code className="mx-1">PRICE_EXPERIMENTAL_SARRAF_SCREEN=true</code>
-          gerekir; gerçek üretim dağıtımında bu bayrak yok sayılır.
-        </Alert>
-      ) : null}
       {notice ? <Alert tone="success">{notice}</Alert> : null}
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
@@ -166,104 +149,7 @@ export function AdminExperimentalView({
         )}
       </Card>
 
-      <Card className="p-4" data-testid="experimental-access">
-        <p className="text-sm font-semibold text-ink">Kullanıcı izin listesi</p>
-        <p className="mt-1 break-words text-xs text-muted">
-          Kullanıcı bu kaynağı kendi kendine açamaz. İzin kaldırılırsa başka kaynağa geçilmez;
-          değerleme boş kalır.
-        </p>
-        <p className="mt-1 break-words text-xs text-muted">
-          <span className="font-medium text-ink">İzin, değerleme planının ÜÇ kaynağı için birden verilir:</span>{" "}
-          Kayseri ekranı, Kapalıçarşı tablosu ve Türkiye geneli. Hibrit değerleme üçünü birlikte
-          kullanır; yalnız birine izin verilirse portföyün bir kısmı fiyatsız kalır ve uygulama
-          bozuk görünür.
-        </p>
-        <div className="mt-3 flex w-full flex-wrap items-end gap-2">
-          <label className="text-xs text-subtle">
-            Kullanıcı
-            <select
-              className="control mt-1 min-h-11 w-full min-w-48"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-              data-testid="experimental-user"
-            >
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.username}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-subtle">
-            Gerekçe
-            <input
-              className="control mt-1 min-h-11 w-full min-w-48"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="kapalı pilot"
-            />
-          </label>
-          <button
-            type="button"
-            className="btn btn-primary min-h-11"
-            disabled={busy || userId === ""}
-            data-testid="grant-access"
-            onClick={() =>
-              void run(async () => {
-                await apiFetch("/api/admin/price-sources/experimental", {
-                  method: "PUT",
-                  body: JSON.stringify({ userId, enabled: true, reason }),
-                });
-                return "Deneysel kaynak erişimi açıldı.";
-              })
-            }
-          >
-            Erişim ver
-          </button>
-        </div>
-
-        {access.length === 0 ? (
-          <p className="mt-3 text-xs text-subtle">Henüz izin verilmiş kullanıcı yok.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {access.map((row) => (
-              <li
-                key={row.portfolioId}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-line p-2 text-xs"
-              >
-                <span className="break-words">
-                  <span className="font-semibold text-ink">{row.username}</span>{" "}
-                  <span className={row.enabled ? "text-positive" : "text-muted"}>
-                    {row.enabled ? "açık" : "kapalı"}
-                  </span>{" "}
-                  · {formatDateTime(row.approvedAt)}
-                  {row.reason ? ` · ${row.reason}` : ""}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
-                  disabled={busy}
-                  data-testid={`revoke-${row.username}`}
-                  onClick={() =>
-                    void run(async () => {
-                      const user = users.find((candidate) => candidate.username === row.username);
-                      await apiFetch("/api/admin/price-sources/experimental", {
-                        method: "PUT",
-                        body: JSON.stringify({ userId: user?.id ?? "", enabled: !row.enabled, reason: row.reason }),
-                      });
-                      return row.enabled ? "Erişim kapatıldı." : "Erişim açıldı.";
-                    })
-                  }
-                >
-                  {row.enabled ? "Kapat" : "Aç"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card className="p-4" data-testid="mapping-approvals">
+            <Card className="p-4" data-testid="mapping-approvals">
         <p className="text-sm font-semibold text-ink">Ekran eşleme onayları</p>
         <p className="mt-1 break-words text-xs text-muted">
           Ekranda yeni/eski ayrımı yazmayan satırlar (ÇEYREK, YARIM, TAM ALTIN) piyasa teamülüne

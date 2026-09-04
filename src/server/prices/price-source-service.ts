@@ -50,18 +50,11 @@ const DEFAULT_STALE_AFTER_MS = 5 * 60_000;
  * kontrol her okumada sunucuda yapılır.
  */
 /**
- * DENEYSEL KAYNAKLAR
+ * Kayseri ekran kaynağının kodu. (Ham ekran satırlarını okumak için gerekir.)
  *
- * Hepsi izin listesine tabidir: hiçbiri genel kullanıcı listesine çıkamaz
- * (veritabanı kısıtı da bunu ayrıca engeller). Erişim portföy bazlıdır ve
- * kaynak BAŞINA verilir; bir kaynağa izin verilmesi diğerini açmaz.
+ * Not: kullanıcı bazlı izin listesi KALDIRILDI. Bir kaynağın kullanılabilir
+ * olup olmadığına yönetici `enabled` bayrağıyla tek yerden karar verir.
  */
-const EXPERIMENTAL_CODES = PLAN_PROVIDER_CODES;
-
-function isExperimentalCode(code: string): boolean {
-  return (EXPERIMENTAL_CODES as readonly string[]).includes(code);
-}
-
 const EXPERIMENTAL_SCREEN_CODE = "sarraf-tv-kayseri-screen";
 
 /**
@@ -159,24 +152,22 @@ export class PriceSourceService {
       this.backend.listPriceProviders(),
       this.backend.getPricePreference(ownScope(actor)),
     ]);
-    // Deneysel kaynaklar yalnızca izin listesindeki kullanıcıya görünür ve
-    // izin KAYNAK BAŞINA denetlenir.
-    const experimentalAllowed = new Map<string, boolean>();
-    await Promise.all(
-      EXPERIMENTAL_CODES.map(async (code) => {
-        const allowed = await this.backend
-          .experimentalAccessAllowed(actor.profile.id, code)
-          .catch(() => false);
-        experimentalAllowed.set(code, allowed);
-      }),
-    );
-
+    /*
+     * KULLANICI BAZLI İZİN LİSTESİ KALDIRILDI.
+     *
+     * Kaynağın açık olup olmadığına yönetici tek yerden karar verir
+     * (`enabled`). Eskiden buna ek olarak kullanıcı başına izin gerekiyordu;
+     * izin verilmeyen kaynaktaki ürünler sessizce fiyatsız kalıyor, kullanıcı
+     * uygulamayı bozuk sanıyordu. Uygulamada herkese açık kayıt yok; hesapları
+     * yalnızca yönetici açıyor, dolayısıyla ikinci bir kapı katmanı yalnızca
+     * arıza üretiyordu.
+     */
     return providers
       .filter((provider) => {
         if (!provider.enabled) return false;
-        if (provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
-          return isExperimentalCode(provider.code) && experimentalAllowed.get(provider.code) === true;
-        }
+        // Lisanssız kaynak da seçilebilir; lisans durumu kaynak detayında
+        // dürüstçe yazar ama kullanımı engellemez.
+        if (provider.licenseStatus === "EXPERIMENTAL_PRIVATE") return true;
         return provider.userSelectable;
       })
       .filter((provider) => !provider.capabilities.includes("REFERENCE_ONLY"))
@@ -211,13 +202,7 @@ export class PriceSourceService {
     await this.ensureCatalog();
     const preference = await this.backend.getPricePreference(scope);
     if (preference.providerCode) {
-      if (!isExperimentalCode(preference.providerCode)) return preference.providerCode;
-      // İzin geri alındıysa deneysel kaynak kullanılmaz. BAŞKA KAYNAĞA DA
-      // GEÇİLMEZ: kaynak yok sayılır ve değerleme boş kalır.
-      const allowed = await this.backend
-        .experimentalAccessAllowed(scope.userId, preference.providerCode)
-        .catch(() => false);
-      return allowed ? preference.providerCode : null;
+      return preference.providerCode;
     }
 
     const explicitDefault = await this.backend.defaultPriceProvider();
@@ -291,7 +276,7 @@ export class PriceSourceService {
    * Erişim izni olmayan kullanıcıya boş döner: deneysel kaynak yalnız
    * yöneticinin izin listesindeki portföylere açıktır.
    */
-  async kayseriScreenRows(actor: UserActor): Promise<{
+  async kayseriScreenRows(_actor: UserActor): Promise<{
     rows: ScreenRawRow[];
     observedAt: string | null;
     screenSignature: string;
@@ -300,13 +285,8 @@ export class PriceSourceService {
     ageMinutes: number | null;
     allowed: boolean;
   }> {
-    const allowed = await this.backend
-      .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
-      .catch(() => false);
-    if (!allowed) {
-      return { rows: [], observedAt: null, screenSignature: "", freshness: "none", ageMinutes: null, allowed: false };
-    }
-
+    // Erişim izni katmanı kaldırıldı: ekran satırları hesabı olan herkese
+    // gösterilir. `allowed` alanı geriye dönük uyum için hep true döner.
     const snapshot = await this.backend.screenRows(EXPERIMENTAL_SCREEN_CODE);
     if (!snapshot || snapshot.rows.length === 0) {
       return { rows: [], observedAt: null, screenSignature: "", freshness: "none", ageMinutes: null, allowed: true };
@@ -367,15 +347,7 @@ export class PriceSourceService {
    * tek-sağlayıcılı yol kullanılır.
    */
   private async hybridSnapshotForScope(scope: DataScope, now: number): Promise<ActiveSnapshotResult | null> {
-    const allowedCodes: string[] = [];
-    await Promise.all(
-      PLAN_PROVIDER_CODES.map(async (code) => {
-        const allowed = await this.backend.experimentalAccessAllowed(scope.userId, code).catch(() => false);
-        if (allowed) allowedCodes.push(code);
-      }),
-    );
-    if (allowedCodes.length === 0) return null;
-
+    const allowedCodes: string[] = [...PLAN_PROVIDER_CODES];
     const rows = await this.backend.comparePriceQuotes(allowedCodes);
     const byProvider = new Map(rows.map((row) => [row.providerCode, row]));
 
@@ -426,6 +398,16 @@ export class PriceSourceService {
     }
 
     const productCount = Object.keys(quotes).length;
+
+    /*
+     * PLAN HİÇ FİYAT ÜRETEMEDİYSE ANLIK GÖRÜNTÜ DÖNDÜRÜLMEZ.
+     *
+     * Boş bir plan görüntüsü döndürmek, klasik kaynak çözümlemesini (ve
+     * geliştirmedeki test sağlayıcısını) sessizce kapatıyordu. Veri yoksa
+     * "plan sonucu boş" demek yerine karar çağırana bırakılır.
+     */
+    if (productCount === 0) return null;
+
     const snapshotStaleAfter = Math.max(
       ...allowedCodes.map((code) => PLAN_STALE_AFTER_MS[code] ?? staleAfterMs()),
     );
@@ -481,9 +463,24 @@ export class PriceSourceService {
   private async snapshotForScope(scope: DataScope): Promise<ActiveSnapshotResult> {
     await this.ensureCatalog();
     const now = this.now();
-    const hybrid = await this.hybridSnapshotForScope(scope, now);
-    if (hybrid) return hybrid;
+    /*
+     * HİBRİT PLAN, KULLANICININ AÇIK SEÇİMİNİ EZMEZ.
+     *
+     * Kullanıcı belirli bir kaynağı açıkça seçtiyse (ve o kaynak planın
+     * parçası değilse) seçimi geçerlidir; plan yalnızca seçim yokken ya da
+     * seçilen kaynak zaten plan kaynaklarından biriyken uygulanır.
+     *
+     * Erişim izni katmanı kaldırılınca plan herkese açıldı; bu kontrol
+     * olmasaydı "altinapi seçtim ama hibrit görüyorum" gibi sessiz bir
+     * ezme oluşurdu.
+     */
     const providerCode = await this.resolveProviderCodeForScope(scope);
+    const planApplies =
+      providerCode === null || (PLAN_PROVIDER_CODES as readonly string[]).includes(providerCode);
+    if (planApplies) {
+      const hybrid = await this.hybridSnapshotForScope(scope, now);
+      if (hybrid) return hybrid;
+    }
     if (!providerCode) {
       return {
         snapshot: null,
@@ -562,14 +559,6 @@ export class PriceSourceService {
     const view = describeProvider(providerCode);
     if (!view) throw notFound("Fiyat kaynağı bulunamadı.");
     await this.ensureCatalog();
-    if (providerCode === EXPERIMENTAL_SCREEN_CODE) {
-      const allowed = await this.backend
-        .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
-        .catch(() => false);
-      if (!allowed) {
-        throw conflict("Bu deneysel kaynak sizin için açık değil. Yönetici izin vermelidir.");
-      }
-    }
     try {
       const result = await this.backend.setPricePreference(
         ownScope(actor),
@@ -654,13 +643,7 @@ export class PriceSourceService {
      *
      * Bu tablo YALNIZCA gösterimdir; değerlemeyi değiştirmez.
      */
-    const planAllowed = new Set<string>();
-    await Promise.all(
-      PLAN_PROVIDER_CODES.map(async (code) => {
-        const allowed = await this.backend.experimentalAccessAllowed(actor.profile.id, code).catch(() => false);
-        if (allowed) planAllowed.add(code);
-      }),
-    );
+    const planAllowed = new Set<string>(PLAN_PROVIDER_CODES);
 
     const visible = providers.filter(
       (provider) =>

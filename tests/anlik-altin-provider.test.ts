@@ -137,17 +137,27 @@ describe("4. ortam kapısı", () => {
   beforeEach(clearGate);
   afterEach(clearGate);
 
-  it("kapı kapalıyken lisanssız görünür ve fiyat üretmez", async () => {
-    const provider = providerWith(PAGE);
-    expect(provider.licenseStatus()).toBe("NOT_CONFIGURED");
-    const snapshot = await provider.fetchSnapshot([]);
-    expect(snapshot.status).toBe("unavailable");
-    expect(snapshot.quotes).toHaveLength(0);
-  });
-
-  it("özel pilotta EXPERIMENTAL_PRIVATE olur; LİSANSLI olmaz", () => {
+  /*
+   * ORTAM BAYRAĞI KAPISI KALDIRILDI.
+   *
+   * Kaynak eskiden APP_DEPLOYMENT_ENV=private-pilot ve iki bayrak istiyordu;
+   * biri eksik kalınca SESSİZCE ölüyor, kullanıcı fiyatların neden gelmediğini
+   * göremiyordu. Artık kaynağı yönetici açar/kapatır (`enabled`), tek karar
+   * noktası budur.
+   *
+   * Lisans durumu ORTAMA GÖRE DEĞİŞMEZ: yeniden yayım izni yoktur, bu bir
+   * olgudur. Kaynak her ortamda lisanssız etiketlenir ve LİSANSLI SAYILMAZ.
+   */
+  it("lisans durumu ortam bayrağından bağımsızdır", () => {
+    expect(providerWith(PAGE).licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
     openGate();
     expect(providerWith(PAGE).licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
+  });
+
+  it("bayrak olmadan da fiyat üretebilir", async () => {
+    const snapshot = await providerWith(PAGE).fetchSnapshot([]);
+    expect(snapshot.status).not.toBe("unavailable");
+    expect(snapshot.quotes.length).toBeGreaterThan(0);
   });
 });
 

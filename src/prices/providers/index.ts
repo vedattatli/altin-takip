@@ -25,7 +25,6 @@ import { AnlikAltinProvider } from "./anlik-altin-provider";
 import { TruncgilProvider } from "./truncgil-provider";
 import {
   SCREEN_OBSERVATION_FRESH_MS,
-  screenCollectorEnabled,
 } from "./sarraf-tv-screen-collector";
 import { SARRAF_TV_SCREEN_MAPPING_VERSION } from "./sarraf-tv-screen-mapping";
 
@@ -202,23 +201,11 @@ class ScreenObservationProvider extends BaseProvider {
   }
 
   licenseStatus(): LicenseStatus {
-    // Lisanslı SAYILMAZ. Kapalıysa yapılandırılmamış kabul edilir.
-    return screenCollectorEnabled() ? "EXPERIMENTAL_PRIVATE" : "NOT_CONFIGURED";
+    // Lisanslı SAYILMAZ; bu bir olgudur ve kaynak detayında yazar.
+    return "EXPERIMENTAL_PRIVATE";
   }
 
   validateConfiguration(): ProviderConfigValidation {
-    if (!screenCollectorEnabled()) {
-      return {
-        ok: false,
-        licenseStatus: "NOT_CONFIGURED",
-        issues: [
-          {
-            variable: "PRICE_EXPERIMENTAL_SARRAF_SCREEN",
-            message: "Deneysel ekran kaynağı bu ortamda kapalıdır (üretim dağıtımında zaten açılamaz).",
-          },
-        ],
-      };
-    }
     const missing = this.missingEnv(["PRICE_SCREEN_WORKER_SECRET"]);
     if (missing.length > 0) return { ok: false, licenseStatus: "NOT_CONFIGURED", issues: missing };
     return { ok: true, licenseStatus: "EXPERIMENTAL_PRIVATE", issues: [] };

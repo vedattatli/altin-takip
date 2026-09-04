@@ -1298,12 +1298,8 @@ export class LocalAuthBackend implements AuthBackend {
     if (enabled && !activatable.includes(provider.licenseStatus)) {
       throw new ProviderNotSelectableError(code, "Bu kaynak lisans/izin olmadan etkinleştirilemez.");
     }
-    if (userSelectable && provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
-      throw new ProviderNotSelectableError(
-        code,
-        "Deneysel kaynak genel listeye açılamaz; erişim portföy bazlı izin listesiyle verilir.",
-      );
-    }
+    // Lisanssız kaynak da kullanıcı listesine açılabilir (0023). Lisans durumu
+    // ayrı bir alandır ve arayüzde açıkça yazar; erişimi engellemez.
     if (enabled && provider.licenseStatus === "LICENSED" && !provider.redistributionAllowed) {
       throw new ProviderNotSelectableError(code, "Bu kaynak için yeniden gösterim izni işaretlenmemiş.");
     }
@@ -1863,21 +1859,15 @@ export class LocalAuthBackend implements AuthBackend {
     if (!provider.enabled) {
       throw new ProviderNotSelectableError(code, "Bu kaynak kullanıma kapalı.");
     }
-    if (role === "user" && !provider.userSelectable) {
-      // Deneysel kaynak genel listeye açılmaz; erişim portföy bazlı izin
-      // listesiyle verilir ve BURADA da doğrulanır (arayüz kontrolü yetmez).
-      const experimentalAllowed =
-        provider.licenseStatus === "EXPERIMENTAL_PRIVATE" &&
-        this.store.experimentalAccess.some(
-          (row) =>
-            row.userId === scope.userId &&
-            row.providerCode === code &&
-            row.enabled &&
-            (row.expiresAt === null || Date.parse(row.expiresAt) > Date.parse(this.nowISO())),
-        );
-      if (!experimentalAllowed) {
-        throw new ProviderNotSelectableError(code, "Bu kaynak kullanıcı seçimine kapalı.");
-      }
+    /*
+     * İZİN LİSTESİ KALDIRILDI (0023).
+     *
+     * Lisanssız kaynak da kullanıcı tarafından seçilebilir; tek koşul kaynağın
+     * yönetici tarafından açılmış olmasıdır. Eskiden buna ek olarak kullanıcı
+     * başına izin aranıyordu ve izin yoksa ürünler SESSİZCE fiyatsız kalıyordu.
+     */
+    if (role === "user" && !provider.userSelectable && provider.licenseStatus !== "EXPERIMENTAL_PRIVATE") {
+      throw new ProviderNotSelectableError(code, "Bu kaynak kullanıcı seçimine kapalı.");
     }
     if (provider.capabilities.includes("REFERENCE_ONLY")) {
       throw new ProviderNotSelectableError(code, "Referans kaynağı değerleme için seçilemez.");

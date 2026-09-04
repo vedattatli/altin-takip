@@ -328,11 +328,17 @@ Arayüz yönlendirmesine tek başına güvenme.
   uyum testi kırılır.
 - Worker'ın yazdığı fiyat **merkezî kalite kapısından** geçer. Kaynağa özel bir "hızlı yol"
   açma; `evaluateQuote` atlanamaz.
-- Deneysel kaynak genel kullanıcı listesine açılamaz ve global varsayılan yapılamaz.
-  Erişim portföy bazlı izin listesindendir ve hem uygulama hem veritabanı katmanında
-  doğrulanır. Tek katmanla yetinme.
-- İzin geri alındığında veya fiyat alınamadığında kullanıcıyı **başka bir kaynağa sessizce
-  düşürme**. Fiyat yoksa yok denir ve nedeni yazılır.
+- **Kullanıcı bazlı izin listesi KALDIRILDI (0023).** Bir kaynağın kullanılabilir olup
+  olmadığına yönetici `enabled` bayrağıyla TEK yerden karar verir. İkinci bir kapı katmanı
+  yalnızca arıza üretiyordu: izinsiz kaynaktaki ürünler sessizce fiyatsız kalıyor, kullanıcı
+  uygulamayı bozuk sanıyordu. Yeni bir "kullanıcı başına kaynak izni" katmanı EKLEME.
+- **Lisans beyanı ortam ayarına bağlanamaz.** Lisanssız kaynak her ortamda lisanssız
+  etiketlenir (`EXPERIMENTAL_PRIVATE`), `LICENSED` sayılmaz ve arayüzde "lisanslı veri
+  değildir" notu kalır. Bu bir olgudur; kaldırılamaz, ortam bayrağıyla değiştirilemez.
+- Fiyat alınamadığında kullanıcıyı **başka bir kaynağa sessizce düşürme**. Fiyat yoksa yok
+  denir ve nedeni yazılır. Bu kural aynen geçerlidir.
+- Kullanıcının AÇIKÇA seçtiği kaynak, hibrit plan tarafından ezilmez; plan yalnızca seçim
+  yokken ya da seçilen kaynak zaten plandayken uygulanır.
 
 ## Ortam değişkeni okuma (ihlal edilemez)
 
@@ -347,19 +353,26 @@ Arayüz yönlendirmesine tek başına güvenme.
   `services/sarraf-screen-worker/src/policy.ts` içindedir. Birini değiştirirsen
   diğerini de değiştir — uyum testle denetlenir.
 
-## Özel pilot kapısı (ihlal edilemez)
+## Kaynak açma kapısı (ihlal edilemez)
 
-- Deneysel ekran kaynağı ÜÇ anahtarın hepsini ister:
-  `APP_DEPLOYMENT_ENV=private-pilot`, `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true`,
-  `PRICE_EXPERIMENTAL_PRIVATE_PILOT=true`. Biri eksikse kapalıdır.
-- `APP_DEPLOYMENT_ENV` tanımsız, tanınmayan, `production` veya
-  `public-production` ise **fail closed**. Yazım hatası kaynağı açmaz.
-- `VERCEL_ENV=production` TEK BAŞINA engellemez: barındırma hedefi ile ürün
-  ortamı ayrı kavramlardır. Ayrım açıkça beyan edilen ortama dayanır.
+Not: "özel pilot" ortam bayrağı kapısı KALDIRILDI. Kaynak üç ortam değişkenine
+bağlıydı; biri eksik kalınca kaynak SESSİZCE ölüyor ve kullanıcı sebebini hiçbir
+yerde göremiyordu. Üretimde tam olarak bu yaşandı. Yerine tek ve görünür bir
+karar kondu: yöneticinin `enabled` bayrağı.
+
+- **Kaynağı yalnızca yönetici açar/kapatır.** Ortam değişkeniyle kaynak açma veya
+  kapatma mantığı EKLEME; sessiz kapanma üretir.
+- Etkinleştirilebilir lisans durumları tek listede: `ACTIVATABLE_LICENSE_STATUS`
+  (`price-source-service.ts`), `setPriceProviderFlags` ve veritabanı kısıtı
+  `price_providers_enabled_requires_license` ile AYNI. Üçü birlikte değişir.
+- **Lisanssız/yapılandırılmamış kaynak hâlâ etkinleştirilemez.** Kapı gevşetilmedi;
+  yalnızca "deneysel" ayrımı kalktı.
+- **`selectable` ile `canEnable` ayrı kavramlardır.** `selectable` = kullanıcı
+  seçebilir mi; `canEnable` = sistem bu kaynaktan fiyat çekebilir mi. Arayüzde
+  etkinleştirme düğmesini `selectable`e bağlama — deneysel kaynak arayüzden hiç
+  açılamıyordu, sebebi buydu.
 - Test verisi sağlayıcısının kapısı AYRIDIR ve üretim dağıtımında koşulsuz
-  kapalıdır. Deneysel kaynağı açmak mock'u açmaz.
-- Bu kapı erişim izni değildir: hangi portföyün kullanacağı izin listesiyle,
-  hangi ürünün değerleneceği eşleme güveniyle ayrıca belirlenir.
+  kapalıdır. Gerçek kaynağı açmak mock'u açmaz.
 
 ## E2E koşum bütünlüğü (ihlal edilemez)
 

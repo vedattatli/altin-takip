@@ -61,17 +61,22 @@ describe("1. ortam kapısı", () => {
     for (const key of ENV_KEYS) delete process.env[key];
   });
 
-  it("kapı kapalıyken lisanssız görünür ve fiyat üretmez", async () => {
-    const provider = providerWith(PAYLOAD);
-    expect(provider.licenseStatus()).toBe("NOT_CONFIGURED");
-    const snapshot = await provider.fetchSnapshot([]);
-    expect(snapshot.status).toBe("unavailable");
-    expect(snapshot.quotes).toHaveLength(0);
-  });
-
-  it("özel pilotta EXPERIMENTAL_PRIVATE olur; LİSANSLI olmaz", () => {
+  /*
+   * ORTAM BAYRAĞI KAPISI KALDIRILDI. Kaynak eskiden üç ortam değişkenine
+   * bağlıydı; biri eksik kalınca sessizce ölüyordu. Artık kaynağı yönetici
+   * açar/kapatır. Lisans durumu ortama göre DEĞİŞMEZ: yeniden yayım izni
+   * yoktur ve kaynak her ortamda lisanssız etiketlenir.
+   */
+  it("lisans durumu ortam bayrağından bağımsızdır", () => {
+    expect(providerWith(PAYLOAD).licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
     openGate();
     expect(providerWith(PAYLOAD).licenseStatus()).toBe("EXPERIMENTAL_PRIVATE");
+  });
+
+  it("bayrak olmadan da fiyat üretebilir", async () => {
+    const snapshot = await providerWith(PAYLOAD).fetchSnapshot([]);
+    expect(snapshot.status).not.toBe("unavailable");
+    expect(snapshot.quotes.length).toBeGreaterThan(0);
   });
 });
 

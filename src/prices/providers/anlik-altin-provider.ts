@@ -7,7 +7,6 @@ import {
 } from "../contract";
 import { requireProviderDescriptor } from "../descriptors";
 import { detectNumberFormat, parseScreenNumber, type NumberFormat } from "../number-format";
-import { experimentalScreenAllowed } from "../dev-gate";
 import { BaseProvider, hashPayload } from "./base";
 import { ANLIK_ALTIN_MAPPING, ANLIK_ALTIN_MAPPING_VERSION, ANLIK_ALTIN_TABLE_CONTRACT } from "./mappings";
 
@@ -199,27 +198,18 @@ export class AnlikAltinProvider extends BaseProvider {
   }
 
   /**
-   * Yeniden gösterim izni beyan EDİLMEMİŞTİR; kaynak lisanslı sayılmaz.
-   * Yalnızca özel pilot kapısı açıkken deneysel olarak kullanılabilir.
+   * Yeniden gösterim izni beyan EDİLMEMİŞTİR; kaynak LİSANSLI SAYILMAZ.
+   * Bu bir olgudur ve gizlenmez: kaynak detayında "lisanslı veri değildir"
+   * yazar. Ama kullanılabilirliği artık ortam bayrağına bağlı DEĞİLDİR —
+   * kaynağı yönetici açar veya kapatır, tek karar noktası budur.
    */
   licenseStatus(): LicenseStatus {
-    return experimentalScreenAllowed() ? "EXPERIMENTAL_PRIVATE" : "NOT_CONFIGURED";
+    return "EXPERIMENTAL_PRIVATE";
   }
 
   validateConfiguration(): ProviderConfigValidation {
-    const allowed = experimentalScreenAllowed();
-    return {
-      ok: allowed,
-      licenseStatus: this.licenseStatus(),
-      issues: allowed
-        ? []
-        : [
-            {
-              variable: "APP_DEPLOYMENT_ENV",
-              message: "Anlık Altın kaynağı yalnızca özel pilot ortamında kullanılabilir.",
-            },
-          ],
-    };
+    // Anahtar veya adres gerektirmez: sayfa açık ve anahtarsızdır.
+    return { ok: true, licenseStatus: this.licenseStatus(), issues: [] };
   }
 
   listSupportedProducts(): readonly string[] {
@@ -232,10 +222,6 @@ export class AnlikAltinProvider extends BaseProvider {
   }
 
   async fetchSnapshot(_productIds: readonly string[], options: FetchOptions = {}): Promise<ProviderSnapshot> {
-    if (!experimentalScreenAllowed()) {
-      return this.unavailableSnapshot("Anlık Altın kaynağı bu ortamda kullanılamaz.", "NOT_CONFIGURED", options);
-    }
-
     const started = Date.now();
     const doFetch = this.options.fetchImpl ?? fetch;
     let html: string;

@@ -6,7 +6,7 @@ import {
   type ProviderId,
 } from "./contract";
 import { PROVIDER_DESCRIPTORS } from "./descriptors";
-import { DEV_ONLY_BLOCKED_MESSAGE, devOnlyProviderBlocked, experimentalScreenAllowed } from "./dev-gate";
+import { DEV_ONLY_BLOCKED_MESSAGE, devOnlyProviderBlocked } from "./dev-gate";
 import { createProvider } from "./providers";
 
 /**
@@ -75,11 +75,17 @@ function blockedReasonFor(provider: CanonicalPriceProvider, status: LicenseStatu
     case "DEV_ONLY":
       return isProduction() ? DEV_ONLY_BLOCKED_MESSAGE : null;
     case "EXPERIMENTAL_PRIVATE":
-      // Deneysel kaynak genel listede seçilebilir GÖRÜNMEZ. Erişim, yöneticinin
-      // portföy bazlı izin listesiyle ayrıca açılır; bu kontrol sunucudadır.
-      return experimentalScreenAllowed()
-        ? "Deneysel özel pilot kaynağı. Yalnızca yöneticinin izin verdiği portföylerde kullanılabilir."
-        : "Deneysel ekran kaynağı bu ortamda kapalıdır.";
+      /*
+       * LİSANSSIZ ama KULLANILABİLİR.
+       *
+       * Yeniden yayım izni yoktur; bu bir olgudur ve kaynak detayında yazar.
+       * Ancak kullanımı engellenmez: kaynağı yönetici açar veya kapatır.
+       * Eskiden burada ortam bayrağına bakılıyor ve kaynak "seçilemez"
+       * işaretleniyordu; sonucunda yönetici kaynağı arayüzden hiç
+       * etkinleştiremiyor, kullanıcı da fiyatların neden gelmediğini
+       * göremiyordu.
+       */
+      return null;
   }
 }
 

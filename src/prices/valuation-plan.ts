@@ -58,7 +58,6 @@ export type PlanProviderCode = (typeof PLAN_PROVIDER_CODES)[number];
  * Kapalıçarşı tablosundan gelenler (ekranda İKİ YÖNLÜ satırı yok):
  *   Gram Altın  — ekranda yalnız tek fiyatlı "HAS" ve "22 AYAR" var
  *   Has Altın   — aynı sebep
- *   14 Ayar     — ekranda tek fiyat
  *
  * Türkiye geneli akışından gelenler (ilk iki kaynakta hiç yok):
  *   Cumhuriyet, Hamit, İkibuçuk, 18 Ayar
@@ -69,6 +68,11 @@ export type PlanProviderCode = (typeof PLAN_PROVIDER_CODES)[number];
  *                                      "22 Ayar Altın" hurda fiyatıdır, bilezik
  *                                      işçilik payı taşır, eşitlenemez
  *   altin-8-ayar                     — ekranda tek fiyat, yön kanıtlanamıyor
+ *   altin-14-ayar                    — ÖLÇÜLDÜ (2026-09-04): Kapalıçarşı satırı
+ *                                      hurda ALIŞI ile perakende SATIŞINI yan
+ *                                      yana koyuyor (%32 makas); Trunçgil ise
+ *                                      referans kuru veriyor (%0,1 makas).
+ *                                      İkisi de tezgâh fiyatı değil.
  */
 export const VALUATION_SOURCE_PLAN: Readonly<Record<string, PlanProviderCode>> = {
   // --- Kayseri yerel tezgâh ---
@@ -86,7 +90,6 @@ export const VALUATION_SOURCE_PLAN: Readonly<Record<string, PlanProviderCode>> =
   // --- Kapalıçarşı referansı ---
   "gram-altin": KAPALICARSI_PROVIDER_CODE,
   "has-altin": KAPALICARSI_PROVIDER_CODE,
-  "altin-14-ayar": KAPALICARSI_PROVIDER_CODE,
 
   // --- Türkiye geneli ---
   "cumhuriyet-altini": TURKIYE_PROVIDER_CODE,

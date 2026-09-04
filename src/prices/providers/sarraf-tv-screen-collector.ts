@@ -1,5 +1,5 @@
 import type { MarketId, NormalizedQuote, TimestampProvenance } from "../contract";
-import { experimentalScreenAllowed } from "../dev-gate";
+import { stringFromEnv } from "@/lib/env";
 import {
   isValuationReady,
   SARRAF_TV_SCREEN_MAPPING_VERSION,
@@ -76,9 +76,15 @@ export interface CollectorResult {
   message: string;
 }
 
-/** Deneysel toplayıcı bu ortamda etkin mi? */
+/**
+ * Ekran toplayıcısı çalışabilir mi?
+ *
+ * Eskiden üç ortam bayrağına bağlıydı; biri eksik kalınca kaynak sessizce
+ * ölüyor ve kullanıcı sebebini göremiyordu. Artık tek koşul worker sırrının
+ * tanımlı olmasıdır — o olmadan imzalı uç zaten çalışamaz.
+ */
 export function screenCollectorEnabled(): boolean {
-  return experimentalScreenAllowed();
+  return stringFromEnv("PRICE_SCREEN_WORKER_SECRET", "").trim() !== "";
 }
 
 /**
@@ -120,8 +126,8 @@ export function collectScreenQuotes(input: CollectorInput): CollectorResult {
       dataKind: SARRAF_TV_DATA_KIND,
       quotes: [],
       unresolved: [],
-      safeErrorCode: "EXPERIMENTAL_DISABLED",
-      message: "Deneysel ekran toplayıcısı kapalı.",
+      safeErrorCode: "COLLECTOR_DISABLED",
+      message: "Ekran toplayıcısı yapılandırılmadı (worker sırrı yok).",
     };
   }
   if (input.captchaSeen) {

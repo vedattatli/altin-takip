@@ -133,7 +133,7 @@ export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
 
 // ---------------------------------------------------------------------------
 
-export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-1";
+export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-2";
 
 /**
  * ANLIK ALTIN "KAPALIÇARŞI ÖNERİLEN" TABLOSU → KANONİK ÜRÜNLER
@@ -150,11 +150,29 @@ export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-1";
  *   HONS                 dolar bazlı ons; TL ürün değildir
  *   HAYAR22              tabloda "22 Ayar Altın" hurda/işlenmiş ayrımı yazmıyor
  *   HCEYREK_ESKI         aşağıda ayrı ele alınıyor
+ *   HAYAR14              SÜRÜM 2'DE ÇIKARILDI — aşağıdaki ölçüme bakın
+ *
+ * SÜRÜM 2: HAYAR14 (14 Ayar Altın) kaldırıldı.
+ *
+ * Ölçüm (2026-09-04): kaynak bu satırda `3781.52 / 5010.26` yayımlıyor, yani
+ * %32 makas. Diğer satırlarda makas ~%1. Sebebi tabloda iki FARKLI şeyin yan
+ * yana konması:
+ *   gram altın 6868 × 0,585 (14 ayar milyemi) = 4018 TL saf altın karşılığı
+ *   alış  3781 → saf altın değerinin ALTINDA, hurda alış fiyatı
+ *   satış 5010 → saf altın değerinin %25 ÜSTÜNDE, işçilikli takı satışı
+ *
+ * Bu bir alış/satış makası değildir; hurda alışı ile perakende satışıdır.
+ * Kalite kapısı zaten SPREAD_TOO_WIDE ile reddediyordu, ama her koşumda
+ * karantina kaydı üretiyordu. Eşlemeden çıkarmak dürüst olanıdır: kaynak bu
+ * ürün için iki yönlü fiyat YAYIMLAMIYOR.
+ *
+ * Trunçgil de çözüm değil: orada 14 ayar `3933.27 / 3937.67`, makas %0,1 —
+ * tezgâh fiyatı değil piyasa referans kuru. Bozdurma ile yeniden alımı aynı
+ * göstermek kullanıcıyı yanıltır.
  */
 export const ANLIK_ALTIN_MAPPING: Readonly<Record<string, string>> = {
   HGRAM: "gram-altin",
   HHAS: "has-altin",
-  HAYAR14: "altin-14-ayar",
   HCEYREK: "yeni-ceyrek",
   HCEYREK_ESKI: "eski-ceyrek",
   HYARIM: "yeni-yarim",
