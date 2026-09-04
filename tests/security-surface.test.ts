@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -37,27 +37,37 @@ function readCode(file: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-describe("herkese açık kayıt yoktur", () => {
-  it("kayıt / signup uç noktası bulunmaz", () => {
-    const suspicious = ROUTE_FILES.filter((file) =>
-      /(register|signup|sign-up|kayit|kayıt)/i.test(relative("src", file)),
-    );
-    expect(suspicious).toEqual([]);
+/*
+ * HERKESE AÇIK KAYIT AÇILDI (ürün kararı, sahibi verdi).
+ *
+ * Bu blok eskiden "kayıt ucu BULUNMAZ" diye sınıyordu. Artık kayıt vardır ve
+ * sınanan şey KORUMALARIN yerinde olduğudur: uç internete açık olduğu için
+ * gevşeyen her koruma doğrudan hesap devralmaya açılır.
+ */
+describe("herkese açık kayıt korumalı kurulmuştur", () => {
+  it("kayıt ucu apiRoute sarmalayıcısından geçer", () => {
+    const source = readCode(join("src", "app", "api", "auth", "register", "route.ts"));
+    expect(source).toMatch(/apiRoute/);
   });
 
-  it("kayıt sayfası bulunmaz", () => {
-    const pages = SOURCE_FILES.filter(
-      (file) =>
-        file.includes(`${sep}app${sep}`) &&
-        /(register|signup|sign-up|kayit-ol|kayitol)/i.test(relative("src", file)),
-    );
-    expect(pages).toEqual([]);
+  it("rol istemciden ALINMAZ", () => {
+    const route = readCode(join("src", "app", "api", "auth", "register", "route.ts"));
+    const service = readCode(join("src", "server", "auth", "service.ts"));
+    // Uç gövdeden rol okumaz.
+    expect(route).not.toMatch(/body\.role/);
+    // Servis kaydı her zaman "user" rolüyle açar.
+    expect(service).toMatch(/role: "user"/);
   });
 
-  it("giriş ekranında kayıt bağlantısı yoktur", () => {
-    const login = readCode(join("src", "app", "giris", "page.tsx"));
-    const form = readCode(join("src", "app", "giris", "login-form.tsx"));
-    expect(`${login}${form}`).not.toMatch(/Kayıt Ol|Hesap oluştur|Üye ol/i);
+  it("kayıt hız sınırlayıcıdan ve parola politikasından geçer", () => {
+    const service = readCode(join("src", "server", "auth", "service.ts"));
+    const register = service.slice(service.indexOf("async register("), service.indexOf("async login("));
+    expect(register).toMatch(/loginRateLimitBuckets/);
+    expect(register).toMatch(/rateLimiter\.check/);
+    expect(register).toMatch(/validatePassword/);
+    expect(register).toMatch(/isReservedUsername/);
+    // Parola tekrarı SUNUCUDA denetlenir; istemci kontrolü yeterli değildir.
+    expect(register).toMatch(/passwordConfirm/);
   });
 });
 

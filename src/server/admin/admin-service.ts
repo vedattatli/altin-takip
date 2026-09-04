@@ -2,7 +2,6 @@ import "server-only";
 
 import { validatePassword } from "@/auth/password";
 import {
-  ADMIN_CAN_EDIT_USER_PORTFOLIO,
   type AdminAction,
   type AdminAuditLog,
   type SessionSummary,
@@ -10,11 +9,9 @@ import {
   type UserStatus,
 } from "@/auth/types";
 import { isReservedUsername, validateUsername } from "@/auth/username";
-import { valuePositions } from "@/domain/accounting";
-import type { AdminUserPortfolioView } from "@/domain/admin-view";
 import { approvalAppliesToCurrentMapping } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { PLAN_PROVIDER_CODES } from "@/prices/valuation-plan";
-import { adminScope, type AdminActor } from "@/server/auth/actor";
+import type { AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
 import { ProviderNotSelectableError } from "@/server/prices/types";
@@ -30,7 +27,6 @@ import { ProviderNotSelectableError } from "@/server/prices/types";
  * Rol İSTEMCİDEN ALINMAZ: panelden oluşturulan her hesap "user" rolündedir.
  */
 
-export type { AdminUserPortfolioView } from "@/domain/admin-view";
 
 export interface DeleteUserResult {
   deleted: boolean;
@@ -336,41 +332,25 @@ export class AdminService {
     return target;
   }
 
-  async getUserPortfolio(actor: AdminActor, userId: string): Promise<AdminUserPortfolioView> {
+  /**
+   * YÖNETİCİ KULLANICININ ALTIN VARLIĞINI GÖREMEZ.
+   *
+   * Ürün kararı (sahibi verdi): yönetici hesap yönetir, portföy okumaz.
+   * Miktar, tutar, ortalama maliyet, kâr/zarar ve işlem geçmişi yönetici
+   * yüzeyinden TAMAMEN kaldırıldı — ekranı gizlemek yetmez, veri sunucudan
+   * hiç çıkmaz ve `/api/admin/users/[id]/portfolio` ucu silindi.
+   *
+   * Yönetici hesabın YAŞAM DÖNGÜSÜNÜ görmeye devam eder: son giriş zamanı,
+   * açık oturumlar, cihaz etiketi. Destek için gereken budur.
+   */
+  async getUserAccount(actor: AdminActor, userId: string): Promise<{ user: UserProfile }> {
     const target = await this.backend.getProfile(userId);
     if (!target) {
-      await this.audit(actor, "user.portfolio_view", null, false, { userId });
+      await this.audit(actor, "user.account_view", null, false, { userId });
       throw notFound("Kullanıcı bulunamadı.");
     }
-
-    // Başka kullanıcının verisine erişim AÇIKÇA işaretlenir. Yalnızca OKUMA:
-    // yönetici kullanıcı adına BUY/SELL/OPENING_BALANCE/VOID/REPLACE yapamaz.
-    const scope = adminScope(actor, userId);
-    // Fiyat, HEDEF KULLANICININ aktif kaynağından gelir. Eski test sağlayıcısı
-    // kullanılsaydı yönetici, kullanıcının gördüğünden FARKLI bir değerleme
-    // görürdü. Kaynak yoksa test verisine düşülmez; değerleme boş kalır.
-    const { PriceSourceService } = await import("@/server/prices/price-source-service");
-    const sources = new PriceSourceService(this.backend, { now: () => this.now() });
-    const [ledger, positions, active] = await Promise.all([
-      this.backend.listLedger(scope),
-      this.backend.listPositions(scope),
-      sources.activeSnapshotForAdmin(actor, userId),
-    ]);
-    const summary = valuePositions(positions, active.snapshot, this.now(), {
-      ledgerEntryCount: ledger.length,
-    });
-
-    // Denetim kaydına yalnızca hassas olmayan sayısal özet yazılır.
-    await this.audit(actor, "user.portfolio_view", target, true, {
-      transactionCount: ledger.length,
-    });
-
-    return {
-      user: target,
-      summary: { ...summary, priceSource: active.source },
-      ledger,
-      canEdit: ADMIN_CAN_EDIT_USER_PORTFOLIO,
-    };
+    await this.audit(actor, "user.account_view", target, true, {});
+    return { user: target };
   }
 
   async createUser(

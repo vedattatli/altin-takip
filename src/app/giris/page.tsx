@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CsrfMeta } from "@/components/csrf-meta";
@@ -29,13 +30,20 @@ export default async function LoginPage() {
           <LoginForm />
         </div>
 
+        <p className="mt-5 text-center text-sm text-muted">
+          Hesabınız yok mu?{" "}
+          <Link href="/kayit" className="font-medium text-accent hover:underline">
+            Hesap oluşturun
+          </Link>
+        </p>
+
         {/*
-          Herkese açık kayıt YOKTUR. Hesaplar yalnızca yönetici tarafından
-          oluşturulur; bu ekranda kayıt bağlantısı bulunmaz.
+          "Şifremi unuttum" bağlantısı YOKTUR ve bu bilinçlidir: uygulamanın
+          e-posta veya SMS kanalı yok, dolayısıyla kimliği doğrulanmış bir
+          sıfırlama akışı kurulamaz. Sıfırlamayı yalnızca yönetici yapar.
         */}
-        <p className="mt-5 text-center text-xs leading-relaxed text-subtle">
-          Hesaplar yönetici tarafından oluşturulur. Kullanıcı adınızı veya parolanızı
-          bilmiyorsanız sistem yöneticinizle iletişime geçin.
+        <p className="mt-4 text-center text-xs leading-relaxed text-subtle">
+          Parolanızı unuttuysanız kendiniz sıfırlayamazsınız; yöneticiyle iletişime geçin.
         </p>
       </div>
     </main>

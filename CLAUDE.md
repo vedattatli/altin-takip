@@ -50,10 +50,24 @@ npm run test:db
   `npm run admin:create` ile verilir.
 - **Yetki kontrolü sunucuda yapılır.** Menü gizlemek güvenlik önlemi değildir; her admin ucu
   `requireCurrentAdmin()` çağırmak zorundadır.
+- **Yönetici kullanıcının FİNANSAL verisini göremez (ihlal edilemez).** Altın miktarı, tutar,
+  ortalama maliyet, kâr/zarar ve işlem geçmişi yönetici yüzeyine ÇIKMAZ. Yönetici hesabı
+  yönetir (açma, arama, pasifleştirme, silme, parola sıfırlama) ve hesabın yaşam döngüsünü
+  görür (son giriş, açık oturumlar, cihaz etiketi). `AdminService` içinde `listLedger`,
+  `listPositions`, `valuePositions` veya `adminScope` KULLANMA; portföy okuyan yeni bir
+  yönetici ucu EKLEME. Bu kural `tests/admin-service.test.ts` ve
+  `tests/authorization-matrix.test.ts` tarafından denetlenir.
 - **Denetim kaydına hassas veri yazma.** `admin_audit_logs` içine parola, parola özeti, tutar veya
   işlem detayı yazılmaz.
-- Herkese açık kayıt ucu veya sayfası ekleme. E-posta OTP, sihirli bağlantı, telefon girişi,
-  `signInWithOtp`, `resetPasswordForEmail` kullanma.
+- **Herkese açık kayıt AÇIKTIR** (`/kayit`, `POST /api/auth/register`). Ürün kararı sahibi
+  tarafından verildi: siteye giren herkes kendi hesabını açar. Uç internete açık olduğu için
+  korumalar gevşetilemez: giriş ucuyla AYNI hız sınırlayıcı, kullanıcı adı doğrulama,
+  ayrılmış ad reddi, benzersizlik ve parola politikası. **Rol istemciden ALINMAZ**; kayıt
+  her zaman `user` rolüyle açılır.
+- **E-posta OTP, sihirli bağlantı, telefon girişi, `signInWithOtp`, `resetPasswordForEmail`
+  kullanma.** Uygulamanın e-posta/SMS kanalı yoktur; bu yüzden "şifremi unuttum" akışı da
+  YOKTUR. Parola sıfırlamayı yalnızca yönetici yapar (`/yonetim`). Kimliği doğrulanmamış bir
+  sıfırlama akışı EKLEME: kullanıcı adını bilen herkes hesabı ele geçirir.
 
 ## Dağıtım ve cihaz kuralları
 

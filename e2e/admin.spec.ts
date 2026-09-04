@@ -85,7 +85,12 @@ test.describe("yönetim paneli", () => {
     await expect(page.getByTestId("user-list")).not.toContainText(ADMIN.username);
   });
 
-  test("yönetici kullanıcının portföyünü görüntüler ama düzenleyemez", async ({
+  /*
+   * Yönetici kullanıcının ALTIN VARLIĞINI GÖREMEZ (ürün kararı).
+   * Bu test eskiden yöneticinin portföyü doğru gördüğünü sınıyordu; artık
+   * HİÇ görmediğini sınıyor.
+   */
+  test("yönetici kullanıcının altın varlığını göremez; giriş/oturum bilgisini görür", async ({
     page,
     browser,
   }) => {
@@ -106,10 +111,23 @@ test.describe("yönetim paneli", () => {
     // Arama akışı ayrı bir testte doğrulanır; burada kullanıcıya doğrudan gidilir.
     await gotoReady(page, `/yonetim/${target.id}`);
 
-    await expect(page.getByText("Kullanıcının portföyü")).toBeVisible();
-    await expect(page.getByText("Elde kalan maliyet")).toBeVisible();
-    await expect(page.getByText("40.000,00")).toBeVisible();
-    await expect(page.getByText(/Salt okunur görünüm/)).toBeVisible();
+    // Finansal içerik HİÇBİR biçimde görünmemeli.
+    await expect(page.getByText("Kullanıcının portföyü")).toHaveCount(0);
+    await expect(page.getByText("Elde kalan maliyet")).toHaveCount(0);
+    await expect(page.getByText("40.000,00")).toHaveCount(0);
+    await expect(page.getByText("Gram Altın")).toHaveCount(0);
+
+    // Hesap yaşam döngüsü görünmeye devam eder.
+    await expect(page.getByText(username)).toBeVisible();
+    await expect(page.getByText("Aktif oturumlar")).toBeVisible();
+
+    // Uç de silinmiştir: doğrudan istek 404 döner.
+    const status = await page.evaluate(
+      async (id) => (await fetch(`/api/admin/users/${id}/portfolio`)).status,
+      target.id,
+    );
+    expect(status).toBe(404);
+
     await expectNoHorizontalOverflow(page);
   });
 

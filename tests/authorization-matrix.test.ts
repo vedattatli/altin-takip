@@ -56,6 +56,9 @@ type Guard =
 /** Her uç için BEKLENEN guard. Yeni uç eklenince bu tablo da güncellenmelidir. */
 const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/login/route.ts": "public",
+  // Herkese acik kayit: guard yok, korumalar servis katmaninda (hiz siniri,
+  // parola politikasi, ayrilmis ad reddi). Rol istemciden ALINMAZ.
+  "auth/register/route.ts": "public",
   "auth/logout/route.ts": "public",
   "auth/session/route.ts": "public",
   // Geçici parolalı kullanıcı bu uçları kullanabilmelidir.
@@ -70,7 +73,6 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/users/route.ts": "admin",
   "admin/users/[id]/route.ts": "admin",
   "admin/users/[id]/password/route.ts": "admin",
-  "admin/users/[id]/portfolio/route.ts": "admin",
   "admin/users/[id]/sessions/route.ts": "admin",
   "admin/users/[id]/sessions/[sessionId]/route.ts": "admin",
   "admin/audit/route.ts": "admin",
@@ -262,12 +264,17 @@ describe("kullanıcı verisi ayrımı", () => {
     expect((await portfolio.getPortfolio(userActor(userB))).name).toBe("B Portföyü");
   });
 
-  it("yönetici başka kullanıcının verisini adminScope ile yalnızca okur", async () => {
+  /*
+   * Yönetici artık başka kullanıcının FİNANSAL verisini hiç okumaz; hesap
+   * görünümü yalnızca profil döner. `adminScope` yalnızca hesap yaşam döngüsü
+   * (oturum kapatma, silme) için kullanılır.
+   */
+  it("yönetici hesap görünümünde finansal veri yoktur", async () => {
     await portfolio.appendTransaction(userActor(userA), buyCommand({ quantity: "7" }));
 
-    const view = await admin.getUserPortfolio(adminActor(adminProfile), userA.id);
-    expect(view.ledger).toHaveLength(1);
-    expect(view.canEdit).toBe(false);
+    const view = await admin.getUserAccount(adminActor(adminProfile), userA.id);
+    expect(Object.keys(view)).toEqual(["user"]);
+    expect(JSON.stringify(view)).not.toContain("quantity");
   });
 
   it("arka uç kapsamı kullanıcı kimliğine sıkıca bağlıdır", async () => {
@@ -290,10 +297,16 @@ describe("actor sınırının kaynak kodda korunması", () => {
       const source = readCode(file);
       return /adminScope\(/.test(source) && !file.endsWith("actor.ts");
     });
-    // Kapsam üretebilen dosyalar AÇIKÇA listelidir; yeni bir dosya eklenirse test düşer.
+    /*
+     * Kapsam üretebilen dosyalar AÇIKÇA listelidir; yeni bir dosya eklenirse
+     * test düşer.
+     *
+     * `admin-service.ts` listeden ÇIKTI: yönetici artık başka kullanıcının
+     * finansal verisini okumuyor, dolayısıyla admin kapsamı da kurmuyor.
+     * Geri eklenmesi, portföy okumasının geri gelmesi demektir.
+     */
     expect(callers.sort()).toEqual(
       [
-        join("src", "server", "admin", "admin-service.ts"),
         join("src", "server", "prices", "price-source-service.ts"),
       ].sort(),
     );

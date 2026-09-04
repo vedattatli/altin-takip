@@ -116,7 +116,9 @@ export type AdminAction =
   | "user.activate"
   | "user.password_reset"
   | "user.view"
+  // Yönetici artık portföy OKUMAZ; eylem geçmiş kayıtlar için korunur.
   | "user.portfolio_view"
+  | "user.account_view"
   | "user.sessions_view"
   | "user.sessions_revoke"
   | "user.delete_attempt"

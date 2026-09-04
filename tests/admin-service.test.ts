@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { UserProfile } from "@/auth/types";
@@ -5,10 +8,8 @@ import { AdminService } from "@/server/admin/admin-service";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { AuthService } from "@/server/auth/service";
 import { MemoryLoginRateLimiter } from "@/server/rate-limit/memory";
-import { PriceIngestionService } from "@/server/prices/ingestion-service";
-import { PriceSourceService } from "@/server/prices/price-source-service";
-import { adminActor, scopeOf, userActor } from "./actors";
-import { dec, parseLedgerCommand } from "@/domain/accounting";
+import { parseLedgerCommand } from "@/domain/accounting";
+import { adminActor, scopeOf } from "./actors";
 import { buyCommand } from "./helpers";
 
 const ADMIN_PASSWORD = "Yonetici7Kasa";
@@ -130,10 +131,9 @@ describe("yönetici: parola sıfırlama", () => {
   it("yönetici mevcut parolayı hiçbir uçtan göremez", async () => {
     const user = await createUserAccount("ayse");
     const detail = await admin.getUserDetail(adminActor(adminProfile), user.id);
-    const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
     const list = await admin.listUsers(adminActor(adminProfile));
 
-    const serialized = JSON.stringify({ detail, view, list });
+    const serialized = JSON.stringify({ detail, list });
     expect(serialized).not.toContain(USER_PASSWORD);
     expect(serialized.toLowerCase()).not.toContain("passwordhash");
     expect(serialized.toLowerCase()).not.toContain("password_hash");
@@ -201,77 +201,41 @@ describe("yönetici: pasifleştirme ve silme", () => {
   });
 });
 
-describe("yönetici: portföy görüntüleme", () => {
-  it("kullanıcının portföy özetini KULLANICININ aktif kaynağıyla hesaplar", async () => {
+/*
+ * YÖNETİCİ KULLANICININ ALTIN VARLIĞINI GÖREMEZ.
+ *
+ * Ürün kararı (sahibi verdi): yönetici hesap yönetir, portföy okumaz. Bu blok
+ * eskiden yöneticinin portföyü DOĞRU gördüğünü sınıyordu; artık HİÇ görmediğini
+ * sınıyor. Ekranı gizlemek yeterli olmazdı: veri sunucudan çıkmamalı ve uç
+ * bulunmamalı.
+ */
+describe("yönetici: kullanıcının finansal verisini GÖREMEZ", () => {
+  it("hesap görünümü yalnızca profil döner; tutar/miktar/işlem içermez", async () => {
     const user = await createUserAccount("ayse");
     await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
 
-    // Kaynak hazırlanır ve kullanıcı adına seçilir.
-    const ingestion = new PriceIngestionService(backend);
-    await ingestion.syncCatalog();
-    await backend.setPriceProviderFlags("mock", true, true);
-    await ingestion.ingestProvider("mock");
-    const sources = new PriceSourceService(backend);
-    await sources.selectSource(userActor(user), "mock", "test");
-
-    const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
-
+    const view = await admin.getUserAccount(adminActor(adminProfile), user.id);
     expect(view.user.username).toBe("ayse");
-    expect(view.ledger).toHaveLength(1);
-    expect(view.summary.totalRemainingCostBasis).toBe("50000");
-    expect(dec(view.summary.totalReplacementValue).greaterThan(dec(view.summary.totalLiquidationValue))).toBe(true);
 
-    // Yönetici, kullanıcının gördüğü kaynağın AYNISINI görür.
-    const own = await sources.activeSnapshot(userActor(user));
-    expect(view.summary.priceSource?.providerCode).toBe("mock");
-    expect(view.summary.priceSource?.marketId).toBe(own.source.marketId);
-    expect(view.summary.priceSource?.isRealMarketData).toBe(false);
+    const serialized = JSON.stringify(view);
+    for (const forbidden of ["50000", "quantity", "liquidation", "ledger", "summary", "averageCost"]) {
+      expect(serialized.toLowerCase(), forbidden).not.toContain(forbidden.toLowerCase());
+    }
   });
 
-  it("kullanıcının kaynağı yoksa yönetici test verisine düşmez", async () => {
-    const user = await createUserAccount("ayse");
-    await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
-
-    // Hiçbir kaynak açılmadı ve varsayılan tanımlanmadı.
-    const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
-
-    expect(view.summary.priceSource?.providerCode).toBeNull();
-    expect(view.summary.priceSource?.status).toBe("not_selected");
-    // Maliyet görünür ama değerleme uydurulmaz.
-    expect(view.summary.totalRemainingCostBasis).toBe("50000");
-    expect(view.summary.valuationStatus).toBe("none");
+  it("yönetici yüzeyinin hiçbir ucunda portföy okuma kalmadı", () => {
+    // Uç dosyası SİLİNDİ; menü gizlemek güvenlik önlemi değildir.
+    expect(existsSync(join(process.cwd(), "src/app/api/admin/users/[id]/portfolio/route.ts"))).toBe(false);
+    const source = readFileSync(join(process.cwd(), "src/server/admin/admin-service.ts"), "utf8");
+    expect(source).not.toMatch(/getUserPortfolio/);
+    // Portföy okumak için gereken kapsam da artık kurulmuyor.
+    expect(source).not.toMatch(/listLedger|listPositions|valuePositions/);
   });
 
-  it("iki kullanıcı farklı kaynak seçtiyse yönetici her biri için doğru kaynağı görür", async () => {
-    const first = await createUserAccount("ayse");
-    const second = await createUserAccount("mehmet");
-    const ingestion = new PriceIngestionService(backend);
-    await ingestion.syncCatalog();
-    await backend.setPriceProviderFlags("mock", true, true);
-    await ingestion.ingestProvider("mock");
-
-    const sources = new PriceSourceService(backend);
-    await sources.selectSource(userActor(first), "mock", "test");
-    // İkinci kullanıcı seçim yapmaz ve global varsayılan da yoktur.
-
-    const firstView = await admin.getUserPortfolio(adminActor(adminProfile), first.id);
-    const secondView = await admin.getUserPortfolio(adminActor(adminProfile), second.id);
-    expect(firstView.summary.priceSource?.providerCode).toBe("mock");
-    expect(secondView.summary.priceSource?.providerCode).toBeNull();
-  });
-
-  it("yönetici yalnızca okur: kullanıcı adına düzenleme yetkisi yoktur ve servis mutation sunmaz", async () => {
-    const user = await createUserAccount("ayse");
-    const view = await admin.getUserPortfolio(adminActor(adminProfile), user.id);
-    expect(view.canEdit).toBe(false);
-    const adminMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(admin));
-    expect(adminMethods.some((name) => /transaction|ledger|buy|sell|void|replace/i.test(name))).toBe(false);
-  });
-
-  it("olmayan kullanıcı için 404 döner", async () => {
-    await expect(
-      admin.getUserPortfolio(adminActor(adminProfile), "yok-boyle-id"),
-    ).rejects.toMatchObject({ status: 404 });
+  it("olmayan kullanıcı 404 döner", async () => {
+    await expect(admin.getUserAccount(adminActor(adminProfile), "yok-boyle-id")).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });
 
@@ -295,7 +259,7 @@ describe("denetim kaydı (audit log)", () => {
     await admin.setUserStatus(adminActor(adminProfile), user.id, "active");
     await admin.resetUserPassword(adminActor(adminProfile), user.id, "GeciciParola7Kasa");
     await admin.getUserDetail(adminActor(adminProfile), user.id);
-    await admin.getUserPortfolio(adminActor(adminProfile), user.id);
+    await admin.getUserAccount(adminActor(adminProfile), user.id);
 
     const actions = (await admin.listAudit(adminActor(adminProfile))).map((log) => log.action);
     for (const expected of [
@@ -303,7 +267,7 @@ describe("denetim kaydı (audit log)", () => {
       "user.activate",
       "user.password_reset",
       "user.view",
-      "user.portfolio_view",
+      "user.account_view",
     ]) {
       expect(actions).toContain(expected);
     }
@@ -369,7 +333,7 @@ describe("denetim kaydı (audit log)", () => {
   it("denetim kaydına parola veya finansal içerik yazılmaz", async () => {
     const user = await createUserAccount("ayse");
     await backend.appendLedgerEntry(scopeOf(user), requestOf(buyCommand({ quantity: "10", unitPrice: "5000" })));
-    await admin.getUserPortfolio(adminActor(adminProfile), user.id);
+    await admin.getUserAccount(adminActor(adminProfile), user.id);
     await admin.resetUserPassword(adminActor(adminProfile), user.id, "GeciciParola7Kasa");
 
     const serialized = JSON.stringify(await admin.listAudit(adminActor(adminProfile)));

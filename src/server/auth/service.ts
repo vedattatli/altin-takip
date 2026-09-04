@@ -24,7 +24,7 @@ import {
   type UserProfile,
   type UserRole,
 } from "@/auth/types";
-import { validateUsername } from "@/auth/username";
+import { isReservedUsername, validateUsername } from "@/auth/username";
 import type { AuthBackend, ResolvedSession, SessionPolicy, SessionTouch } from "./backend";
 import {
   createAdminActor,
@@ -35,6 +35,7 @@ import {
 import {
   AppError,
   badRequest,
+  conflict,
   forbidden,
   GENERIC_LOGIN_ERROR,
   passwordChangeRequired,
@@ -125,6 +126,80 @@ export class AuthService {
   }
 
   // ---------------------------------------------------------------- giriş
+
+  /**
+   * HERKESE AÇIK KAYIT.
+   *
+   * Ürün kararı (sahibi verdi): siteye giren herkes kendi hesabını açabilir.
+   * Önceki model "hesapları yalnızca yönetici açar" idi.
+   *
+   * BU UÇ İNTERNETE AÇIKTIR; korumalar bu yüzden bilerek sıkı tutuldu:
+   *  - Giriş ucuyla AYNI hız sınırlayıcıdan geçer (IP, kullanıcı adı, çift).
+   *    Aksi hâlde otomatik araçlar sınırsız hesap açardı.
+   *  - Rol İSTEMCİDEN ALINMAZ; her kayıt `user` rolüyle açılır. `admin` rolü
+   *    yalnızca `npm run admin:create` ile verilir.
+   *  - Kullanıcı adı doğrulanır, ayrılmış adlar reddedilir, benzersizdir.
+   *  - Parola politikası giriş/parola değiştirme ile AYNI fonksiyondan geçer.
+   *  - Parola tekrarı sunucuda da denetlenir; istemci kontrolü yeterli değildir.
+   *
+   * `mustChangePassword` KURULMAZ: parolayı kullanıcı kendi seçti, ilk girişte
+   * yeniden sormak anlamsız olurdu (yönetici geçici parola verdiğinde kurulur).
+   *
+   * E-posta veya telefon doğrulaması YOKTUR (uygulamanın böyle bir kanalı yok).
+   * Bunun sonucu açıktır: kullanıcı adı sahipliği doğrulanmaz ve parolasını
+   * unutan kullanıcıyı YALNIZCA yönetici kurtarabilir.
+   */
+  async register(
+    input: { username: string; displayName: string; password: string; passwordConfirm: string },
+    clientKey: string,
+  ): Promise<UserProfile> {
+    const username = validateUsername(input.username ?? "");
+    const buckets = loginRateLimitBuckets(clientKey, username.value, this.loginRateLimits);
+    const decisions = await Promise.all(
+      buckets.map((bucket) => this.rateLimiter.check(bucket.key, bucket.settings)),
+    );
+    const locked = decisions.find((decision) => !decision.allowed);
+    if (locked) throw this.lockedOut(locked.retryAfterMs);
+
+    if (!username.ok) {
+      await this.recordFailure(buckets);
+      throw badRequest(username.error ?? "Kullanıcı adı geçersiz.");
+    }
+    if (isReservedUsername(username.value)) {
+      await this.recordFailure(buckets);
+      throw badRequest("Bu kullanıcı adı sistem tarafından ayrılmıştır.");
+    }
+
+    const displayName = (input.displayName ?? "").trim();
+    if (displayName.length < 2 || displayName.length > 80) {
+      throw badRequest("Görünen ad 2-80 karakter olmalıdır.");
+    }
+
+    if (input.password !== input.passwordConfirm) {
+      throw badRequest("Parolalar birbiriyle eşleşmiyor.");
+    }
+    const policy = validatePassword(input.password ?? "", username.value);
+    if (!policy.ok) {
+      throw badRequest(policy.error ?? "Parola politikaya uymuyor.");
+    }
+
+    const existing = await this.backend.findProfileByUsername(username.value);
+    if (existing) {
+      // Sayaç ilerletilir: kullanıcı adı taraması ücretsiz olmasın.
+      await this.recordFailure(buckets);
+      throw conflict("Bu kullanıcı adı zaten kullanılıyor.");
+    }
+
+    const created = await this.backend.createUser({
+      username: username.value,
+      displayName,
+      temporaryPassword: input.password,
+      role: "user",
+    });
+    // Parolayı kullanıcı seçti; ilk girişte değiştirmesi istenmez.
+    await this.backend.setMustChangePassword(created.id, false);
+    return { ...created, mustChangePassword: false };
+  }
 
   async login(
     rawUsername: string,

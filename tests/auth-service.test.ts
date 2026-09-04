@@ -271,3 +271,93 @@ describe("kendi parolasını değiştirme", () => {
     expect(await service.resolveSession(second.token)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+
+/**
+ * HERKESE AÇIK KAYIT
+ *
+ * Ürün kararı (sahibi verdi): siteye giren herkes kendi hesabını açabilir.
+ * Uç internete açık olduğu için korumaların TAM listesi burada sabitlenir;
+ * biri gevşerse test düşer.
+ */
+describe("herkese açık kayıt", () => {
+  const NEW_PASSWORD = "Kuyumcu7Defter";
+
+  function input(overrides: Record<string, string> = {}) {
+    return {
+      username: "yenikullanici",
+      displayName: "Yeni Kullanıcı",
+      password: NEW_PASSWORD,
+      passwordConfirm: NEW_PASSWORD,
+      ...overrides,
+    };
+  }
+
+  it("hesap açılır ve parola değiştirme İSTENMEZ (parolayı kullanıcı seçti)", async () => {
+    const created = await service.register(input(), CLIENT);
+    expect(created.username).toBe("yenikullanici");
+    expect(created.role).toBe("user");
+    expect(created.mustChangePassword).toBe(false);
+
+    // Kayıttan sonra aynı parolayla giriş yapabilmeli.
+    const result = await service.login("yenikullanici", NEW_PASSWORD, CLIENT);
+    expect(result.user.username).toBe("yenikullanici");
+  });
+
+  /*
+   * ROL İSTEMCİDEN ALINMAZ. Gövdeye `role: "admin"` konsa bile okunmaz;
+   * `register` böyle bir alan kabul etmez ve her kayıt `user` olur.
+   */
+  it("kayıtla yönetici olunamaz", async () => {
+    const created = await service.register(
+      { ...input(), ...({ role: "admin" } as Record<string, string>) },
+      CLIENT,
+    );
+    expect(created.role).toBe("user");
+  });
+
+  it("parola tekrarı SUNUCUDA denetlenir", async () => {
+    await expect(
+      service.register(input({ passwordConfirm: "BaskaBirSey7" }), CLIENT),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("zayıf parola reddedilir (giriş ile AYNI politika)", async () => {
+    await expect(
+      service.register(input({ password: "1234", passwordConfirm: "1234" }), CLIENT),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("ayrılmış kullanıcı adı alınamaz", async () => {
+    // Ayrılmış adlar: root, system, support, api, null, undefined.
+    await expect(service.register(input({ username: "support" }), CLIENT)).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it("aynı kullanıcı adı ikinci kez alınamaz", async () => {
+    await service.register(input(), CLIENT);
+    await expect(service.register(input(), CLIENT)).rejects.toMatchObject({ status: 409 });
+  });
+
+  /*
+   * Uç internete açıktır: hız sınırı OLMAZSA otomatik araçlar sınırsız hesap
+   * açar. Kayıt, giriş ucuyla AYNI sayaçları kullanır.
+   */
+  it("hız sınırına tabidir", async () => {
+    /*
+     * Sayaçlar kullanıcı adı bazlıdır; aynı adla tekrar tekrar denenince
+     * kilitlenir. Testte kombinasyon sayacı 3 denemede kilitleniyor.
+     */
+    await service.register(input(), CLIENT);
+    const attempts: number[] = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const error = await service.register(input(), CLIENT).catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(AppError);
+      attempts.push((error as AppError).status);
+    }
+    // Bir noktadan sonra 409 (çakışma) değil 429 (çok fazla istek) döner.
+    expect(attempts).toContain(429);
+  });
+});
