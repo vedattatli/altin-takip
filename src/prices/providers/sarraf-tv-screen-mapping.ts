@@ -31,7 +31,9 @@ export const SARRAF_TV_SCREEN_MAPPING_VERSION = "sarraf-tv-screen-observed-4";
  *                    yüklediği yanıtta AYRI ALAN ADLARIYLA (buying/sales)
  *                    kanıtlanmış. Değerlemeye girebilir.
  *  GROUPED_EXPLICIT  Kaynak, aynı fiyatın birden çok ürünü kapsadığını AÇIKÇA
- *                    söylüyor. (Bu ekranda böyle bir alan bulunmadı.)
+ *                    söylüyor. Bu ekranda ayrı bir alanla değil, başlığın
+ *                    kendisiyle beyan edilir ("ATA - REŞAT LİRA"); tablo
+ *                    aşağıda: SARRAF_TV_SCREEN_MAPPING_GROUPED.
  *  OPERATOR_VERIFIED Yönetici, ekran kanıtını görüp eşlemeyi açıkça onayladı.
  *  CONVENTION        Başlık yeni/eski ayrımını yazmıyor ("ÇEYREK"). Piyasa
  *                    teamülüdür, kanıt değildir. Onaysız değerlemeye GİRMEZ.

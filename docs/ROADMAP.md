@@ -239,14 +239,60 @@ Ekran normal tarayıcı oturumunda okunabildi; değerler ekranla birebir doğrul
   tek yazar kirası ve fencing jetonu, tek kullanımlık nonce.
 - Portföy bazlı izin listesi ve yönetici eşleme onayları (`0017`).
 - Ağ/DOM çift doğrulaması (açılışta yön, sonra DOM), imza değişiminde fail-closed.
+- Ham ekran satırlarının göründüğü `/kayseri-fiyatlari` sayfası (`0018`); tek yönlü
+  satırlar referans değer olarak, değerlemeye girmeden gösterilir.
+- ÇEYREK / YARIM / TAM eşlemeleri yöneticinin açık onayıyla açıldı
+  (`price_mapping_approve`, `OPERATOR_VERIFIED`); kanıt olarak o an ekranda okunan
+  değerler kullanıldı. `npm run mappings:approve`.
+- Eşleme sürümü 4: "ATA - REŞAT LİRA" / "ATA - REŞAT BEŞLİ" `GROUPED_EXPLICIT`.
+  **Sürüm değişimi eski onayları geçersiz kılar**; onay dağıtım başına yenilenir.
 
 **Kalan (pilot kararı gerektirir, kod işi değil)**
 
-- ÇEYREK / YARIM / TAM satırlarının yönetici onayı — teamül tahmini değerlemeye girmez.
 - Tek fiyatlı satırların (HAS, 22/14/8 AYAR) alış mı satış mı olduğunun teyidi.
-- Uzun süreli dayanıklılık ölçümü (son koşumda fiyat değişimi gözlenmedi).
+  Teyit gelene kadar bu satırlar `EXACT` kalır ve değerlemeye girmez.
+- Günler süren dayanıklılık ölçümü. Ekranın canlı tiklediği kanıtlandı (400 sn'de
+  5 güncelleme), ama uzun koşumda Chromium çökmesi ölçüldü ve `strict` mod bu
+  ortamda geçmiyor. Ayrıntı: [PRICE_SOURCE_STATUS.md](PRICE_SOURCE_STATUS.md) §4.
 - Yayın/lisans izni. Ekran gözlemi ticari yayın hakkı **vermez**; kalıcı çözüm
   lisanslı bir veri sözleşmesidir.
+
+## Hibrit Kayseri değerlemesi ve pilot dağıtımı (Sprint 3.2 devamı)
+
+Tek kaynak yerine **ürün başına sabit kaynak**: karar `src/prices/valuation-plan.ts`
+içinde tek yerdedir ve `tests/valuation-plan.test.ts` ile sabitlenmiştir. Bir ürünün
+alış ve satış fiyatı her zaman aynı kaydın iki alanıdır; planlanan kaynak veri
+vermezse ürün fiyatsız kalır, başka kaynağın fiyatı o ürüne yazılmaz.
+
+- **İkinci kaynak — Kapalıçarşı (`anlik-altin-kapalicarsi`).** Düz `fetch`, tarayıcı
+  yok. Ölçüm: anlikaltinfiyatlari.com'daki KAYSARDER bölümü yalnızca `tv.sarraf.pro`
+  iframe'idir (0 fiyat hücresi); geniş tablo ayrı bir kaynaktır ve Sarraf TV ile üç
+  gözlemde 24 hücrenin 0'ı eşleşti. Bu yüzden ayrı kaynak olarak etiketlendi.
+  [ANLIK_ALTIN_DOGRULAMA.md](ANLIK_ALTIN_DOGRULAMA.md)
+- **Üçüncü kaynak — Trunçgil (`truncgil-turkiye`).** Ücretsiz, anahtarsız açık akış;
+  yalnızca ilk iki kaynakta hiç bulunmayan ürünler için. Kaynağın kendi güncelleme
+  zamanı taşınır (`UPSTREAM`), uydurulmaz.
+- **Arayüz:** varsayılan listede altı ürün, diğerleri "Diğer varlıklar" altında;
+  basit/detaylı görünüm modu; panelde kompakt Kayseri canlı ekranı ve tam ekran
+  iframe. Katalogdan ürün silinmedi.
+- **Lisanssız ≠ uydurma.** "Gerçek piyasa verisi değil" uyarısı yalnızca test
+  sağlayıcısında görünür. Kayseri tezgâh fiyatı gerçektir, yalnızca lisanslı
+  değildir; lisans notu açıklama bölümünde durur.
+- **Şifreli yedek** (AES-256-GCM) günlük dışa aktarım ve geri yükleme provası
+  (`0019`–`0021`); prova geçti.
+- **Bulut fiyat toplayıcısı:** GitHub Actions ile ücretsiz zamanlanmış koşum.
+  [CLOUD_PRICE_COLLECTOR.md](CLOUD_PRICE_COLLECTOR.md)
+- **Uzak erişim izolasyon sondası:** `npm run probe:remote-isolation`.
+- **Özel pilot kapısı:** `private-pilot` ortamı açıkça beyan edilir; deneysel kaynak
+  genel listede görünmez, global varsayılan olamaz.
+- **Üretim dağıtımı yapıldı** (Vercel, `altin-takip-pilot`). Kurulum, doğrulama ve
+  geri alma adımları: [FINAL_DEPLOYMENT.md](FINAL_DEPLOYMENT.md). Alan adı hâlâ yok.
+
+**Doğrulama (2026-09-04):** `npm run verify` temiz — 696 birim testi (37 dosya), üretim
+derlemesi ve istemci paketi taraması ("31 dosya tarandı, secret izi yok"). Playwright:
+305 geçti, 3 atlandı, 1 düştü. Düşen test uygulama hatası değildi: chunk indirilemedi
+(`net::ERR_NO_BUFFER_SPACE` — Windows soket tükenmesi), hydration tamamlanmadı. Aynı test
+tek başına yeniden koşulduğunda 1,1 sn'de geçti.
 
 ## Sprint 4 — Ürün derinleştirme
 
@@ -260,8 +306,10 @@ Ekran normal tarayıcı oturumunda okunabildi; değerler ekranla birebir doğrul
 
 ## Sprint 5 — Operasyon
 
-- Production deployment ve alan adı (bu turda kapsam dışıydı).
-- İzleme, hata takibi ve yedekleme politikası.
+- Kendi alan adı ve HTTPS sertifikası. (Pilot dağıtımı Vercel alt alan adında
+  yayında; bkz. [FINAL_DEPLOYMENT.md](FINAL_DEPLOYMENT.md).)
+- İzleme ve hata takibi. (Şifreli günlük yedek ve geri yükleme provası yapıldı;
+  saklama süresi ve uzak kopya politikası kaldı.)
 - Veri saklama süresi politikasının otomatik uygulanması (KVKK sayfası ve silme talebi akışı
   Sprint 3'te eklendi).
 

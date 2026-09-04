@@ -126,7 +126,7 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run typecheck` | TypeScript tip denetimi |
 | `npm run test` | Birim ve güvenlik yüzeyi testleri (Vitest) |
 | `npm run test:e2e` | Tarayıcı duman ve güvenlik testleri (Playwright, 390/768/1440 px) |
-| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0016 uygular, 242 pgTAP testi koşar (Supabase CLI + Docker) |
+| `npm run test:db` | Veritabanı yetki sınırı, RLS ve muhasebe testleri: temiz DB'ye 0001→0021 uygular, pgTAP testlerini koşar (Supabase CLI + Docker) |
 | `npm run test:data-api` | Gerçek anon / authenticated JWT ile PostgREST üzerinden yazma yüzeyinin kapalı olduğunu doğrular (yerel Supabase) |
 | `npm run verify` | lint + typecheck + test + build + istemci paketi taraması |
 | `npm run package:source` | Temiz kaynak paketi (`dist/Altin-Takip-Source.zip` + SHA-256 + manifest) |
@@ -134,7 +134,13 @@ değişkenlerin eksik olduğunu raporlar.
 | `npm run admin:repair` | Eksik varsayılan portföy/tercih kayıtlarını idempotent biçimde tamamlar (yönetici onarımı) |
 | `npm run accounting:verify` | Defteri yeniden oynatır; türetilmiş pozisyonlar ve Postgres içi doğrulamayla karşılaştırır; tutarsızlıkta başarısız olur |
 | `npm run price:contract` | Sağlayıcı sözleşmesi testleri (fixture). Credential varsa canlı sağlık kontrolü ekler; yoksa eksik DEĞİŞKEN ADLARINI listeleyip NOT_RUN raporlar |
-| `npm run price:sarraf-feasibility` | Sarraf TV Kayseri ekranının normal tarayıcı oturumunda okunup okunamadığını ölçen DENEYSEL fizibilite aracı. Üretim yolunun parçası değildir; CAPTCHA aşmaz, sonucu OK/BLOCKED/UNAVAILABLE/NOT_RUN olarak dürüstçe raporlar |
+| `npm run price:sarraf-feasibility:headed` / `:headless` / `:strict` | Sarraf TV Kayseri ekranının normal tarayıcı oturumunda okunup okunamadığını ölçen DENEYSEL fizibilite aracı. Üretim yolunun parçası değildir; CAPTCHA aşmaz, sonucu OK/PARTIAL_OK/BLOCKED/UNAVAILABLE/NOT_RUN olarak dürüstçe raporlar |
+| `npm run price:truncgil:collect-once` / `price:anlik:collect-once` | Adapter'ı gerçek kaynağa karşı çalıştırır ve çıkan fiyatları yazdırır. **Veritabanına yazmaz**; sözleşme/alan adı/sayı biçimi denetimi içindir |
+| `npm run price:sarraf:collect-once` | Bulut toplayıcının tek seferlik koşumu: ekranı bir kez okur ve imzalı gözlemi HMAC'li makine ucuna **gönderir**. Supabase anahtarı taşımaz |
+| `npm run price:ingest:trigger` | Merkezî fiyat alımını elle tetikler (cron ucu) |
+| `npm run price:match-verify` | Canlı birebir eşleşme denetimi: ekran → toplayıcı → veritabanı → panel zincirinin dördü de aynı değeri gösteriyor mu? Geçici test kullanıcısı açar ve siler |
+| `npm run mappings:approve` | Kayseri ekran eşlemelerini yönetici onayıyla açar (`OPERATOR_VERIFIED`). Ekran gözlemi yoksa hiçbir şey onaylamaz; eşleme sürümü değişince yeniden koşulmalıdır |
+| `npm run probe:remote-isolation` | Canlı Vercel + uzak Supabase üzerinde çapraz kullanıcı erişiminin engellendiğini gerçek HTTPS oturumuyla doğrular; geçici kullanıcı açar ve siler |
 | `npm run price:smoke` | Yalnızca yerel Supabase: katalog eşitleme → alım → karantina → kaynak seçimi yolunu uçtan uca doğrular |
 | `npm run accounting:smoke` | Yalnızca yerel Supabase: gerçek RPC yolundan kabul örneklerini (1, 4, 8, 9, VOID/REPLACE, MARKET_BASELINE) koşar |
 | `npm run staging:doctor` / `staging:migrate` / `staging:smoke` / `staging:seed` / `staging:admin` / `staging:cleanup` / `test:staging` | Staging araçları — bkz. [docs/STAGING.md](docs/STAGING.md). Değerler yazdırılmaz; eksik yapılandırmada fail closed |
@@ -164,15 +170,22 @@ kullanıcı adını içeren parolalar reddedilir.
 
 ## Fiyat verisi
 
-Uygulama **çoklu fiyat kaynağını** destekler. Bu sürümde hiçbir gerçek sağlayıcı lisansı
-yoktur: yalnızca **Test Verisi** çalışır ve arayüzde "Gerçek piyasa verisi değil" etiketiyle
-görünür. Gerçek kaynaklar katalogda tanımlıdır ama `NOT_CONFIGURED` / `LICENSE_REQUIRED`
-durumundadır ve veri çekmez.
+Uygulama **çoklu fiyat kaynağını** destekler. Lisanslı ticari sağlayıcı sözleşmesi yoktur;
+`LICENSE_REQUIRED` kaynaklar veri çekmez ve veritabanı kısıtıyla kapalı durur. Özel pilotta
+üç kaynak `EXPERIMENTAL_PRIVATE` olarak çalışır ve **ürün başına sabit bir planla** kullanılır
+(hibrit Kayseri değerlemesi; hangi ürünün hangi kaynaktan geldiği
+[docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md) içindedir).
+
+**Test Verisi** yalnızca geliştirmede açılır ve arayüzde "Gerçek piyasa verisi değil"
+etiketiyle görünür. Pilot kaynakları bu etiketi taşımaz: verileri gerçektir, yalnızca
+lisanslı değildir — lisanssız olmakla uydurma olmak aynı şey değildir.
 
 | Kaynak | Piyasa | Durum |
 | --- | --- | --- |
 | Test Verisi (MARKET_BASELINE) | Test | Yalnızca geliştirme; üretimde kapalı |
 | Sarraf TV Kayseri (ekran gözlemi) | Kayseri | **Özel pilot** — `EXPERIMENTAL_PRIVATE`, lisanssız, izin listesiyle, sınırlı ürün |
+| Kapalıçarşı Önerilen (Anlık Altın) | Kapalıçarşı | **Özel pilot** — `EXPERIMENTAL_PRIVATE`, düz `fetch`; Kayseri ekranında iki yönlü satırı olmayan gram ürünleri |
+| Türkiye geneli (Trunçgil) | Genel Türkiye | **Özel pilot** — `EXPERIMENTAL_PRIVATE`, ücretsiz açık akış; yalnızca diğer iki kaynakta hiç bulunmayan ürünler |
 | Kayseri Yerel Piyasa (Sarraf Pro — KAYSARDER ekranı) | Kayseri | Yetkili API/XML sözleşmesi bekleniyor |
 | AltinAPI — bağımsız veri sağlayıcısı | Genel Türkiye | Anahtar ve lisans bekleniyor |
 | Hasfiyat — çoklu kaynak | Çoklu Kaynak | Anahtar ve lisans bekleniyor |
@@ -314,7 +327,9 @@ senkronize olmaz.
 | [docs/FINAL_DEPLOYMENT.md](docs/FINAL_DEPLOYMENT.md) | Özel pilotu sıfırdan ayağa kaldırma adımları |
 | [docs/ADMIN_QUICK_START.md](docs/ADMIN_QUICK_START.md) | Yönetici: hesap açma, MFA, izin listesi, eşleme onayı |
 | [docs/USER_QUICK_START.md](docs/USER_QUICK_START.md) | Kullanıcı: giriş, işlem girme, K/Z, fiyat uyarıları |
-| [docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md) | Fiyat kaynaklarının ölçülmüş durumu ve sınırları |
+| [docs/PRICE_SOURCE_STATUS.md](docs/PRICE_SOURCE_STATUS.md) | Fiyat kaynaklarının ölçülmüş durumu, hibrit plan ve sınırları |
+| [docs/ANLIK_ALTIN_DOGRULAMA.md](docs/ANLIK_ALTIN_DOGRULAMA.md) | Kapalıçarşı (Anlık Altın) kaynağının ölçümü ve Sarraf TV'den neden ayrı olduğu |
+| [docs/CLOUD_PRICE_COLLECTOR.md](docs/CLOUD_PRICE_COLLECTOR.md) | Bulut fiyat toplayıcısı: zamanlanmış koşum, secret yönetimi, hata durumları |
 | [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) | Belirti → neden → yapılacak: worker, karantina, geri alma |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Sonraki sprintler |
 | [CLAUDE.md](CLAUDE.md) | Bu depoda çalışan yapay zekâ ajanları için kurallar |
