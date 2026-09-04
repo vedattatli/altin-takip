@@ -636,8 +636,29 @@ export class PriceSourceService {
       this.backend.listPriceProviders(),
       this.resolveActiveProviderCode(actor),
     ]);
+
+    /*
+     * Kullanıcının izinli olduğu PLAN kaynakları da karşılaştırmaya girer.
+     *
+     * Plan kaynakları bilerek "kullanıcıya açık" değildir (genel listede
+     * seçilemezler). Yalnız `userSelectable` bakılsaydı karşılaştırma tablosu
+     * tek sütuna düşer ve kaynaklar arasındaki fark görünmez olurdu — oysa
+     * kullanıcının görmesi gereken tam olarak bu farktır.
+     *
+     * Bu tablo YALNIZCA gösterimdir; değerlemeyi değiştirmez.
+     */
+    const planAllowed = new Set<string>();
+    await Promise.all(
+      PLAN_PROVIDER_CODES.map(async (code) => {
+        const allowed = await this.backend.experimentalAccessAllowed(actor.profile.id, code).catch(() => false);
+        if (allowed) planAllowed.add(code);
+      }),
+    );
+
     const visible = providers.filter(
-      (provider) => provider.enabled && (provider.userSelectable || provider.code === activeProviderCode),
+      (provider) =>
+        provider.enabled &&
+        (provider.userSelectable || provider.code === activeProviderCode || planAllowed.has(provider.code)),
     );
     const rows = await this.backend.comparePriceQuotes(visible.map((provider) => provider.code));
     return {

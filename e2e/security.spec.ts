@@ -226,14 +226,22 @@ test.describe("CSRF ve origin koruması", () => {
     const state = await page.evaluate(() => ({
       meta: document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ?? null,
       cookieVisible: document.cookie.includes("csrf"),
-      localStorageKeys: Object.keys(localStorage).length,
+      localStorageEntries: Object.entries(localStorage).map(([key, value]) => `${key}=${String(value)}`),
       sessionStorageKeys: Object.keys(sessionStorage).length,
     }));
 
     expect(state.meta).toMatch(/^[0-9a-f]{64}$/);
     // Çerez HttpOnly olduğu için JavaScript göremez.
     expect(state.cookieVisible).toBe(false);
-    expect(state.localStorageKeys).toBe(0);
+    /*
+     * Tarayıcı deposunda YALNIZCA görünüm modu tercihi bulunabilir
+     * ("basit" / "detaylı"). Kimlik bilgisi, oturum jetonu, CSRF jetonu veya
+     * portföy verisi hiçbir koşulda yazılmaz — asıl güvence budur.
+     */
+    expect(state.localStorageEntries).toEqual(
+      state.localStorageEntries.filter((entry) => /^altin-takip:gorunum-modu=(basit|detayli)$/.test(entry)),
+    );
+    expect(state.localStorageEntries.length).toBeLessThanOrEqual(1);
     expect(state.sessionStorageKeys).toBe(0);
   });
 });

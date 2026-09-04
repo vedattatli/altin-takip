@@ -5,18 +5,29 @@
 # (ölçüldü: 494 MB `.next` yüzünden yükleme 17 dakika sonra bile bitmedi) ve
 # hiçbirinin sunucuda karşılığı yoktur — Vercel derlemeyi kendisi yapar.
 
+# NOT: Vercel'in yoksayma eşleşmesi sondaki eğik çizgiyle güvenilir
+# çalışmadı (ölçüldü: "test-results/" yazılıyken dosyalar yine yüklendi).
+# Bu yüzden desenler eğik çizgisiz ve ayrıca "**" ile yazılır.
+
 # Yerel derleme çıktısı
-.next/
-out/
+.next
+.next/**
+out
+out/**
 
 # Test çıktıları ve kanıt dosyaları
-test-results/
-playwright-report/
-artifacts/
-.data/
+test-results
+test-results/**
+playwright-report
+playwright-report/**
+artifacts
+artifacts/**
+.data
+.data/**
 
 # Bağımlılıklar (Vercel kendisi kurar)
-node_modules/
+node_modules
+node_modules/**
 
 # Yerel ortam dosyaları — zaten commit edilmez, kazara da gitmesin.
 .env

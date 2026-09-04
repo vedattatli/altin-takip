@@ -195,7 +195,9 @@ async function createTempUser(): Promise<TempUser> {
       must_change_password: false,
     }),
   });
-  await rpc("provision_user_defaults", { p_user_id: created.id });
+  // Portföy ve tercih kayıtları `profiles_provision_defaults` tetikleyicisiyle
+  // otomatik açılır; ayrıca bir RPC çağrısı gerekmez (ve service_role'a
+  // bilerek verilmemiştir).
 
   const admin = (await rest<{ id: string }[]>("/rest/v1/profiles?select=id&role=eq.admin"))[0]!;
   for (const code of PLAN_PROVIDERS) {

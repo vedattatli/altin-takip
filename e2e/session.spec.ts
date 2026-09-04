@@ -121,14 +121,18 @@ test.describe("kalıcı oturum çerezi", () => {
 
     const state = await page.evaluate(async () => ({
       cookie: document.cookie,
-      localStorageKeys: Object.keys(localStorage).length,
+      localStorageEntries: Object.entries(localStorage).map(([key, value]) => `${key}=${String(value)}`),
       sessionStorageKeys: Object.keys(sessionStorage).length,
       databases:
         typeof indexedDB.databases === "function" ? (await indexedDB.databases()).length : 0,
     }));
 
     expect(state.cookie).not.toContain(SESSION_COOKIE_SUFFIX);
-    expect(state.localStorageKeys).toBe(0);
+    // Depoda yalnızca görünüm modu tercihi olabilir; oturum verisi asla.
+    expect(state.localStorageEntries).toEqual(
+      state.localStorageEntries.filter((entry) => /^altin-takip:gorunum-modu=(basit|detayli)$/.test(entry)),
+    );
+    expect(state.localStorageEntries.length).toBeLessThanOrEqual(1);
     expect(state.sessionStorageKeys).toBe(0);
     expect(state.databases).toBe(0);
   });

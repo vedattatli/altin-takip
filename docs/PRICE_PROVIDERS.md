@@ -4,15 +4,34 @@ Uygulama birden çok fiyat kaynağını destekler. Amaç, farklı piyasaların v
 **karıştırmadan**, lisans durumu açıkça bilinen ve kullanıcıya dürüstçe etiketlenen tek bir
 kanonik biçimde sunmaktır.
 
-> Bu sürümde hiçbir gerçek sağlayıcı lisansı yoktur. Bütün gerçek kaynaklar
-> `NOT_CONFIGURED` veya `LICENSE_REQUIRED` durumundadır; yalnızca test verisi çalışır ve
-> arayüzde "Gerçek piyasa verisi değil" etiketiyle görünür.
+> Bu sürümde hiçbir sağlayıcının **yeniden gösterim lisansı** yoktur. Özel pilotta üç
+> kaynak `EXPERIMENTAL_PRIVATE` durumunda ve yalnızca yöneticinin izin verdiği
+> portföylerde çalışır (bkz. bölüm 2). Diğer gerçek sağlayıcılar `NOT_CONFIGURED`
+> veya `LICENSE_REQUIRED` durumundadır.
+>
+> "Lisanssız" ile "uydurma" ayrı şeylerdir: **"Gerçek piyasa verisi değil"** uyarısı
+> yalnızca test sağlayıcısında gösterilir. Kayseri tezgâh fiyatı gerçektir; lisans
+> durumu ayrı bir not olarak yazılır.
 
 ## 1. Değişmez kurallar
 
-- **Scraping yok.** KAYSARDER, Sarraf TV, Altınkaynak ve Harem sayfaları scrape edilmez;
-  gizli/özel WebSocket trafiği reverse engineer edilmez. Yalnızca resmî/yetkili API veya XML
-  sözleşmesi kullanılır.
+- **Serbest scraping yok.** DOM kütüphanesiyle (cheerio/jsdom/querySelector) sayfa
+  ayrıştırma hiçbir sağlayıcıda yapılmaz ve bu bir testle sabitlenmiştir
+  (`tests/price-providers.test.ts`). Gizli/özel WebSocket trafiği reverse engineer
+  edilmez.
+
+  **Özel pilotta iki daraltılmış istisna vardır ve ikisi de açıkça belgelidir:**
+
+  1. `anlik-altin-kapalicarsi` — herkese açık bir sayfadaki **tek bir tabloyu**
+     okur. Okunacak blok üç işaretle birden doğrulanır (market numarası,
+     `data-type`, tablo kimliği); biri tutmazsa fail closed olunur ve "benzeyen"
+     başka bir tablo okunmaz. Sembol listesi açık beyaz listedir.
+  2. `sarraf-tv-kayseri-screen` — bayi fiyatı yalnız tarayıcıda hesaplandığı için
+     ekran gözlemi yapılır. Bu kaynak sağlayıcı katmanından veri çekmez; ayrı bir
+     bulut toplayıcı imzalı gözlemi makine ucuna gönderir.
+
+  İkisi de `EXPERIMENTAL_PRIVATE`'tır, genel kullanıcı listesine **açılamaz**
+  (veritabanı kısıtı da engeller) ve lisanslı sayılmaz.
 - **Hayali endpoint yok.** Sözleşmesi bilinmeyen kaynak için adres yazılmaz; taban adres
   operatörün elindeki sözleşmeden `*_API_URL` ile gelir. Adres yoksa sağlayıcı veri çekmez.
 - **Fail closed.** Yeniden gösterim izni (`*_REDISTRIBUTION_ALLOWED`) açıkça `true` değilse
@@ -36,6 +55,14 @@ kanonik biçimde sunmaktır.
 | `altinkaynak-direct` | Altınkaynak (doğrudan) | Resmî API sözleşmesi bekleniyor | Genel Türkiye | `LICENSE_REQUIRED` — adapter kapalı |
 | `harem-direct` | Harem Altın (doğrudan) | Resmî API sözleşmesi bekleniyor | Genel Türkiye | `LICENSE_REQUIRED` — adapter kapalı |
 | `bist-reference` | BIST Referans (yalnızca kontrol) | BIST — referans/anomali | BIST | `LICENSE_REQUIRED`, `REFERENCE_ONLY` |
+| `sarraf-tv-kayseri-screen` | Kayseri Yerel Piyasa | Sarraf TV Kayseri ekran gözlemi | Kayseri | `EXPERIMENTAL_PRIVATE` — izin listesi; genel listeye açılamaz |
+| `anlik-altin-kapalicarsi` | Kapalıçarşı Referansı | anlikaltinfiyatlari.com — Kapalıçarşı Önerilen tablosu | Kapalıçarşı | `EXPERIMENTAL_PRIVATE` — izin listesi |
+| `truncgil-turkiye` | Genel Türkiye | Truncgil açık finans akışı | Genel Türkiye | `EXPERIMENTAL_PRIVATE` — izin listesi |
+
+**Anlık Altın** sayfasının adresi `/altin/kayseri` olsa da okunan tablo **Kapalıçarşı**
+verisidir (`data-type="harem"`), Kayseri tezgâh fiyatı değildir. Aynı sayfadaki
+"KAYSARDER" sekmesi yalnızca `tv.sarraf.pro` iframe'idir ve içinde tek bir fiyat
+hücresi yoktur. Ölçüm ayrıntısı: `docs/ANLIK_ALTIN_DOGRULAMA.md`.
 
 **KAYSARDER**'ın resmî adı **Kayseri Sarraflar ve Kuyumcular Derneği**'dir ("Kuyumcular Odası"
 değildir). Derneğin fiyat sayfası, canlı ekranı `tv.sarraf.pro` üzerinden yayımlar. Dernek, bu

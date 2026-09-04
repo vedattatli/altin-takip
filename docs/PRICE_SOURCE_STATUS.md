@@ -17,6 +17,8 @@ farklar bölüm 4'te olduğu gibi yazılıdır. Tek koşumu "kesin davranış" s
 | --- | --- | --- | --- |
 | MARKET_BASELINE | `market-baseline` | `DEV_ONLY` | Evet — maliyet tabanı ve testler için. Gerçek piyasa verisi **değildir**. |
 | Sarraf TV Kayseri (ekran) | `sarraf-tv-kayseri-screen` | `EXPERIMENTAL_PRIVATE` | Evet — yalnızca izin listesindeki kullanıcıda, yalnızca aşağıdaki ürünlerde. |
+| Kapalıçarşı Önerilen (Anlık Altın) | `anlik-altin-kapalicarsi` | `EXPERIMENTAL_PRIVATE` | Evet — Gram Altın için. Bkz. `docs/ANLIK_ALTIN_DOGRULAMA.md`. |
+| Türkiye geneli (Truncgil) | `truncgil-turkiye` | `EXPERIMENTAL_PRIVATE` | Evet — yalnız ilk iki kaynakta hiç bulunmayan ürünler için. |
 | Sarraf Pro Kayseri | `sarraf-pro-kayseri` | `LICENSE_REQUIRED` | Hayır — sözleşme ve API anahtarı yok. |
 | AltınAPI | `altinapi` | `LICENSE_REQUIRED` | Hayır. |
 | HasFiyat | `hasfiyat` | `LICENSE_REQUIRED` | Hayır. |
@@ -25,6 +27,23 @@ farklar bölüm 4'te olduğu gibi yazılıdır. Tek koşumu "kesin davranış" s
 Lisanssız kaynaklar veritabanı kısıtıyla kapalıdır
 (`price_providers_enabled_requires_license`). Anahtar eklemek yetmez; lisans
 durumu kod ve veritabanında ayrıca işaretlenmelidir.
+
+### Hangi ürün hangi kaynaktan (hibrit plan)
+
+Tek kaynak yerine ÜRÜN BAŞINA sabit kaynak kullanılır. Karar `src/prices/valuation-plan.ts`
+içindedir ve `tests/valuation-plan.test.ts` ile sabitlenmiştir.
+
+| Ürün | Kaynak | Gerekçe |
+| --- | --- | --- |
+| Gram Altın | Kapalıçarşı — Anlık Altın | Kayseri ekranında gram altının iki yönlü satırı yok |
+| Çeyrek / Yarım / Tam | Kayseri — Sarraf TV | Ekranda iki yönlü, yönetici onaylı kategori fiyatı |
+| Ata Altın | Kayseri — Sarraf TV | "ATA - REŞAT LİRA" satırı iki ürünü açıkça sayar (GROUPED_EXPLICIT) |
+| Gremse Altın | Kayseri — Sarraf TV | Ekranda iki yönlü satır |
+| Cumhuriyet, Hamit, İkibuçuk, 18 Ayar | Türkiye geneli — Trunçgil | İlk iki kaynakta hiç yok |
+| Külçe (24 ayar / özel), 22 Ayar Bilezik, 8 Ayar | **Yok** | Hiçbir kaynak iki yönlü fiyat yayımlamıyor; türetilmez |
+
+Bir ürünün alış ve satış fiyatı **her zaman aynı kaydın iki alanıdır**. Planlanan
+kaynak veri vermezse ürün fiyatsız kalır; başka kaynağın fiyatı o ürüne yazılmaz.
 
 ---
 

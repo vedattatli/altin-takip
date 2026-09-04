@@ -446,7 +446,7 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Cumhuriyet Altını", quantity: "3", unitPrice: "38500" });
+    await addPurchase(page, { product: "Tam Altın", quantity: "3", unitPrice: "38500" });
 
     for (const path of ["/panel", "/islemler", "/islemler?ekle=mevcut", "/islemler?ekle=satis", "/ayarlar"]) {
       await gotoReady(page, path);
