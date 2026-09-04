@@ -203,8 +203,19 @@ export class TruncgilProvider extends BaseProvider {
         liquidationPrice: liquidation,
         replacementPrice: replacement,
         currency: "TRY",
-        // Kaynak zaman dilimi yazmıyor; damga BİZİM yorumumuzdur.
-        providerTimestamp: null,
+        /*
+         * ZAMAN DAMGASI
+         *
+         * Kaynak, yanıtın kökünde KENDİ güncelleme zamanını yayımlar
+         * (`Update_Date`). Bu yüzden damga tamamen bizim uydurmamız değildir
+         * ve taşınır — veritabanındaki ikinci savunma hattı da fiyatın
+         * zamanını bilmek zorundadır.
+         *
+         * Ama kaynak SAAT DİLİMİ yazmıyor; +03:00 varsayımı BİZİM
+         * yorumumuzdur. Bu yüzden köken "PROVIDER" değil "OBSERVED" olarak
+         * işaretlenir ve arayüzde sağlayıcının kesin damgası gibi sunulmaz.
+         */
+        providerTimestamp: observedAt,
         timestampProvenance: "OBSERVED",
         fetchedAt: observedAt,
         status: "ok",
