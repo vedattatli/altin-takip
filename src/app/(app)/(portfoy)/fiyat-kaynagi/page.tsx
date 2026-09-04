@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { PriceListView } from "@/components/price-list-view";
 import { PriceSourcesView } from "@/components/price-sources-view";
 import { PriceTabs } from "@/components/price-tabs";
 import { getPriceSourceService, requireUsableUser } from "@/server/auth";
@@ -17,8 +18,13 @@ export default async function PriceSourcePage() {
     service.compareSources(actor),
   ]);
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PriceTabs />
+      {/*
+        Fiyatlar ÖNCE gelir: kullanıcı bu sayfaya "ne kaça alınıp satılıyor"
+        diye bakar. Kaynak seçimi ve karşılaştırma altta kalır.
+      */}
+      <PriceListView snapshot={active.snapshot} />
       <PriceSourcesView
         initialOptions={options}
         initialActive={active.source}

@@ -103,10 +103,26 @@ describe("1. plan bütünlüğü", () => {
     expect(plannedProviderFor("gremse-altin")).toBe(SCREEN_PROVIDER_CODE);
   });
 
-  it("hiçbir kaynakta iki yönlü fiyatı olmayan ürünler planda YOKTUR", () => {
-    for (const productId of ["kulce-24-ayar", "kulce-ozel-gramaj", "bilezik-22-ayar", "altin-8-ayar"]) {
+  /*
+   * Bu ürünler için hiçbir kaynak DÜRÜST bir iki yönlü fiyat yayımlamıyor.
+   * Ölçüm (2026-09-04):
+   *   14 ayar  Kapalıçarşı %32, Altınkaynak %14 makas → alış hurda, satış
+   *            işçilikli perakende; Trunçgil %0,1 → referans kuru, tezgâh değil
+   *   22 ayar bilezik  kaynaktaki satır 222.238/241.500 → gram fiyatı değil
+   *   8 ayar   hiçbir kaynakta yok
+   *   özel gramaj külçe  toptan külçe fiyatı STANDART külçeyedir; özel
+   *            gramajın primi farklıdır, aynı fiyat yazılamaz
+   *
+   * Bunları bağlamak "veri var" olmaz, YANLIŞ veri olur.
+   */
+  it("dürüst iki yönlü fiyatı olmayan ürünler planda YOKTUR", () => {
+    for (const productId of ["kulce-ozel-gramaj", "bilezik-22-ayar", "altin-8-ayar", "altin-14-ayar"]) {
       expect(plannedProviderFor(productId), productId).toBeNull();
     }
+  });
+
+  it("külçe artık toptan tablosundan fiyatlanır", () => {
+    expect(plannedProviderFor("kulce-24-ayar")).toBe("anlik-altin-kapalicarsi");
   });
 });
 

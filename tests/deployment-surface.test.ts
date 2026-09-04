@@ -105,13 +105,33 @@ describe("kimlik bilgisi ve portföy verisi tarayıcı deposuna yazılmaz", () =
    * yalnızca iki sabit değerden birini yazdığını ayrıca kanıtlar.
    */
   const VIEW_MODE_FILE = join("src", "state", "view-mode.tsx");
+  const NOTICE_FILE = join("src", "components", "dismissible-notice.tsx");
 
-  it("localStorage veya sessionStorage kullanılmaz", () => {
+  /*
+   * Web deposu YALNIZCA iki dosyada ve YALNIZCA arayüz tercihi için kullanılır:
+   * görünüm modu ve kapatılmış bilgilendirmeler. İkisi de cihaz başına, hassas
+   * OLMAYAN veridir. Kimlik bilgisi, oturum jetonu veya portföy verisi hiçbir
+   * koşulda yazılmaz; aşağıdaki iki test bunu ayrıca kanıtlar.
+   */
+  const STORAGE_ALLOWED = [VIEW_MODE_FILE, NOTICE_FILE];
+
+  it("localStorage yalnızca izin verilen iki arayüz tercihinde kullanılır", () => {
     // Yorumlar ayıklanır: denetlenen şey kural metni değil, çalışan koddur.
     const offenders = SOURCE_FILES.filter(
-      (file) => file !== VIEW_MODE_FILE && /\b(localStorage|sessionStorage)\b/.test(readCode(file)),
+      (file) =>
+        !STORAGE_ALLOWED.includes(file) && /\b(localStorage|sessionStorage)\b/.test(readCode(file)),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("kapatılan bilgilendirme deposu yalnızca sabit bir bayrak tutar", () => {
+    const code = readCode(NOTICE_FILE);
+    expect(code).toContain('const PREFIX = "altin-takip:notice:"');
+    // Tek yazma noktası, tek tür değer.
+    expect(code.match(/localStorage\.setItem\(/gu)).toHaveLength(1);
+    expect(code).toContain('window.localStorage.setItem(PREFIX + id, "1")');
+    // Kimlik bilgisi, oturum veya portföy verisi ADI BİLE geçmez.
+    expect(code).not.toMatch(/token|password|parola|session|portfolio|portfoy|quantity|cost/i);
   });
 
   it("görünüm modu deposu yalnızca iki sabit değer tutar", () => {

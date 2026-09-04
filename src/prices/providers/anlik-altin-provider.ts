@@ -8,7 +8,13 @@ import {
 import { requireProviderDescriptor } from "../descriptors";
 import { detectNumberFormat, parseScreenNumber, type NumberFormat } from "../number-format";
 import { BaseProvider, hashPayload } from "./base";
-import { ANLIK_ALTIN_MAPPING, ANLIK_ALTIN_MAPPING_VERSION, ANLIK_ALTIN_TABLE_CONTRACT } from "./mappings";
+import {
+  ANLIK_ALTIN_MAPPING,
+  ANLIK_ALTIN_MAPPING_VERSION,
+  ANLIK_ALTIN_TABLE_CONTRACT,
+  ANLIK_ALTIN_WHOLESALE_CONTRACT,
+  ANLIK_ALTIN_WHOLESALE_MAPPING,
+} from "./mappings";
 
 /**
  * ANLIK ALTIN — "KAPALIÇARŞI ÖNERİLEN" TABLOSU
@@ -96,8 +102,10 @@ function sliceMarketBlock(html: string, market: string): string {
  * Blok bulunamaz veya işaretler tutmazsa boş satır listesi döner; hiçbir
  * koşulda başka bir bloğa geçilmez.
  */
-export function parseAnlikAltinTable(html: string): AnlikAltinTable {
-  const contract = ANLIK_ALTIN_TABLE_CONTRACT;
+export function parseAnlikAltinTable(
+  html: string,
+  contract: { market: string; dataType: string; tableId: string } = ANLIK_ALTIN_TABLE_CONTRACT,
+): AnlikAltinTable {
   const block = sliceMarketBlock(html, contract.market);
   const dataType =
     new RegExp(`<div data-market="${contract.market}"[^>]*data-type="([^"]*)"`, "u").exec(html)?.[1] ?? null;
@@ -127,12 +135,11 @@ export function parseAnlikAltinTable(html: string): AnlikAltinTable {
 }
 
 /** Blok gerçekten beklediğimiz tablo mu? Üç işaret de tutmalıdır. */
-export function tableContractOk(table: AnlikAltinTable): boolean {
-  return (
-    table.dataType === ANLIK_ALTIN_TABLE_CONTRACT.dataType &&
-    table.tableId === ANLIK_ALTIN_TABLE_CONTRACT.tableId &&
-    table.rows.length > 0
-  );
+export function tableContractOk(
+  table: AnlikAltinTable,
+  contract: { dataType: string; tableId: string } = ANLIK_ALTIN_TABLE_CONTRACT,
+): boolean {
+  return table.dataType === contract.dataType && table.tableId === contract.tableId && table.rows.length > 0;
 }
 
 /**
@@ -213,7 +220,7 @@ export class AnlikAltinProvider extends BaseProvider {
   }
 
   listSupportedProducts(): readonly string[] {
-    return [...new Set(Object.values(ANLIK_ALTIN_MAPPING))];
+    return [...new Set([...Object.values(ANLIK_ALTIN_MAPPING), ...Object.values(ANLIK_ALTIN_WHOLESALE_MAPPING)])];
   }
 
   /** Zaman damgası satırın kendisindedir; tekil normalleştirme kullanılmaz. */
@@ -275,8 +282,28 @@ export class AnlikAltinProvider extends BaseProvider {
     const quotes: NormalizedQuote[] = [];
     const seen = new Set<string>();
 
-    for (const row of table.rows) {
-      const productId = ANLIK_ALTIN_MAPPING[row.key];
+    /*
+     * İKİNCİ TABLO — YALNIZCA KÜLÇE.
+     *
+     * Ana tabloda (kapalicarsi_h) külçe satırı YOKTUR; toptan bloğunda vardır
+     * ve makası %1,3 ile gerçek bir bayi makasıdır. Aynı bloktaki 18/14 ayar
+     * satırları BİLEREK alınmaz: alış tarafı hurda, satış tarafı işçilikli
+     * perakende olduğu için %14-18 makas veriyorlar (bkz. mappings.ts).
+     *
+     * Sözleşme ayrıca doğrulanır: blok işaretleri tutmazsa o tablo hiç
+     * okunmaz, ana tablodan gelen fiyatlar etkilenmez.
+     */
+    const wholesale = parseAnlikAltinTable(html, ANLIK_ALTIN_WHOLESALE_CONTRACT);
+    const wholesaleRows = tableContractOk(wholesale, ANLIK_ALTIN_WHOLESALE_CONTRACT)
+      ? wholesale.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_WHOLESALE_MAPPING }))
+      : [];
+
+    for (const entry of [
+      ...table.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_MAPPING })),
+      ...wholesaleRows,
+    ]) {
+      const row = entry.row;
+      const productId = entry.mapping[row.key];
       // Beyaz listede olmayan sembol SESSİZCE başka ürüne yazılmaz, atlanır.
       if (productId === undefined) continue;
       if (seen.has(productId)) continue;

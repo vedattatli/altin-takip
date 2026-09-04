@@ -34,6 +34,7 @@ import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
 import { PortfolioChart } from "./portfolio-chart";
 import { PriceSourceLine } from "./price-source-line";
+import { DismissibleNotice } from "./dismissible-notice";
 import { Card, DeltaValue, EmptyState, Explain, SectionTitle, cx, moneySizeClass } from "./ui";
 
 const PRICE_UNAVAILABLE = PRICE_UNAVAILABLE_LABEL;
@@ -460,28 +461,31 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
       </div>
 
       {/*
-        BU BİR BİLDİRİM DEĞİL, RAKAMIN ETİKETİDİR — bu yüzden kaybolmaz.
-        
-        Kullanıcı "5-10 saniye sonra kapansın" dedi; kapatmadım çünkü kutu bir
-        olayı ("kayıt eklendi") değil, ekranda DURAN kâr/zarar sayısının ne
-        anlama geldiğini anlatıyor. Kutu gidip sayı kalsaydı, kullanıcı onu
-        gerçek tarihsel maliyete dayalı bir kâr/zarar sanırdı.
-        
-        Yerine yer kaplaması küçültüldü: koca paragraf yerine tek satır
-        rozet + isteyen açar. Uyarı hâlâ orada, ama ekranı işgal etmiyor.
+        KAPATILABİLİR.
+
+        Kullanıcı haklıydı: bilgilendirme kutusu ekranda sonsuza kadar durmaz.
+        Kapatmak burada güvenli, çünkü uyarının ÖZÜ zaten kâr/zarar kartının
+        kendi etiketinde yazıyor ("Takip başlangıcından itibaren K/Z"). Kutu
+        gitse de sayı yanlış okunmuyor.
+
+        Aşağıdaki "fiyat verisi kullanılamıyor" uyarısı ise KAPATILAMAZ: o,
+        ekrandaki sayının neden EKSİK olduğunu söyler; kapanırsa kullanıcı
+        eksik bir toplamı tam sanır.
       */}
       {summary.hasEstimatedOrBaseline ? (
-        <Explain
-          title={`${PNL_LABELS.SINCE_TRACKING_START} — neden?`}
+        <DismissibleNotice
+          id="pnl-tracking-start-v1"
           className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3 py-2"
           testId="pnl-label-notice"
         >
-          <span>
-            {summary.holdingHasEstimatedOrBaseline
-              ? "Portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
-              : "Elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
-          </span>
-        </Explain>
+          <Explain title={`${PNL_LABELS.SINCE_TRACKING_START} — neden?`}>
+            <span>
+              {summary.holdingHasEstimatedOrBaseline
+                ? "Portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
+                : "Elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
+            </span>
+          </Explain>
+        </DismissibleNotice>
       ) : null}
 
       {noPrices ? (

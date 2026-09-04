@@ -148,7 +148,7 @@ export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
 
 // ---------------------------------------------------------------------------
 
-export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-4";
+export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-5";
 
 /**
  * ANLIK ALTIN "KAPALIÇARŞI ÖNERİLEN" TABLOSU → KANONİK ÜRÜNLER
@@ -228,6 +228,38 @@ export const ANLIK_ALTIN_MAPPING: Readonly<Record<string, string>> = {
  * Bu üç değer birlikte doğrulanır. Sayfa yeniden düzenlenir ve blok kayarsa
  * fail closed olunur; "yakın görünen" başka bir tablo okunmaz.
  */
+/**
+ * İKİNCİ TABLO — ALTINKAYNAK (TOPTAN) BLOĞU
+ *
+ * SÜRÜM 5'TE EKLENDİ, YALNIZCA KÜLÇE İÇİN.
+ *
+ * Sayfada üç blok var; ikisi okunur:
+ *   data-market="5" data-type="harem"   id="kapalicarsi_h"  → ana tablo
+ *   data-market="3" data-type="kuyumcu" id="altinkaynak"    → BU TABLO
+ *
+ * Bu tablodan YALNIZCA "Külçe Toptan" alınır. Ölçüm (2026-09-04):
+ *   Külçe Toptan   6716,20 / 6805,06   makas %1,3  → gerçek bayi makası ✓
+ *
+ * Aynı tablodaki DİĞER satırlar BİLEREK alınmaz:
+ *   18 Ayar   4655,94 / 5475     makas %17,6  → alış hurda, satış perakende
+ *   14 Ayar   3814,86 / 4355     makas %14    → aynı sorun
+ *   22 Ayar Bilezik 222.238 / 241.500        → gram fiyatı değil, ölçek belirsiz
+ *
+ * Bu satırları bağlamak "veri var" olmaz, YANLIŞ veri olur: kullanıcının
+ * 14 ayarını %14 şişik gösterirdi. Kalite kapısı zaten reddediyor; eşlemeye
+ * hiç koymamak karantina gürültüsünü de önler.
+ */
+export const ANLIK_ALTIN_WHOLESALE_CONTRACT = {
+  market: "3",
+  dataType: "kuyumcu",
+  tableId: "altinkaynak",
+} as const;
+
+/** Toptan tablosundan alınan semboller. Beyaz liste AÇIKTIR. */
+export const ANLIK_ALTIN_WHOLESALE_MAPPING: Readonly<Record<string, string>> = {
+  Hkulce_toptan: "kulce-24-ayar",
+};
+
 export const ANLIK_ALTIN_TABLE_CONTRACT = {
   market: "5",
   dataType: "harem",

@@ -71,7 +71,7 @@ export type PlanProviderCode = (typeof PLAN_PROVIDER_CODES)[number];
  *                 banka/döviz bürosu tezgâh fiyatı değildir)
  *
  * HİÇBİR KAYNAKTA OLMAYANLAR (bilerek fiyatsız):
- *   kulce-24-ayar, kulce-ozel-gramaj — hiçbir kaynak külçe satırı yayımlamıyor
+ *   kulce-ozel-gramaj — gramajı belirsiz; toptan külçe fiyatı standart külçeyedir
  *   bilezik-22-ayar                  — Kapalıçarşı'daki "22 Ayar Altın" hurda
  *                                      fiyatıdır; bilezik İŞÇİLİK payı taşır ve
  *                                      aynı fiyattan alınıp satılmaz. Hurda
@@ -99,6 +99,7 @@ export const VALUATION_SOURCE_PLAN: Readonly<Record<string, PlanProviderCode>> =
 
   // --- Kapalıçarşı referansı ---
   "gram-altin": KAPALICARSI_PROVIDER_CODE,
+  "kulce-24-ayar": KAPALICARSI_PROVIDER_CODE,
   "has-altin": KAPALICARSI_PROVIDER_CODE,
   "altin-22-ayar": KAPALICARSI_PROVIDER_CODE,
 
