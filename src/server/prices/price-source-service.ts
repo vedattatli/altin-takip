@@ -124,6 +124,13 @@ export interface ActiveSnapshotResult {
   source: ActiveSourceView;
 }
 
+/**
+ * Etkinleştirilebilir lisans durumları — veritabanı kısıtı
+ * (`price_providers_enabled_requires_license`) ve `setPriceProviderFlags` ile
+ * AYNI liste. Üç yerde ayrı ayrı yazılırsa biri diğerinden sapar.
+ */
+const ACTIVATABLE_LICENSE_STATUS: readonly string[] = ["LICENSED", "DEV_ONLY", "EXPERIMENTAL_PRIVATE"];
+
 export class PriceSourceService {
   constructor(
     private readonly backend: AuthBackend,
@@ -689,6 +696,20 @@ export class PriceSourceService {
     (Awaited<ReturnType<AuthBackend["listPriceProviders"]>>[number] & {
       runtimeLicenseStatus: string;
       selectable: boolean;
+      /**
+       * Bu kaynak ETKİNLEŞTİRİLEBİLİR mi? `selectable` ile karıştırılmamalıdır:
+       * `selectable` "kullanıcı genel listeden seçebilir mi", `canEnable` ise
+       * "sistem bu kaynaktan fiyat çekebilir mi" demektir.
+       *
+       * Deneysel kaynakta `selectable` HER ZAMAN false'tur (genel listeye
+       * çıkmaz) ama etkinleştirilebilir. Yönetim ekranı ikisini karıştırdığı
+       * için deneysel bir kaynak arayüzden hiç açılamıyordu: düğme sürekli
+       * devre dışıydı, üretimde Kapalıçarşı kaynağı bu yüzden kapalı kaldı ve
+       * gram altın fiyatsız göründü.
+       *
+       * Kural sunucudakiyle (`setPriceProviderFlags`) aynıdır.
+       */
+      canEnable: boolean;
       blockedReason: string | null;
       missingConfig: readonly string[];
       /** Sağlayıcının sunduğunu söylediği ama bizde adapter'ı OLMAYAN yetenekler. */
@@ -705,6 +726,9 @@ export class PriceSourceService {
         ...row,
         runtimeLicenseStatus: view?.licenseStatus ?? row.licenseStatus,
         selectable: view?.selectable ?? false,
+        canEnable:
+          ACTIVATABLE_LICENSE_STATUS.includes(row.licenseStatus) &&
+          !(row.licenseStatus === "LICENSED" && !row.redistributionAllowed),
         blockedReason: view?.blockedReason ?? null,
         missingConfig: view?.missingConfig ?? [],
         advertisedCapabilities: view?.advertisedCapabilities ?? [],

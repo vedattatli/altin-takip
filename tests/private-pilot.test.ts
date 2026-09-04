@@ -440,6 +440,44 @@ describe("5. sağlayıcı kimliği ve güvenlik yüzeyi", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("5b. deneysel kaynak yönetim ekranından ETKİNLEŞTİRİLEBİLİR", () => {
+  /*
+   * ÜRETİMDE YAŞANDI: Kapalıçarşı kaynağı kapalı kaldı, gram altın fiyatsız
+   * göründü ve yönetici kaynağı açamadı — "Etkinleştir" düğmesi sürekli devre
+   * dışıydı. Sebep iki ayrı kavramın karışmasıydı:
+   *
+   *   selectable : kullanıcı GENEL listeden seçebilir mi?  (deneyselde HEP false)
+   *   canEnable  : sistem bu kaynaktan fiyat ÇEKEBİLİR mi? (deneyselde true)
+   *
+   * Arayüz düğmeyi `selectable`e bakarak kapatıyordu. Sunucu ve veritabanı
+   * kısıtı ise etkinleştirmeye izin veriyordu.
+   */
+  it("deneysel kaynak: selectable false ama canEnable true", async () => {
+    const ingestion = new PriceIngestionService(backend);
+    await ingestion.syncCatalog();
+    const rows = await new PriceSourceService(backend).adminProviderState();
+
+    for (const code of PLAN_PROVIDER_CODES) {
+      const row = rows.find((candidate) => candidate.code === code);
+      expect(row, code).toBeDefined();
+      expect(row?.licenseStatus, code).toBe("EXPERIMENTAL_PRIVATE");
+      expect(row?.selectable, `${code}: genel listede seçilebilir GÖRÜNMEMELİ`).toBe(false);
+      expect(row?.canEnable, `${code}: yönetici etkinleştirebilmeli`).toBe(true);
+    }
+  });
+
+  it("lisanssız kaynak etkinleştirilemez", async () => {
+    const ingestion = new PriceIngestionService(backend);
+    await ingestion.syncCatalog();
+    const rows = await new PriceSourceService(backend).adminProviderState();
+    const licenseRequired = rows.filter((row) => row.licenseStatus === "LICENSE_REQUIRED");
+    expect(licenseRequired.length).toBeGreaterThan(0);
+    for (const row of licenseRequired) {
+      expect(row.canEnable, row.code).toBe(false);
+    }
+  });
+});
+
 describe("6. worker ucu tarayıcı yüzeyinden ayrıdır", () => {
   it("proxy worker yoluna CSRF çerezi BASMAZ", async () => {
     // 3.1'de cron ucunda aynı hata vardı: middleware makine yanıtına çerez

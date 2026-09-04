@@ -23,6 +23,12 @@ export interface AdminProviderRow {
   providerType: string;
   enabled: boolean;
   userSelectable: boolean;
+  /**
+   * "Sistem bu kaynaktan fiyat çekebilir mi" — `selectable` ("kullanıcı genel
+   * listeden seçebilir mi") ile KARIŞTIRILMAMALIDIR. Deneysel kaynakta
+   * `selectable` her zaman false'tur ama kaynak etkinleştirilebilir.
+   */
+  canEnable: boolean;
   licenseStatus: string;
   licenseReference: string | null;
   redistributionAllowed: boolean;
@@ -291,7 +297,7 @@ export function AdminPriceSourcesView({
                 <button
                   type="button"
                   className={cx("btn min-h-9 px-2.5 py-1 text-xs", provider.enabled ? "btn-secondary" : "btn-primary")}
-                  disabled={busy !== null || (!provider.enabled && !provider.selectable)}
+                  disabled={busy !== null || (!provider.enabled && !provider.canEnable)}
                   data-testid={`toggle-${provider.code}`}
                   onClick={() =>
                     void run(provider.code, async () => {
