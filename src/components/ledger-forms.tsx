@@ -25,8 +25,7 @@ import type { GoldProduct } from "@/domain/types";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
 import { usableQuoteOrNull } from "@/prices/validate";
-import { displayProductName, isPrimaryProduct, PRIMARY_DISPLAY_GROUPS } from "@/prices/valuation-plan";
-import { usePortfolio } from "@/state/portfolio-store";
+import { displayProductName, PRIMARY_DISPLAY_GROUPS } from "@/prices/valuation-plan";
 import { marketLabel, useClientClock } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
@@ -46,17 +45,19 @@ function firstErrorText(errors: CommandErrors): string | null {
 }
 
 /**
- * ALTIN TÜRÜ SEÇİMİ — SADE LİSTE
+ * ALTIN TÜRÜ SEÇİMİ — KATALOĞUN TAMAMI
  *
- * İlk ve varsayılan liste ALTI üründen oluşur. Katalogdaki diğer ürünler
- * silinmez; ama yeni kayıt açarken kalabalık yapmasın diye varsayılan listede
- * görünmezler.
+ * Liste iki bölümdür:
+ *  1. En sık kullanılan ALTI ürün üstte, tek tıkla ulaşılsın diye.
+ *  2. "Tüm altın türleri" altında katalogdaki DİĞER BÜTÜN ürünler.
  *
- * İKİ İSTİSNA VARDIR VE ZORUNLUDUR:
- *  1. Kullanıcının ELİNDE olan gizli bir ürün listeye eklenir — yoksa o
- *     varlığı satamaz ve kayıt kilitlenirdi.
- *  2. DÜZELTİLEN kaydın ürünü listeye eklenir — yoksa düzeltme formu ürünü
- *     sessizce başka bir ürüne çevirirdi.
+ * Önceden yalnızca altı ürün ve kullanıcının ELİNDE OLANLAR listeleniyordu.
+ * Sonucu şuydu: elinde olmayan bir ürünü satın alamıyordun — listede
+ * bulunmadığı için kayıt açılamıyordu. Sadeleştirme, ürün eklemeyi
+ * engellememelidir.
+ *
+ * Grup üyeleri (yeni/eski çeyrek gibi) ayrı ayrı görünür ve katalog adı
+ * parantezde yazılır; aksi hâlde iki farklı ürün aynı satır gibi okunurdu.
  */
 function ProductSelect({
   id,
@@ -71,30 +72,21 @@ function ProductSelect({
   error?: string;
   disabled?: boolean;
 }) {
-  const { summary } = usePortfolio();
-
   const options = useMemo(() => {
     const primary = PRIMARY_DISPLAY_GROUPS.map((group) => ({
       id: group.primaryProductId,
       label: group.label,
     }));
+    const primaryIds = new Set(primary.map((option) => option.id));
 
-    const heldIds = new Set(
-      summary.holdings
-        .filter((holding) => dec(holding.position.quantity).greaterThan(0))
-        .map((holding) => holding.product.id),
-    );
-    const extraIds = new Set<string>();
-    for (const productId of heldIds) if (!isPrimaryProduct(productId)) extraIds.add(productId);
-    if (value !== "" && !isPrimaryProduct(value)) extraIds.add(value);
-
-    const others = GOLD_PRODUCTS.filter((product) => extraIds.has(product.id)).map((product) => ({
+    // Katalogdaki kalan HER ürün; üstteki altı ürün tekrar edilmez.
+    const others = GOLD_PRODUCTS.filter((product) => !primaryIds.has(product.id)).map((product) => ({
       id: product.id,
       label: displayProductName(product.id, product.name, { distinguish: true }),
     }));
 
     return { primary, others };
-  }, [summary.holdings, value]);
+  }, []);
 
   return (
     <Field label="Altın türü" htmlFor={id} error={error}>
@@ -112,7 +104,7 @@ function ProductSelect({
           </option>
         ))}
         {options.others.length > 0 ? (
-          <optgroup label="Diğer varlıklarınız">
+          <optgroup label="Tüm altın türleri">
             {options.others.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
