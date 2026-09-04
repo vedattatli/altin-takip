@@ -85,6 +85,25 @@ export interface ProviderQuotesRow {
   quotes: StoredQuoteRow[];
 }
 
+/**
+ * FİYAT GEÇMİŞİ SATIRI — grafik için.
+ *
+ * `observedAt` fiyatın UYGULAMA TARAFINDAN GÖRÜLDÜĞÜ andır (`fetched_at`).
+ * Ekran kaynağının kendi fiyat saati yoktur; bu yüzden grafiğin x ekseni
+ * "gözlem zamanı"dır ve arayüzde de öyle adlandırılır.
+ */
+export interface PriceHistoryRow {
+  providerCode: string;
+  marketId: string;
+  canonicalProductId: string;
+  liquidationPrice: string;
+  replacementPrice: string;
+  currency: string;
+  observedAt: string;
+  providerTimestamp: string | null;
+  status: string;
+}
+
 export interface IngestionQuoteInput {
   canonicalProductId: string;
   liquidationPrice: string;

@@ -22,6 +22,7 @@ import {
   type WorkerLeaseState,
   ScreenRawRow,
   ScreenRowsSnapshot,
+  PriceHistoryRow,
 } from "@/server/prices/types";
 import type {
   LedgerAppendRequest,
@@ -879,6 +880,19 @@ export class SupabaseAuthBackend implements AuthBackend {
       "price_quotes_compare",
       { p_codes: codes },
       "Fiyat karşılaştırması okunamadı",
+    );
+    return rows ?? [];
+  }
+
+  async priceQuoteHistory(
+    codes: readonly string[],
+    sinceIso: string,
+    limit = 5000,
+  ): Promise<PriceHistoryRow[]> {
+    const rows = await this.priceRpc<PriceHistoryRow[] | null>(
+      "price_quotes_history",
+      { p_codes: codes, p_since: sinceIso, p_limit: limit },
+      "Fiyat geçmişi okunamadı",
     );
     return rows ?? [];
   }

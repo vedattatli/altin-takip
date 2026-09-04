@@ -296,7 +296,13 @@ tek başına yeniden koşulduğunda 1,1 sn'de geçti.
 
 ## Sprint 4 — Ürün derinleştirme
 
-- Portföy geçmişi ve zaman içinde değer grafiği.
+- ~~Portföy geçmişi ve zaman içinde değer grafiği.~~ **Yapıldı** — panelde portföy
+  değeri grafiği (1 saat / 24 saat / 7 gün / 30 gün). Kaynak: `price_quote_history`
+  (`0022` ile okuma RPC'si). Çözünürlük fiyatın TOPLANMA sıklığıdır; ara nokta
+  üretilmez, eski fiyat 3 saatten fazla ileri taşınmaz, fiyatı olmayan ürün
+  toplama katılmaz (sıfır sayılmaz) ve nokta "kısmi" işaretlenir. Grafiğin altında
+  kaç gerçek gözlem çizildiği ve verinin kaç dakikada bir geldiği yazar.
+  Kütüphane eklenmedi: çizim satır içi SVG.
 - Ürün bazlı detay ekranı ve işlem geçmişi filtreleri.
 - Birden fazla portföy (örn. "Birikim", "Çeyrekler").
 - Muhasebe genişletmeleri: `TRANSFER_IN` / `TRANSFER_OUT` / `ADJUSTMENT` işlem türleri

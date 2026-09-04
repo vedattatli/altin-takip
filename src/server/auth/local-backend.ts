@@ -45,6 +45,7 @@ import {
   type StoredQuoteRow,
   ScreenRawRow,
   ScreenRowsSnapshot,
+  PriceHistoryRow,
 } from "@/server/prices/types";
 import type { MfaCredentialRecord } from "./backend";
 import type { DataScope } from "./actor";
@@ -153,6 +154,8 @@ interface StoreShape {
   /** Fiyat kaynakları (Sprint 3). Supabase tarafındaki tabloların ikizi. */
   priceProviders: StoredPriceProvider[];
   priceQuotes: StoredPriceQuote[];
+  /** Append-only fiyat geçmişi; üretimdeki price_quote_history ikizi. */
+  priceQuoteHistory: StoredPriceQuote[];
   priceRuns: StoredPriceRun[];
   pricePreferences: StoredPricePreference[];
   priceSourceEvents: StoredPriceSourceEvent[];
@@ -296,6 +299,7 @@ function emptyStore(): StoreShape {
     ledgerSequence: 0,
     priceProviders: [],
     priceQuotes: [],
+    priceQuoteHistory: [],
     priceRuns: [],
     pricePreferences: [],
     priceSourceEvents: [],
@@ -1459,6 +1463,8 @@ export class LocalAuthBackend implements AuthBackend {
       );
       if (index >= 0) this.store.priceQuotes[index] = row;
       else this.store.priceQuotes.push(row);
+      // Geçmiş append-only'dir: güncel kayıt değişse de eski nokta silinmez.
+      this.store.priceQuoteHistory.push(row);
     }
 
     const rejected = this.store.priceQuarantine.filter((row) => row.ingestionRunId === runId).length;
@@ -1789,6 +1795,35 @@ export class LocalAuthBackend implements AuthBackend {
       if (row) rows.push(row);
     }
     return rows;
+  }
+
+  async priceQuoteHistory(
+    codes: readonly string[],
+    sinceIso: string,
+    limit = 5000,
+  ): Promise<PriceHistoryRow[]> {
+    this.refresh();
+    const since = Date.parse(sinceIso);
+    const rows = this.store.priceQuoteHistory
+      .filter((row) => codes.includes(row.providerCode) && row.status === "ok")
+      .filter((row) => {
+        const at = Date.parse(row.fetchedAt);
+        return Number.isFinite(at) && (!Number.isFinite(since) || at >= since);
+      })
+      .sort((a, b) => Date.parse(a.fetchedAt) - Date.parse(b.fetchedAt));
+    // Sınır aşılırsa EN ESKİ uç kırpılır; grafik "şu ana kadar" doğru kalır.
+    const trimmed = rows.length > limit ? rows.slice(rows.length - limit) : rows;
+    return trimmed.map((row) => ({
+      providerCode: row.providerCode,
+      marketId: row.marketId,
+      canonicalProductId: row.canonicalProductId,
+      liquidationPrice: row.liquidationPrice,
+      replacementPrice: row.replacementPrice,
+      currency: row.currency,
+      observedAt: row.fetchedAt,
+      providerTimestamp: row.providerTimestamp === "" ? null : row.providerTimestamp,
+      status: row.status,
+    }));
   }
 
   async getPricePreference(scope: DataScope): Promise<PricePreferenceRow> {

@@ -62,6 +62,7 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "auth/change-password/route.ts": "authenticated",
   "auth/logout-all/route.ts": "authenticated",
   "portfolio/route.ts": "usable",
+  "portfolio/history/route.ts": "usable",
   "portfolio/summary/route.ts": "usable",
   "portfolio/version/route.ts": "usable",
   "transactions/route.ts": "usable",
@@ -305,6 +306,9 @@ describe("actor sınırının kaynak kodda korunması", () => {
     });
     expect(callers.sort()).toEqual(
       [
+        // Grafik serisi de kullanıcının KENDİ defterini okur; kapsamı route
+        // değil servis kurar, böylece uç hedef kullanıcı kimliği alamaz.
+        join("src", "server", "portfolio", "portfolio-history-service.ts"),
         join("src", "server", "portfolio", "user-portfolio-service.ts"),
         join("src", "server", "prices", "price-source-service.ts"),
       ].sort(),

@@ -32,6 +32,7 @@ import {
 } from "@/prices/valuation-plan";
 import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
+import { PortfolioChart } from "./portfolio-chart";
 import { PriceSourceLine } from "./price-source-line";
 import { Card, DeltaValue, EmptyState, SectionTitle, cx } from "./ui";
 
@@ -466,6 +467,12 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           {formatMoney(summary.unpricedCostBasis)}. Gerçekleşmiş K/Z bundan etkilenmez.
         </div>
       ) : null}
+
+      {/*
+        Grafik yalnızca elde varlık VARKEN gösterilir: boş portföyde düz sıfır
+        çizgisi çizmek bilgi vermez, yer kaplar.
+      */}
+      {isOpen ? <PortfolioChart /> : null}
 
       <section>
         <SectionTitle

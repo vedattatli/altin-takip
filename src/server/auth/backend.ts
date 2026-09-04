@@ -23,6 +23,7 @@ import type {
   ExperimentalAccessRow,
   MappingApprovalRow,
   WorkerLeaseState,
+  PriceHistoryRow,
 } from "@/server/prices/types";
 import type { DataScope } from "./actor";
 
@@ -345,6 +346,15 @@ export interface AuthBackend {
   currentPriceQuotes(code: string): Promise<ProviderQuotesRow | null>;
   /** Birden çok sağlayıcının fiyatları (karşılaştırma ekranı). */
   comparePriceQuotes(codes: readonly string[]): Promise<ProviderQuotesRow[]>;
+  /**
+   * Fiyat GEÇMİŞİ (append-only kayıt). Grafik bunu kullanır.
+   * Kullanıcıya değil sağlayıcıya ait veridir; kapsam filtresi yoktur.
+   */
+  priceQuoteHistory(
+    codes: readonly string[],
+    sinceIso: string,
+    limit?: number,
+  ): Promise<PriceHistoryRow[]>;
   /** Portföyün seçili fiyat kaynağı. */
   getPricePreference(scope: DataScope): Promise<PricePreferenceRow>;
   /** Portföyün fiyat kaynağını değiştirir; denetim olayı üretir. */

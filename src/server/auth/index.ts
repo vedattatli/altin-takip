@@ -5,6 +5,7 @@ import { cookies, headers } from "next/headers";
 
 import type { UserProfile } from "@/auth/types";
 import { AdminService } from "@/server/admin/admin-service";
+import { PortfolioHistoryService } from "@/server/portfolio/portfolio-history-service";
 import { UserPortfolioService } from "@/server/portfolio/user-portfolio-service";
 import { getLoginRateLimiter } from "@/server/rate-limit";
 import { resolveAuthBackendId, serverEnv } from "@/server/env";
@@ -75,6 +76,15 @@ export function getUserPortfolioService(): UserPortfolioService {
     portfolioServiceInstance = new UserPortfolioService(getAuthBackend());
   }
   return portfolioServiceInstance;
+}
+
+let historyServiceInstance: PortfolioHistoryService | null = null;
+
+export function getPortfolioHistoryService(): PortfolioHistoryService {
+  if (!historyServiceInstance) {
+    historyServiceInstance = new PortfolioHistoryService(getAuthBackend());
+  }
+  return historyServiceInstance;
 }
 
 export const SESSION_COOKIE = serverEnv.sessionCookieName;
