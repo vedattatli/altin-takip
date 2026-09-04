@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
+import { usePortfolio } from "@/state/portfolio-store";
 import { Card, cx } from "./ui";
 
 /**
@@ -66,7 +67,18 @@ function formatTick(iso: string, range: RangeId): string {
 }
 
 export function PortfolioChart() {
+  const { summary } = usePortfolio();
   const [range, setRange] = useState<RangeId>("24h");
+
+  /*
+   * GRAFİK YENİ FİYAT GELİNCE KENDİLİĞİNDEN YENİLENİR.
+   *
+   * Ayrı bir zamanlayıcı KURULMAZ: portföy deposu fiyatları zaten periyodik
+   * tazeliyor. Yeni bir anlık görüntü geldiğinde `fetchedAt` değişir ve grafik
+   * o anda yeniden çekilir. Böylece grafik, fiyatın gerçekten güncellendiği
+   * anda güncellenir — ne daha erken (boşuna istek) ne daha geç (bayat çizgi).
+   */
+  const snapshotAt = summary.snapshot?.fetchedAt ?? null;
   /*
    * Sonuç, HANGİ aralığa ait olduğuyla birlikte tutulur. Yükleme durumu bundan
    * TÜRETİLİR; effect içinde senkron setState yapılmaz (React "cascading
@@ -91,8 +103,13 @@ export function PortfolioChart() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, snapshotAt]);
 
+  /*
+   * Yenileme sırasında ESKİ grafik ekranda kalır: aynı aralığın verisi
+   * duruyorsa "yükleniyor" yazısına düşmek, saniyede bir grafiğin kaybolup
+   * gelmesi demek olurdu. Yalnızca aralık değişince veya ilk açılışta beklenir.
+   */
   const busy = result === null || result.range !== range;
   const data = busy ? null : result.data;
   const error = busy ? null : result.error;
