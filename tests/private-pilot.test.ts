@@ -527,6 +527,23 @@ describe("7. yönetici onayı ve eşleme sürümü", () => {
     expect(stored?.rows[0]).toMatchObject({ rawLabel: "ÇEYREK", buy: "10950", sell: "11500" });
   });
 
+  /*
+   * Onaylı satır ekranda "onay olmadan hesaba girmez" DİYEMEZ.
+   *
+   * ÜRETİMDE GÖRÜLDÜ: satır "7 satır değerlemeye giriyor" başlığının altında
+   * dururken güven sütunu hâlâ ham CONVENTION yazıyordu — aynı satır hem
+   * "giriyor" hem "girmiyor" diyordu. Kaydedilen güven, toplayıcının
+   * kullandığı ETKİN güven olmalıdır.
+   *
+   * Not: tam `ingest` yolu burada koşturulamıyor; yerel test ikizi
+   * EXPERIMENTAL_PRIVATE sağlayıcının fiyat yazmasına izin vermiyor, üretim
+   * RPC'si veriyor. Bu ikizin kendi eksiği ve ayrıca ele alınmalı.
+   */
+  it("ekran satırına ETKİN güven yazılır, ham eşleme güveni değil", () => {
+    const source = readFileSync(join(process.cwd(), "src/server/prices/screen-worker-service.ts"), "utf8");
+    expect(source).toMatch(/confidence: approved\.get\(observation\.canonicalProductId\) \?\? observation\.mappingConfidence/);
+  });
+
   it("yönetim ekranı eski sürümdeki onayı geçerli göstermez", () => {
     const source = readFileSync(join(process.cwd(), "src/components/admin/admin-experimental-view.tsx"), "utf8");
     // Sürüm karşılaştırması yapılıyor ve sonucu satırın görünümünü belirliyor.

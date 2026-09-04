@@ -138,7 +138,7 @@ export class ScreenWorkerService {
     // HAM SATIRLARI SAKLA — kabul edilen fiyat olmasa BİLE.
     // "Kayseri Fiyatları" ekranının asıl gerekli olduğu durum tam olarak budur:
     // hiçbir fiyat değerlemeye girmese de kullanıcı ekranda ne yazdığını görür.
-    await this.persistScreenRows(payload, collected);
+    await this.persistScreenRows(payload, collected, approved);
 
     if (collected.quotes.length === 0) {
       return {
@@ -222,6 +222,7 @@ export class ScreenWorkerService {
   private async persistScreenRows(
     payload: ScreenWorkerPayload,
     collected: { quotes: readonly NormalizedQuote[]; unresolved: readonly { rawProductName: string; reason: string }[] },
+    approved: ReadonlyMap<string, MappingConfidence>,
   ): Promise<void> {
     /*
      * BOŞ GÖZLEM SON İYİ SATIRLARIN ÜSTÜNE YAZILMAZ.
@@ -249,7 +250,16 @@ export class ScreenWorkerService {
         sell: twoSided ? observation.replacementPrice : null,
         single: twoSided ? null : (observation.liquidationPrice ?? observation.replacementPrice ?? null),
         canonicalProductId: observation.canonicalProductId,
-        confidence: observation.mappingConfidence,
+        /*
+         * ETKİN güven yazılır, ham eşleme güveni değil.
+         *
+         * Yönetici onayı CONVENTION'ı OPERATOR_VERIFIED'a yükseltir ve fiyat
+         * bu sayede değerlemeye girer. Ham güven yazıldığında ekranda
+         * "Piyasa teamülü — onay olmadan hesaba girmez" çıkıyordu; oysa satır
+         * tam da hesaba giriyordu. Aynı satır hem "giriyor" hem "girmiyor"
+         * diyordu.
+         */
+        confidence: approved.get(observation.canonicalProductId) ?? observation.mappingConfidence,
         usedInValuation: accepted.has(observation.canonicalProductId),
         reason: accepted.has(observation.canonicalProductId)
           ? null
