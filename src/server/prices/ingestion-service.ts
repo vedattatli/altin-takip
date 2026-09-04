@@ -205,6 +205,20 @@ export class PriceIngestionService {
       knownProductIds: KNOWN_PRODUCT_IDS,
       now,
       previousLiquidation: (productId) => previous.get(productId) ?? null,
+      // GÖZLEM ZAMANI POLİTİKASI
+      //
+      // Truncgil yanıtın kökünde tek bir `Update_Date` yayımlar; ürün başına
+      // sağlayıcı damgası YOKTUR ve zaman dilimi yazmaz. Bu yüzden damga
+      // "sağlayıcı zamanı" değil GÖZLEM zamanı sayılır.
+      //
+      // Politika yalnızca bu sağlayıcı için açılır; başka hiçbir kaynak bu
+      // yolla zaman damgası kuralını atlayamaz. Yaş sınırı, kaynağın kendi
+      // güncelleme sıklığından (birkaç dakika) belirgin biçimde geniştir ama
+      // bayat veriyi güncel göstermeyecek kadar dardır.
+      observedTimePolicy:
+        provider.providerId === "truncgil-turkiye"
+          ? { providerId: "truncgil-turkiye", maxObservationAgeMs: 30 * 60_000 }
+          : undefined,
     });
 
     const payload: IngestionPayload = {
