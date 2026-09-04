@@ -25,7 +25,7 @@ const SERVER_CLOCK = () => null;
  * İstemci tarafında belirli aralıklarla ilerleyen saat.
  * Sunucuda null döner; böylece göreli zaman metni hidrasyonu bozmaz.
  */
-function useClientClock(intervalMs: number): number | null {
+export function useClientClock(intervalMs: number): number | null {
   const subscribe = useCallback(
     (onChange: () => void) => {
       const timer = setInterval(onChange, intervalMs);

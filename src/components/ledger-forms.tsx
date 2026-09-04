@@ -24,9 +24,10 @@ import { getProduct, GOLD_PRODUCTS } from "@/domain/catalog";
 import type { GoldProduct } from "@/domain/types";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
+import { usableQuoteOrNull } from "@/prices/validate";
 import { displayProductName, isPrimaryProduct, PRIMARY_DISPLAY_GROUPS } from "@/prices/valuation-plan";
 import { usePortfolio } from "@/state/portfolio-store";
-import { marketLabel } from "./price-source-line";
+import { marketLabel, useClientClock } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
 /**
@@ -925,8 +926,27 @@ export function OpeningBalanceForm({
   const [busy, setBusy] = useState(false);
 
   const product = getProduct(state.productId);
-  const quote = summary.priceStatus === "ok" ? (summary.snapshot?.quotes[state.productId] ?? null) : null;
-  const baselineAvailable = quote !== null && quote.status === "ok";
+  /*
+   * Kullanılabilirlik kararı MERKEZİ doğrulamadan gelir (src/prices/validate.ts).
+   *
+   * Burada eskiden `summary.priceStatus === "ok" && quote.status === "ok"`
+   * yazıyordu. İki hatası vardı:
+   *  1. `priceStatus` sağlayıcı META durumudur, değerleme kararı değildir.
+   *     Hibrit planda üç kaynaktan biri düşünce "ok" olmaz ve FİYATI OLAN
+   *     ürünlerde de bu seçenek kapanırdı.
+   *  2. Kendi ölçütünü uydurup plan/bayatlık/sağlayıcı denetimlerini atlıyordu;
+   *     sunucu kabul ederken ekran reddedebiliyordu (ya da tersi).
+   */
+  /*
+   * Saat istemci tarafında ilerler; sunucu render'ında null döner (hidrasyon
+   * bozulmasın diye). Saat gelmeden önce anlık görüntünün KENDİ zamanı esas
+   * alınır: aksi hâlde seçenek bir an "kullanılamıyor" diye kapalı görünüp
+   * hemen açılırdı. Sunucu her hâlükârda gönderimde yeniden doğrular.
+   */
+  const clock = useClientClock(30_000);
+  const evaluatedAt = clock ?? Date.parse(summary.snapshot?.fetchedAt ?? "") ?? 0;
+  const quote = usableQuoteOrNull(summary.snapshot, state.productId, Number.isFinite(evaluatedAt) ? evaluatedAt : 0);
+  const baselineAvailable = quote !== null;
 
   const command = useMemo<OpeningBalanceCommand>(
     () => ({
