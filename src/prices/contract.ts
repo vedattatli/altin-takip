@@ -28,6 +28,11 @@ export type ProviderId =
   | "harem-direct"
   | "bist-reference"
   /**
+   * Truncgil açık finans akışı — Türkiye geneli, ücretsiz, anahtarsız.
+   * Bağımsız bir yayıncıdır; hiçbir kurumun resmî servisi DEĞİLDİR.
+   */
+  | "truncgil-turkiye"
+  /**
    * Sarraf TV Kayseri EKRAN GÖZLEMİ.
    *
    * `sarraf-pro-kayseri` ile AYNI KİMLİK ALTINDA TUTULMAZ: biri ileride

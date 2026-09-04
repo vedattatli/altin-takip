@@ -21,6 +21,7 @@ import {
   SARRAFPRO_MAPPING_VERSION,
 } from "./mappings";
 import { PrototypeJsonProvider } from "./rest-provider";
+import { TruncgilProvider } from "./truncgil-provider";
 import {
   SCREEN_OBSERVATION_FRESH_MS,
   screenCollectorEnabled,
@@ -286,6 +287,8 @@ export function createProvider(providerId: string): CanonicalPriceProvider | nul
       return createBistReferenceProvider();
     case "sarraf-tv-kayseri-screen":
       return createSarrafTvScreenProvider();
+    case "truncgil-turkiye":
+      return new TruncgilProvider();
     default:
       return null;
   }

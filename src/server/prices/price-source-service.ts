@@ -39,6 +39,19 @@ const DEFAULT_STALE_AFTER_MS = 5 * 60_000;
  * engeller). Erişim yalnızca yöneticinin portföy bazlı izin listesiyle verilir;
  * kontrol her okumada sunucuda yapılır.
  */
+/**
+ * DENEYSEL KAYNAKLAR
+ *
+ * Hepsi izin listesine tabidir: hiçbiri genel kullanıcı listesine çıkamaz
+ * (veritabanı kısıtı da bunu ayrıca engeller). Erişim portföy bazlıdır ve
+ * kaynak BAŞINA verilir; bir kaynağa izin verilmesi diğerini açmaz.
+ */
+const EXPERIMENTAL_CODES = ["sarraf-tv-kayseri-screen", "truncgil-turkiye"] as const;
+
+function isExperimentalCode(code: string): boolean {
+  return (EXPERIMENTAL_CODES as readonly string[]).includes(code);
+}
+
 const EXPERIMENTAL_SCREEN_CODE = "sarraf-tv-kayseri-screen";
 
 function staleAfterMs(): number {
@@ -108,16 +121,23 @@ export class PriceSourceService {
       this.backend.listPriceProviders(),
       this.backend.getPricePreference(ownScope(actor)),
     ]);
-    // Deneysel kaynak yalnızca izin listesindeki kullanıcıya görünür.
-    const experimentalAllowed = await this.backend
-      .experimentalAccessAllowed(actor.profile.id, EXPERIMENTAL_SCREEN_CODE)
-      .catch(() => false);
+    // Deneysel kaynaklar yalnızca izin listesindeki kullanıcıya görünür ve
+    // izin KAYNAK BAŞINA denetlenir.
+    const experimentalAllowed = new Map<string, boolean>();
+    await Promise.all(
+      EXPERIMENTAL_CODES.map(async (code) => {
+        const allowed = await this.backend
+          .experimentalAccessAllowed(actor.profile.id, code)
+          .catch(() => false);
+        experimentalAllowed.set(code, allowed);
+      }),
+    );
 
     return providers
       .filter((provider) => {
         if (!provider.enabled) return false;
         if (provider.licenseStatus === "EXPERIMENTAL_PRIVATE") {
-          return provider.code === EXPERIMENTAL_SCREEN_CODE && experimentalAllowed;
+          return isExperimentalCode(provider.code) && experimentalAllowed.get(provider.code) === true;
         }
         return provider.userSelectable;
       })
@@ -153,11 +173,11 @@ export class PriceSourceService {
     await this.ensureCatalog();
     const preference = await this.backend.getPricePreference(scope);
     if (preference.providerCode) {
-      if (preference.providerCode !== EXPERIMENTAL_SCREEN_CODE) return preference.providerCode;
+      if (!isExperimentalCode(preference.providerCode)) return preference.providerCode;
       // İzin geri alındıysa deneysel kaynak kullanılmaz. BAŞKA KAYNAĞA DA
       // GEÇİLMEZ: kaynak yok sayılır ve değerleme boş kalır.
       const allowed = await this.backend
-        .experimentalAccessAllowed(scope.userId, EXPERIMENTAL_SCREEN_CODE)
+        .experimentalAccessAllowed(scope.userId, preference.providerCode)
         .catch(() => false);
       return allowed ? preference.providerCode : null;
     }

@@ -76,3 +76,57 @@ export const SARRAFPRO_MAPPING_VERSION = "sarrafpro-kayseri-unmapped-1";
  * bkz. `src/prices/providers/sarraf-tv-screen-mapping.ts`.
  */
 export const SARRAFPRO_MAPPING: Readonly<Record<string, string>> = {};
+
+// ---------------------------------------------------------------------------
+
+export const TRUNCGIL_MAPPING_VERSION = "truncgil-v4-1";
+
+/**
+ * TRUNCGIL SEMBOLLERİ → KANONİK ÜRÜNLER
+ *
+ * DİKKAT: Kaynak, `Type` alanında GUMUS, XU100, BRENT, ONS ve DBITCOIN gibi
+ * satırları da "Gold" olarak etiketliyor. Bu yüzden `Type` alanına GÜVENİLMEZ;
+ * yalnızca aşağıdaki AÇIK beyaz liste kullanılır. Listede olmayan sembol
+ * sessizce başka ürüne yazılmaz, atlanır.
+ *
+ * Eşlenmeyenler ve nedeni:
+ *   GUMUS      gümüştür, altın portföyüne katılmaz
+ *   XU100      borsa endeksi
+ *   ONS/BRENT  altın portföyü ürünü değil
+ *   YIA        anlamı belirsiz (hangi ayar olduğu kaynakta yazmıyor)
+ *   22 ayar    kaynak 22 ayar satırı yayımlamıyor
+ *   8 ayar     kaynak 8 ayar satırı yayımlamıyor
+ *   külçe      kaynak külçe satırı yayımlamıyor
+ */
+export const TRUNCGIL_MAPPING: Readonly<Record<string, string>> = {
+  GRA: "gram-altin",
+  HAS: "has-altin",
+  "14AYARALTIN": "altin-14-ayar",
+  "18AYARALTIN": "altin-18-ayar",
+  CEYREKALTIN: "yeni-ceyrek",
+  YARIMALTIN: "yeni-yarim",
+  TAMALTIN: "yeni-tam",
+  CUMHURIYETALTINI: "cumhuriyet-altini",
+  ATAALTIN: "ata-altin",
+  RESATALTIN: "resat-altin",
+  HAMITALTIN: "hamit-altin",
+  IKIBUCUKALTIN: "ikibucuk-altin",
+  BESLIALTIN: "besli-altin",
+  GREMSEALTIN: "gremse-altin",
+};
+
+/**
+ * ESKİ ZİYNET EŞLEMELERİ — GROUPED_EXPLICIT
+ *
+ * Kaynak "ÇEYREK / YARIM / TAM" için TEK fiyat yayımlar; yeni-eski ayrımı
+ * yapmaz. Eski ziynetler aynı ayar (0.916) ve neredeyse aynı gramajdadır, bu
+ * yüzden aynı kaynak fiyatı her ikisine de uygulanır.
+ *
+ * Bu bir TAHMİN DEĞİL, açık bir gruplamadır ve kullanıcıya arayüzde
+ * "kaynak yeni ve eskiyi ayırmıyor" uyarısıyla birlikte gösterilir.
+ */
+export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
+  CEYREKALTIN: "eski-ceyrek",
+  YARIMALTIN: "eski-yarim",
+  TAMALTIN: "eski-tam",
+};

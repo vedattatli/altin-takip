@@ -176,6 +176,29 @@ const SARRAF_TV_SCREEN: ProviderDescriptor = {
   devOnly: false,
 };
 
+
+const TRUNCGIL: ProviderDescriptor = {
+  providerId: "truncgil-turkiye",
+  displayName: MARKET_DISPLAY_NAMES["turkiye-genel"],
+  technicalName: "Truncgil açık finans akışı (Türkiye geneli)",
+  marketId: "turkiye-genel",
+  marketDisplayName: MARKET_DISPLAY_NAMES["turkiye-genel"],
+  providerType: "REST",
+  capabilities: ["REST", "PRODUCT_LEVEL", "PROTOTYPE"],
+  advertisedCapabilities: [],
+  referenceUrl: "https://finans.truncgil.com",
+  // DÜRÜST ETİKETLEME: bu bağımsız bir yayıncıdır. Herhangi bir borsanın,
+  // derneğin veya kuyumcunun resmî servisi DEĞİLDİR ve öyle sunulmaz.
+  // Yeniden gösterim izni beyan edilmediği için kaynak deneysel sayılır.
+  attribution:
+    "Truncgil açık finans akışı (finans.truncgil.com). Bağımsız bir yayıncıdır; " +
+    "bir borsanın, derneğin veya kuyumcunun resmî servisi değildir. Türkiye geneli " +
+    "piyasa referansıdır; belirli bir kuyumcunun tezgâh fiyatı değildir.",
+  // Anahtar GEREKTİRMEZ; ücretsiz ve açık uçtur.
+  requiredEnv: [],
+  devOnly: false,
+};
+
 export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   MOCK,
   SARRAF_PRO,
@@ -185,6 +208,7 @@ export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   HAREM_DIRECT,
   BIST_REFERENCE,
   SARRAF_TV_SCREEN,
+  TRUNCGIL,
 ];
 
 const BY_ID = new Map(PROVIDER_DESCRIPTORS.map((descriptor) => [descriptor.providerId, descriptor]));
