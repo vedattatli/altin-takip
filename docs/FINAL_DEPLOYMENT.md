@@ -238,3 +238,44 @@ Sırayla yapın. Her adımın karşısındaki sonucu görmelisiniz.
 
 Veritabanı geri alma gerektirecek bir değişiklik yapmadan önce Supabase
 panelinden yedek alın.
+
+## Dağıtım bloke olursa: commit yazarı kuralı
+
+Vercel, Git bağlantılı projelerde **commit yazarının** dağıtım yetkisi olup
+olmadığını denetler. Yazar tanınmıyorsa dağıtım hiç başlamaz; API'de şöyle
+görünür:
+
+```
+readyState: BLOCKED
+readyStateReason: The deployment was blocked because the commit author
+                  doesn't have permission to create deployments for this project.
+```
+
+Belirti kafa karıştırıcıdır: `vercel ls` durumu `UNKNOWN` gösterir, CLI
+"Building…" der ve dakikalarca bekler, `vercel inspect --logs` hiçbir şey
+yazmaz. **Yapı hiç başlamamıştır.**
+
+Sebebi teşhis etmek için:
+
+```bash
+node --input-type=module -e "
+import { readFileSync } from 'node:fs';
+const token = JSON.parse(readFileSync(process.env.APPDATA + '/xdg.data/com.vercel.cli/auth.json','utf8')).token;
+const r = await fetch('https://api.vercel.com/v13/deployments/<DPL_ID>?teamId=<TEAM_ID>', {
+  headers: { Authorization: 'Bearer ' + token },
+});
+const j = await r.json();
+console.log(j.readyState, j.readyStateReason);
+"
+```
+
+Çözüm: commit'i projenin tanıdığı kimlikle at. Deponun kendi ayarı zaten
+doğrudur; `git -c user.email=...` ile **ezmeyin**.
+
+```bash
+git config user.email   # proje hesabının e-postası olmalı
+git commit -m "..."     # -c ile kimlik ezilmeden
+```
+
+Dağıtım HEAD commit'inin yazarına bakar; yalnız son commit'in doğru kimlikle
+atılması yeterlidir.
