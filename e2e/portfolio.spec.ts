@@ -134,7 +134,7 @@ test.describe("portföy akışı", () => {
     await gotoReady(page, "/islemler");
 
     await page.getByTestId("add-opening").click();
-    await page.getByLabel("Altın türü").selectOption({ label: "Gram Altın" });
+    await page.getByLabel("Varlık türü").selectOption({ label: "Gram Altın" });
     await page.getByLabel(/^Miktar/).fill("100");
     await page.getByTestId("opening-next").click();
 
@@ -170,7 +170,7 @@ test.describe("portföy akışı", () => {
     await gotoReady(page, "/islemler");
 
     await page.getByTestId("add-opening").click();
-    await page.getByLabel("Altın türü").selectOption({ label: "Çeyrek Altın" });
+    await page.getByLabel("Varlık türü").selectOption({ label: "Çeyrek Altın" });
     await page.getByLabel(/^Miktar/).fill("14");
     await page.getByTestId("opening-next").click();
     await page.getByTestId("cost-method-ACTUAL").click();
@@ -288,7 +288,7 @@ test.describe("portföy akışı", () => {
 
     await gotoReady(page, "/islemler");
     await page.getByTestId("add-buy").click();
-    await page.getByLabel("Altın türü").selectOption({ label: "Çeyrek Altın" });
+    await page.getByLabel("Varlık türü").selectOption({ label: "Çeyrek Altın" });
     await page.getByLabel(/^Miktar/).fill("1,5");
     await page.getByLabel(/^Birim alış fiyatı/).fill("9000");
     await page.getByTestId("submit-buy").click();

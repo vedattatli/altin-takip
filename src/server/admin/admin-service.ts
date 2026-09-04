@@ -135,74 +135,6 @@ export class AdminService {
     }
   }
 
-  // --- Deneysel özel pilot (Sprint 3.2) ---
-
-  /** Deneysel kaynağa erişimi olan portföyler. */
-  async listExperimentalAccess(actor: AdminActor, code: string): Promise<unknown> {
-    const rows = await this.backend.listExperimentalAccess(code);
-    await this.audit(actor, "price.experimental_access", null, true, {
-      providerCode: code,
-      action: "list",
-      count: rows.length,
-    });
-    return rows;
-  }
-
-  /**
-   * Yönetici bir kullanıcının portföyüne deneysel kaynak erişimi verir/kaldırır.
-   * Kullanıcı kendi kendine açamaz; her değişiklik denetim kaydı üretir.
-   */
-  async setExperimentalAccess(
-    actor: AdminActor,
-    userId: string,
-    code: string,
-    enabled: boolean,
-    reason: string,
-    expiresAt: string | null,
-  ): Promise<void> {
-    const target = await this.backend.getProfile(userId);
-    if (!target) {
-      await this.audit(actor, "price.experimental_access", null, false, { providerCode: code, userId });
-      throw notFound("Kullanıcı bulunamadı.");
-    }
-    /*
-     * İZİN PLANIN TAMAMI İÇİN VERİLİR.
-     *
-     * Hibrit değerleme üç kaynağı BİRLİKTE kullanır: Kayseri ekranı, Kapalıçarşı
-     * tablosu ve Türkiye geneli. Yalnızca birine izin verilirse portföyün bir
-     * kısmı fiyatlanır, kalanı "fiyat yok" görünür — kullanıcı uygulamayı bozuk
-     * sanar. Üretimde tam olarak bu yaşandı: ekran kaynağına izin vardı, gram
-     * altının geldiği Kapalıçarşı kaynağına yoktu.
-     *
-     * Bu bir gizli genişletme DEĞİLDİR: yönetim ekranı izni "plan kaynakları"
-     * olarak adlandırır ve hangi kaynakları kapsadığını yazar. Plan dışı bir
-     * kaynak için istek gelirse yalnızca o kaynak için uygulanır.
-     */
-    const codes = (PLAN_PROVIDER_CODES as readonly string[]).includes(code)
-      ? [...PLAN_PROVIDER_CODES]
-      : [code];
-    try {
-      for (const providerCode of codes) {
-        await this.backend.setExperimentalAccess(
-          userId,
-          providerCode,
-          enabled,
-          actor.profile.id,
-          reason,
-          expiresAt,
-        );
-      }
-      await this.audit(actor, "price.experimental_access", target, true, {
-        providerCode: codes.join(","),
-        enabled,
-        expiresAt: expiresAt ?? "none",
-      });
-    } catch (error) {
-      await this.audit(actor, "price.experimental_access", target, false, { providerCode: code, enabled });
-      if (error instanceof ProviderNotSelectableError) throw conflict(error.message);
-      throw error;
-    }
-  }
 
   /** Onaylanmış ekran eşlemeleri. */
   /**
@@ -265,7 +197,7 @@ export class AdminService {
   /** Kalıcı tarayıcı worker'ının kira/heartbeat durumu. */
   async screenWorkerState(actor: AdminActor, code: string): Promise<unknown> {
     const state = await this.backend.workerLeaseState(code);
-    await this.audit(actor, "price.experimental_access", null, true, { providerCode: code, action: "worker_state" });
+    await this.audit(actor, "price.screen_worker", null, true, { providerCode: code, action: "worker_state" });
     return state;
   }
 

@@ -244,6 +244,44 @@ describe("migration bütünlük kuralları", () => {
     expect(hardening).toContain("reject_audit_mutation");
   });
 
+  /*
+   * 0023 "deneysel kapı kaldırıldı" dedi ama yalnızca TABLO KISITINI düşürdü.
+   * Aynı kuralı uygulayan üç RPC kaldı ve kapı kapalı kalmaya devam etti:
+   * katalog eşitlemesi `user_selectable` alanını her seferinde geri alıyordu.
+   * 0028 üçünü de düzeltti; bu test geriye dönmeyi engeller.
+   */
+  it("fiyat kaynağı RPC'leri lisans durumuna göre kullanıcı listesini kapatmaz", () => {
+    const migrationsDir = join(process.cwd(), "supabase", "migrations");
+    const files = readdirSync(migrationsDir)
+      .filter((file) => file.endsWith(".sql"))
+      .sort();
+
+    /** Bir fonksiyonun SON tanımını döndürür. */
+    const latestBody = (fnName: string): string => {
+      let body = "";
+      for (const file of files) {
+        const sql = readFileSync(join(migrationsDir, file), "utf8");
+        const marker = `create or replace function public.${fnName}(`;
+        const at = sql.lastIndexOf(marker);
+        if (at === -1) continue;
+        const end = sql.indexOf("$$;", at + marker.length);
+        body = sql.slice(at, end === -1 ? undefined : end);
+      }
+      return body;
+    };
+
+    const sync = latestBody("price_providers_sync");
+    expect(sync).not.toBe("");
+    // Eşitleme, yöneticinin açtığı kaynağı lisans durumuna bakıp kapatmamalı.
+    expect(sync).not.toMatch(/user_selectable[\s\S]{0,200}in \('LICENSED', 'DEV_ONLY'\)/);
+
+    const flags = latestBody("price_provider_set_flags");
+    expect(flags).not.toMatch(/deneysel kaynağı genel listeye açılamaz/);
+
+    const preference = latestBody("price_preference_set");
+    expect(preference).not.toMatch(/experimental_access_allowed/);
+  });
+
   it("denetim eylemi listesi TypeScript ile SQL arasında birebir aynıdır", () => {
     // Listeler ayrışırsa yeni bir eylem çalışma zamanında check kısıtına takılır.
     const types = readFileSync(join(process.cwd(), "src", "auth", "types.ts"), "utf8");

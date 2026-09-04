@@ -87,7 +87,7 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/price-sources/[code]/test/route.ts": "admin",
   "admin/price-sources/quarantine/route.ts": "admin",
   "admin/price-sources/default/route.ts": "admin",
-  "admin/price-sources/experimental/route.ts": "admin",
+  "admin/price-sources/screen-worker/route.ts": "admin",
   "admin/price-sources/mappings/route.ts": "admin",
   "admin/users/[id]/mfa/route.ts": "admin",
   // İkinci faktör durumunu geçici parolalı yönetici de sorgulayabilmelidir.

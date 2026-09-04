@@ -49,7 +49,8 @@ function firstErrorText(errors: CommandErrors): string | null {
  *
  * Liste iki bölümdür:
  *  1. En sık kullanılan ALTI ürün üstte, tek tıkla ulaşılsın diye.
- *  2. "Tüm altın türleri" altında katalogdaki DİĞER BÜTÜN ürünler.
+ *  2. "Tüm varlıklar" altında katalogdaki DİĞER BÜTÜN ürünler (gümüş ve döviz dâhil;
+ *     bu yüzden başlık artık "altın türü" değil).
  *
  * Önceden yalnızca altı ürün ve kullanıcının ELİNDE OLANLAR listeleniyordu.
  * Sonucu şuydu: elinde olmayan bir ürünü satın alamıyordun — listede
@@ -79,7 +80,7 @@ function ProductSelect({
     }));
     const primaryIds = new Set(primary.map((option) => option.id));
 
-    // Katalogdaki kalan HER ürün; üstteki altı ürün tekrar edilmez.
+    // Katalogdaki kalan HER ürün (gümüş ve döviz dâhil); üstteki altı ürün tekrar edilmez.
     const others = GOLD_PRODUCTS.filter((product) => !primaryIds.has(product.id)).map((product) => ({
       id: product.id,
       label: displayProductName(product.id, product.name, { distinguish: true }),
@@ -89,7 +90,7 @@ function ProductSelect({
   }, []);
 
   return (
-    <Field label="Altın türü" htmlFor={id} error={error}>
+    <Field label="Varlık türü" htmlFor={id} error={error}>
       <select
         id={id}
         className="control"
@@ -104,7 +105,7 @@ function ProductSelect({
           </option>
         ))}
         {options.others.length > 0 ? (
-          <optgroup label="Tüm altın türleri">
+          <optgroup label="Tüm varlıklar">
             {options.others.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
@@ -199,6 +200,12 @@ function QuantityField({
   hint?: string;
 }) {
   const unit = product?.unit ?? "gram";
+  /*
+   * Ondalık izni ÜRÜNDEN gelir, birimden değil. Döviz de "adet" ile tutulur
+   * ama bölünebilir; birime bakan eski sürüm kesirli döviz girişini engelliyordu.
+   */
+  const scale = product?.quantityScale ?? 6;
+  const integer = scale === 0;
   return (
     <Field
       label={`Miktar (${unit})`}
@@ -206,18 +213,18 @@ function QuantityField({
       error={error}
       hint={
         hint ??
-        (unit === "adet"
-          ? "Adet ile takip edilen üründe pozitif tam sayı girin."
-          : "Gram cinsinden girin; en fazla 6 ondalık basamak.")
+        (integer
+          ? "Bu ürün adet ile takip edilir; pozitif tam sayı girin."
+          : `En fazla ${String(scale)} ondalık basamak girebilirsiniz.`)
       }
     >
       <DecimalInput
         id={id}
         value={value}
         onChange={onChange}
-        placeholder={unit === "adet" ? "1" : "10,5"}
+        placeholder={integer ? "1" : scale === 2 ? "1.500,50" : "10,5"}
         error={error}
-        integer={unit === "adet"}
+        integer={integer}
       />
     </Field>
   );
@@ -686,7 +693,7 @@ export function SellForm({
         quantity:
           dec(availableForSale).isZero()
             ? `Elinizde satılabilir ${product?.name ?? "ürün"} bulunmuyor.`
-            : `Satış miktarı elinizdeki miktarı aşamaz. Mevcut: ${formatQuantity(availableForSale, product?.unit ?? "gram")}.`,
+            : `Satış miktarı elinizdeki miktarı aşamaz. Mevcut: ${formatQuantity(availableForSale, state.productId)}.`,
       });
       return;
     }
@@ -722,7 +729,7 @@ export function SellForm({
             value={state.quantity}
             onChange={(value) => update("quantity", value)}
             error={errors.quantity}
-            hint={`Elinizde ${formatQuantity(availableForSale, product?.unit ?? "gram")} var.`}
+            hint={`Elinizde ${formatQuantity(availableForSale, state.productId)} var.`}
           />
           <DateTimeFields
             formId={formId}
@@ -1150,7 +1157,7 @@ export function OpeningBalanceForm({
             <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3 text-sm">
               <p className="font-semibold text-ink">
                 {displayProductName(product.id, product.name, { distinguish: true })} ·{" "}
-                {formatQuantity(state.quantity, unit)}
+                {formatQuantity(state.quantity, product.id)}
               </p>
               <p className="mt-0.5 text-xs text-muted">{COST_METHOD_LABELS[state.costMethod].title}</p>
             </div>

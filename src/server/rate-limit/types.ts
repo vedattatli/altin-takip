@@ -83,6 +83,56 @@ export interface LoginRateLimitBucket {
   settings: RateLimitSettings;
 }
 
+/**
+ * KAYIT SAYAÇLARI — GİRİŞ SAYAÇLARINDAN AYRI TUTULUR.
+ *
+ * İki ayrı hata bu ayrımı zorunlu kılıyor:
+ *
+ *  1. KİLİTLEME SİLAHI. Kayıt, giriş sayaçlarını kullanırsa saldırgan bilinen
+ *     bir kullanıcı adıyla arka arkaya "üye ol" isteği göndererek o adın
+ *     GİRİŞ sayacını doldurur ve gerçek kullanıcıyı kendi hesabından kilitler.
+ *     Kayıt denemesi asla giriş sayacını ilerletmemelidir.
+ *
+ *  2. BAŞARILI KAYIT DA SAYILMALI. Giriş sayacı yalnızca BAŞARISIZ denemeyi
+ *     sayar; bu doğrudur, çünkü başarılı giriş kötüye kullanım değildir.
+ *     Kayıtta ise tam tersi: bir betiğin her seferinde yeni bir kullanıcı adıyla
+ *     BAŞARIYLA hesap açması saldırının kendisidir. Bu yüzden kayıt ucunda her
+ *     deneme — başarılı olan dâhil — sayaca yazılır.
+ *
+ * Eşikler giriş sayacından dar: normal bir insan saatte birkaç kez hesap
+ * açmaya çalışmaz.
+ */
+export const REGISTER_IP_RATE_LIMIT_SETTINGS: RateLimitSettings = {
+  maxAttempts: 5,
+  windowMs: 60 * 60 * 1000,
+  baseLockMs: 5 * 60 * 1000,
+  maxLockMs: 60 * 60 * 1000,
+};
+
+export const REGISTER_USERNAME_RATE_LIMIT_SETTINGS: RateLimitSettings = {
+  maxAttempts: 5,
+  windowMs: 60 * 60 * 1000,
+  baseLockMs: 5 * 60 * 1000,
+  maxLockMs: 60 * 60 * 1000,
+};
+
+/**
+ * Bir kayıt denemesi için kontrol edilecek sayaçlar.
+ *
+ * Anahtarlar `register:` ön ekiyle AYRI bir ad alanındadır; giriş sayaçlarıyla
+ * hiçbir anahtarı paylaşmazlar.
+ */
+export function registerRateLimitBuckets(
+  clientIp: string,
+  normalizedUsername: string,
+): LoginRateLimitBucket[] {
+  const user = normalizedUsername || "?";
+  return [
+    { kind: "ip", key: `register:ip:${clientIp}`, settings: REGISTER_IP_RATE_LIMIT_SETTINGS },
+    { kind: "username", key: `register:user:${user}`, settings: REGISTER_USERNAME_RATE_LIMIT_SETTINGS },
+  ];
+}
+
 /** Bir giriş denemesi için kontrol edilecek üç sayaç. Sıra: ip, username, pair. */
 export function loginRateLimitBuckets(
   clientIp: string,

@@ -24,6 +24,20 @@ export interface GoldProduct {
   gramWeight: number;
   /** Bir birimin has (saf) altın karşılığı, gram cinsinden. = milyem * gramWeight */
   pureGoldPerUnit: number;
+  /**
+   * Miktarın en fazla kaç ondalık basamağı olabilir.
+   *
+   * BU KURAL BİRİMDEN TÜRETİLEMEZ. "adet" birimi iki farklı şeyi taşır:
+   * ziynet altını BÖLÜNEMEZ (yarım çeyrek diye bir şey yoktur, miktar tam
+   * sayıdır), döviz ise "adet" ile tutulur ama BÖLÜNEBİLİR — 1.500,50 dolar
+   * geçerli bir bakiyedir.
+   *
+   * Kural bir zamanlar `unit === "adet"` idi; döviz eklenince yanlışa döndü ve
+   * kullanıcı kesirli döviz giremez oldu. Bu yüzden ölçek artık ürünün kendi
+   * özelliğidir. Aynı sınır veritabanında `enforce_transaction_unit`
+   * tetikleyicisinde uygulanır.
+   */
+  quantityScale: number;
   /** Listeleme sırası. */
   sortOrder: number;
 }

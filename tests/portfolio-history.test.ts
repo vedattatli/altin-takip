@@ -62,6 +62,44 @@ describe("portföy değeri serisi", () => {
     expect(series.points).toEqual([]);
   });
 
+  /*
+   * ARALIK İÇİNDEKİ ALIM "KÂR" DEĞİLDİR.
+   *
+   * Grafik portföy DEĞERİNİ çizer. Kullanıcı aralık içinde altın aldıysa değer
+   * fiyat hiç değişmese bile yükselir. Arayüz bunu bilmezse ilk-son farkını
+   * yeşil bir yüzdeyle "kazanç" gibi gösterir; 50.000 TL'lik bir alım
+   * "+%500 kâr" diye okunurdu.
+   */
+  it("aralıkta işlem yapıldıysa bildirilir", async () => {
+    await portfolio.appendTransaction(
+      userActor(user),
+      buyCommand({ productId: "yeni-ceyrek", occurredAt: "2026-03-01", quantity: "1", unitPrice: "10000" }),
+    );
+    writeHistory(backend, "2026-03-10T10:00:00.000Z", "yeni-ceyrek", "11000");
+    writeHistory(backend, "2026-03-10T11:00:00.000Z", "yeni-ceyrek", "11000");
+
+    // Önce: aralıkta işlem yok, fark yalnızca fiyat hareketidir.
+    const before = await history.series(userActor(user), "24h");
+    expect(before.ledgerChangesInRange).toBe(0);
+
+    // Sonra: iki gözlem ARASINDA alım yapılır. Fiyat aynı kalsa da değer artar.
+    await portfolio.appendTransaction(
+      userActor(user),
+      buyCommand({
+        productId: "yeni-ceyrek",
+        occurredAt: "2026-03-10",
+        occurredTime: "13:30",
+        quantity: "4",
+        unitPrice: "10000",
+      }),
+    );
+
+    const after = await history.series(userActor(user), "24h");
+    expect(after.ledgerChangesInRange).toBe(1);
+    // Değer 11.000 → 55.000: sıçrama fiyattan değil, eklenen altından geliyor.
+    expect(after.points.map((point) => point.liquidationValue)).toEqual(["11000.00", "55000.00"]);
+  });
+
   it("nokta sayısı gözlem sayısı kadardır; ara noktalar üretilmez", async () => {
     await portfolio.appendTransaction(
       userActor(user),

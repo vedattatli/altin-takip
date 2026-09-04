@@ -1,5 +1,5 @@
 import { TEST_OVERRIDE_TOKEN } from "@/auth/types";
-import { flagFromEnv, stringFromEnv } from "@/lib/env";
+import { stringFromEnv } from "@/lib/env";
 
 /**
  * TEST VERİSİ SAĞLAYICISININ ÜRETİM KAPISI
@@ -29,7 +29,7 @@ export type DeploymentEnv = (typeof DEPLOYMENT_ENVS)[number] | "unknown";
 
 /**
  * Ürün ortamı. `APP_DEPLOYMENT_ENV` bilinen bir değer değilse "unknown" döner
- * ve deneysel kaynak kapalı kalır — yazım hatası kaynağı açmaz.
+ * ve en katı kapı uygulanır — yazım hatası hiçbir kaynağı açmaz.
  */
 export function deploymentEnv(): DeploymentEnv {
   const raw = stringFromEnv("APP_DEPLOYMENT_ENV", "").toLowerCase();
@@ -60,46 +60,3 @@ export function devOnlyProviderBlocked(): boolean {
 }
 
 export const DEV_ONLY_BLOCKED_MESSAGE = "Test verisi sağlayıcısı üretim ortamında kullanılamaz.";
-
-/**
- * DENEYSEL EKRAN KAYNAĞININ ÖZEL PİLOT KAPISI
- *
- * Ürün kararı: bu kaynak HERKESE AÇIK üretimde asla çalışmaz, ama ayrı bir
- * "özel pilot" ortamında açıkça etkinleştirilebilir.
- *
- * Kapı üç anahtarın HEPSİNİ ister:
- *
- *   APP_DEPLOYMENT_ENV=private-pilot
- *   PRICE_EXPERIMENTAL_SARRAF_SCREEN=true
- *   PRICE_EXPERIMENTAL_PRIVATE_PILOT=true
- *
- * `VERCEL_ENV=production` TEK BAŞINA engellemez: barındırma hedefi "production"
- * olsa bile ürün ortamı özel pilot olabilir. Ayrım barındırıcıya değil, açıkça
- * beyan edilen ürün ortamına dayanır.
- *
- * Fail closed: `APP_DEPLOYMENT_ENV` tanımsız, tanınmayan, `production` veya
- * `public-production` ise kaynak KAPALIDIR. İki bayraktan biri eksikse yine
- * kapalıdır — tek bir değişkenin yanlışlıkla açık kalması yetmez.
- *
- * Bu kapı erişim izni DEĞİLDİR: kaynak açık olsa bile hangi portföyün
- * kullanabileceği yöneticinin izin listesiyle ayrıca belirlenir ve veritabanı
- * kısıtı kaynağın genel kullanıcı listesine çıkmasını engeller.
- */
-export function experimentalScreenAllowed(): boolean {
-  if (deploymentEnv() !== "private-pilot") return false;
-  if (!flagFromEnv("PRICE_EXPERIMENTAL_SARRAF_SCREEN")) return false;
-  return flagFromEnv("PRICE_EXPERIMENTAL_PRIVATE_PILOT");
-}
-
-/** Kaynağın neden kapalı olduğunu yöneticiye anlatır. */
-export function experimentalScreenBlockReason(): string | null {
-  if (experimentalScreenAllowed()) return null;
-  const env = deploymentEnv();
-  if (env !== "private-pilot") {
-    return `Deneysel ekran kaynağı yalnızca özel pilot ortamında çalışır (APP_DEPLOYMENT_ENV=private-pilot; şu an: ${env}).`;
-  }
-  if (!flagFromEnv("PRICE_EXPERIMENTAL_SARRAF_SCREEN")) {
-    return "PRICE_EXPERIMENTAL_SARRAF_SCREEN=true değil.";
-  }
-  return "PRICE_EXPERIMENTAL_PRIVATE_PILOT=true değil.";
-}

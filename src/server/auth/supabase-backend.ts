@@ -17,7 +17,6 @@ import {
   type ProviderStateRow,
   type ProviderSyncInput,
   type QuarantineRow,
-  type ExperimentalAccessRow,
   type MappingApprovalRow,
   type WorkerLeaseState,
   ScreenRawRow,
@@ -943,48 +942,6 @@ export class SupabaseAuthBackend implements AuthBackend {
   async defaultPriceProvider(): Promise<string | null> {
     const providers = await this.listPriceProviders();
     return providers.find((provider) => provider.isDefault)?.code ?? null;
-  }
-
-  // --- Deneysel özel pilot (Sprint 3.2) ---
-
-  async setExperimentalAccess(
-    userId: string,
-    code: string,
-    enabled: boolean,
-    adminId: string,
-    reason: string,
-    expiresAt: string | null,
-  ): Promise<void> {
-    await this.priceRpc<unknown>(
-      "experimental_access_set",
-      {
-        p_user_id: userId,
-        p_code: code,
-        p_enabled: enabled,
-        p_admin: adminId,
-        p_reason: reason,
-        p_expires: expiresAt,
-      },
-      "Deneysel erişim güncellenemedi",
-    );
-  }
-
-  async experimentalAccessAllowed(userId: string, code: string): Promise<boolean> {
-    const allowed = await this.priceRpc<boolean | null>(
-      "experimental_access_allowed",
-      { p_user_id: userId, p_code: code },
-      "Deneysel erişim okunamadı",
-    );
-    return allowed === true;
-  }
-
-  async listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]> {
-    const rows = await this.priceRpc<ExperimentalAccessRow[] | null>(
-      "experimental_access_list",
-      { p_code: code },
-      "Deneysel erişim listesi okunamadı",
-    );
-    return rows ?? [];
   }
 
   async approvePriceMapping(input: {

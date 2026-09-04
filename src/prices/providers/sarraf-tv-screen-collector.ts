@@ -7,7 +7,7 @@ import {
 } from "./sarraf-tv-screen-mapping";
 
 /**
- * SARRAF TV KAYSERİ EKRAN GÖZLEMİ — DENEYSEL, ÖZEL PİLOT
+ * SARRAF TV KAYSERİ EKRAN GÖZLEMİ
  *
  * Ölçülen gerçek: bayi fiyatları tarayıcıda HESAPLANIYOR. Kaynağın REST yanıtı
  * yalnızca açılışta parametreleri ve başlangıç fiyatını verir; canlı WebSocket
@@ -21,8 +21,7 @@ import {
  *  - Kullanıcının tarayıcısında çalışmaz.
  *
  * ÇALIŞMA KOŞULLARI:
- *  - `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` olmadan hiç çalışmaz.
- *  - Gerçek üretim dağıtımında bayrak YOK SAYILIR.
+ *  - `PRICE_SCREEN_WORKER_SECRET` olmadan hiç çalışmaz (tek gereken ayar).
  *  - CAPTCHA/etkileşim gerekirse BLOCKED döner; aşma DENENMEZ.
  *  - Ekran imzası beklenen biçimde değilse fail closed olur.
  *  - Yalnızca değerlemeye HAZIR güven seviyesindeki eşlemeler quote üretir.

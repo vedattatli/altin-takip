@@ -130,4 +130,34 @@ describe("altın olmayan varlıklar", () => {
       expect(product.pureGoldPerUnit, product.id).toBeGreaterThan(0);
     }
   });
+
+  /*
+   * BÖLÜNEBİLİRLİK BİRİMDEN OKUNAMAZ.
+   *
+   * "adet" birimi iki farklı şeyi taşır: bölünemeyen ziynet altını ve
+   * bölünebilen döviz. Kural bir zamanlayken `unit === "adet"` idi ve döviz
+   * eklenince kullanıcı 1.500,50 dolar giremez oldu.
+   */
+  it("döviz bölünebilir, ziynet altını bölünemez", () => {
+    expect(getProduct("usd")?.quantityScale).toBe(2);
+    expect(getProduct("eur")?.quantityScale).toBe(2);
+    expect(getProduct("gumus-gram")?.quantityScale).toBe(6);
+
+    for (const product of GOLD_PRODUCTS) {
+      if (product.category === "ziynet") expect(product.quantityScale, product.id).toBe(0);
+      if (product.unit === "gram") expect(product.quantityScale, product.id).toBe(6);
+    }
+  });
+
+  /*
+   * Veritabanı tetikleyicisi (0027) ile TypeScript tablosu birlikte
+   * değişmelidir; biri gevşer diğeri kalırsa kullanıcı formda kabul edilen
+   * miktarı kaydedemez.
+   */
+  it("veritabanı tetikleyicisi aynı ondalık tablosunu uygular", () => {
+    const migration = readFileSync("supabase/migrations/0027_quantity_scale_by_product.sql", "utf8");
+    expect(migration).toMatch(/when 'ziynet' then 0/);
+    expect(migration).toMatch(/when 'doviz' then 2/);
+    expect(migration).toMatch(/else 6/);
+  });
 });

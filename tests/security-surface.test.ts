@@ -62,8 +62,14 @@ describe("herkese açık kayıt korumalı kurulmuştur", () => {
   it("kayıt hız sınırlayıcıdan ve parola politikasından geçer", () => {
     const service = readCode(join("src", "server", "auth", "service.ts"));
     const register = service.slice(service.indexOf("async register("), service.indexOf("async login("));
-    expect(register).toMatch(/loginRateLimitBuckets/);
+    // Kayıt sayaçları GİRİŞ sayaçlarından ayrı olmalıdır: aksi hâlde bir
+    // kullanıcı adıyla "üye ol" spam'i o kullanıcıyı girişten kilitler.
+    expect(register).toMatch(/registerRateLimitBuckets/);
+    expect(register).not.toMatch(/loginRateLimitBuckets/);
     expect(register).toMatch(/rateLimiter\.check/);
+    // Başarılı kayıt da sayaca yazılır; yoksa her denemede yeni ad kullanan
+    // bir betik sınırsız hesap açar.
+    expect(register).toMatch(/await this\.recordFailure\(buckets\);/);
     expect(register).toMatch(/validatePassword/);
     expect(register).toMatch(/isReservedUsername/);
     // Parola tekrarı SUNUCUDA denetlenir; istemci kontrolü yeterli değildir.

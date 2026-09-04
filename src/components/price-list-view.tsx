@@ -29,6 +29,13 @@ const GROUPS: readonly { id: string; title: string; categories: readonly Product
   { id: "para", title: "Para", categories: ["doviz"] },
 ];
 
+/**
+ * Yukarıdaki listede adı geçmeyen bir kategori eklenirse ürünleri bu başlık
+ * altında görünür. Aksi hâlde yeni bir kategori bu ekrandan SESSİZCE düşerdi
+ * ve kimse fark etmezdi.
+ */
+const GROUPED_CATEGORIES = new Set(GROUPS.flatMap((group) => group.categories));
+
 function Row({
   name,
   buy,
@@ -78,6 +85,26 @@ export function PriceListView({ snapshot }: { snapshot: PriceSnapshot | null }) 
       },
     ),
   })).filter((group) => group.products.length > 0);
+
+  const ungrouped = GOLD_PRODUCTS.filter((product) => !GROUPED_CATEGORIES.has(product.category));
+  if (ungrouped.length > 0) {
+    groups.push({
+      id: "diger",
+      title: "Diğer",
+      categories: [],
+      products: ungrouped.map((product) => {
+        const quote = usableQuoteOrNull(snapshot, product.id, now);
+        const member = snapshot?.provider.memberProviders?.[product.id];
+        return {
+          id: product.id,
+          name: product.name,
+          buy: quote?.liquidationPrice ?? null,
+          sell: quote?.replacementPrice ?? null,
+          source: sourceBadgeFor(member?.provider)?.label ?? null,
+        };
+      }),
+    });
+  }
 
   return (
     <section className="space-y-4" data-testid="price-list">

@@ -144,17 +144,6 @@ export interface IngestionPayload {
   quarantined: IngestionQuarantineInput[];
 }
 
-/** Deneysel kaynağa erişim izni verilmiş portföy (yönetim ekranı). */
-export interface ExperimentalAccessRow {
-  username: string;
-  displayName: string;
-  portfolioId: string;
-  enabled: boolean;
-  approvedAt: string;
-  expiresAt: string | null;
-  reason: string;
-}
-
 /** Yönetici tarafından onaylanmış ekran eşlemesi. */
 export interface MappingApprovalRow {
   rawLabel: string;

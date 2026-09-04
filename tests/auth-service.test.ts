@@ -343,21 +343,55 @@ describe("herkese açık kayıt", () => {
 
   /*
    * Uç internete açıktır: hız sınırı OLMAZSA otomatik araçlar sınırsız hesap
-   * açar. Kayıt, giriş ucuyla AYNI sayaçları kullanır.
+   * açar. Kayıt sayaçları GİRİŞ sayaçlarından ayrıdır.
    */
   it("hız sınırına tabidir", async () => {
-    /*
-     * Sayaçlar kullanıcı adı bazlıdır; aynı adla tekrar tekrar denenince
-     * kilitlenir. Testte kombinasyon sayacı 3 denemede kilitleniyor.
-     */
     await service.register(input(), CLIENT);
     const attempts: number[] = [];
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
       const error = await service.register(input(), CLIENT).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(AppError);
       attempts.push((error as AppError).status);
     }
     // Bir noktadan sonra 409 (çakışma) değil 429 (çok fazla istek) döner.
     expect(attempts).toContain(429);
+  });
+
+  /*
+   * BAŞARILI KAYIT DA SAYILIR.
+   *
+   * Giriş sayacı yalnızca başarısız denemeyi sayar ve bu doğrudur. Kayıtta
+   * aynı kural, her seferinde YENİ bir kullanıcı adı kullanan bir betiğe
+   * sınırsız hesap açtırırdı: hiçbir deneme "başarısız" olmadığı için hiçbir
+   * sayaç ilerlemezdi.
+   */
+  it("her seferinde farklı kullanıcı adıyla sınırsız hesap açılamaz", async () => {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const result = await service
+        .register(input({ username: `yenikullanici${String(attempt)}` }), CLIENT)
+        .catch((cause: unknown) => cause);
+      statuses.push(result instanceof AppError ? result.status : 201);
+    }
+    expect(statuses).toContain(429);
+  });
+
+  /*
+   * KAYIT DENEMESİ GİRİŞİ KİLİTLEYEMEZ.
+   *
+   * Sayaçlar ortak olsaydı saldırgan, bilinen bir kullanıcı adıyla arka arkaya
+   * "üye ol" isteği göndererek o adın giriş sayacını doldurur ve hesabın
+   * gerçek sahibini dışarıda bırakırdı.
+   */
+  it("kayıt denemeleri mevcut kullanıcının girişini kilitlemez", async () => {
+    const victim = input({ username: "kurban" });
+    await service.register(victim, CLIENT);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await service.register(victim, CLIENT).catch(() => undefined);
+    }
+
+    const session = await service.login(victim.username, victim.password, CLIENT);
+    expect(session.user.username).toBe("kurban");
   });
 });

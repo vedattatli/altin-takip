@@ -7,14 +7,17 @@ import { formatDateTime } from "@/lib/format";
 import { Alert, Card, cx, SectionTitle } from "../ui";
 
 /**
- * Yönetici — Deneysel Kayseri Ekran Kaynağı (özel pilot).
+ * Yönetici — Kayseri Ekran Kaynağı.
  *
- * Bu ekran üç işi yapar:
+ * Bu ekran iki işi yapar:
  *  1. Kalıcı tarayıcı worker'ının kira ve heartbeat durumunu gösterir.
- *  2. Hangi kullanıcının deneysel kaynağı kullanabileceğini belirler.
- *  3. Ekran etiketi ↔ ürün eşlemelerini kanıtıyla onaylar.
+ *  2. Ekran etiketi ↔ ürün eşlemelerini kanıtıyla onaylar.
  *
  * Onaysız (CONVENTION) eşleme portföy değerlemesine ve MARKET_BASELINE'a GİRMEZ.
+ *
+ * ÜÇÜNCÜ BİR İŞ VARDI: "hangi kullanıcı bu kaynağı kullanabilir" izin listesi.
+ * Kaldırıldı. İkinci bir kapı katmanı yalnızca arıza üretiyordu — izin
+ * verilmemiş kaynaktaki ürünler sessizce fiyatsız kalıyordu.
  */
 
 export interface WorkerStateView {
@@ -23,16 +26,6 @@ export interface WorkerStateView {
   heartbeatAt: string;
   expiresAt: string;
   active: boolean;
-}
-
-export interface AccessRow {
-  username: string;
-  displayName: string;
-  portfolioId: string;
-  enabled: boolean;
-  approvedAt: string;
-  expiresAt: string | null;
-  reason: string;
 }
 
 export interface ApprovalRow {
@@ -64,7 +57,7 @@ export interface ProductOption {
   name: string;
 }
 
-export function AdminExperimentalView({
+export function AdminScreenSourceView({
   initialWorker,
   initialApprovals,
   products,
@@ -95,7 +88,7 @@ export function AdminExperimentalView({
 
   async function reload() {
     const [state, list] = await Promise.all([
-      apiFetch<{ access: AccessRow[]; worker: WorkerStateView | null }>("/api/admin/price-sources/experimental"),
+      apiFetch<{ worker: WorkerStateView | null }>("/api/admin/price-sources/screen-worker"),
       apiFetch<ApprovalRow[]>("/api/admin/price-sources/mappings"),
     ]);
     setWorker(state.worker);
@@ -117,7 +110,7 @@ export function AdminExperimentalView({
   }
 
   return (
-    <div className="space-y-5" data-testid="admin-experimental">
+    <div className="space-y-5" data-testid="admin-screen-source">
       <SectionTitle
         title="Kayseri Ekran Kaynağı"
         description="Sarraf TV Kayseri ekran gözlemi. Resmî API değildir ve lisanslı veri değildir; bu not bilerek durur."

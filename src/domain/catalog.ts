@@ -75,9 +75,29 @@ function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000;
 }
 
+/**
+ * MİKTAR ONDALIK SINIRI — kategoriden gelir, birimden DEĞİL.
+ *
+ * Ziynet altını bölünemez: çeyrek altın 1, 2, 3 adet olur; 1,5 adet olmaz.
+ * Döviz de "adet" ile tutulur ama bölünebilir; 1.500,50 dolar geçerlidir ve
+ * kuruş hassasiyeti yeter. Gram bazlı her şey (altın, gümüş) 6 ondalık.
+ *
+ * Bu tabloyu `unit === "adet"` kısayoluna geri çevirmeyin: döviz eklendiğinde
+ * tam olarak bu kısayol yüzünden kesirli döviz girilemiyordu.
+ */
+const QUANTITY_SCALE_BY_CATEGORY: Readonly<Record<ProductCategory, number>> = {
+  gram: 6,
+  kulce: 6,
+  ayarli: 6,
+  gumus: 6,
+  ziynet: 0,
+  doviz: 2,
+};
+
 export const GOLD_PRODUCTS: readonly GoldProduct[] = ENTRIES.map((entry, index) => ({
   ...entry,
   pureGoldPerUnit: round4(entry.milyem * entry.gramWeight),
+  quantityScale: QUANTITY_SCALE_BY_CATEGORY[entry.category],
   sortOrder: index,
 }));
 
@@ -120,6 +140,15 @@ export const NON_GOLD_CATEGORIES: readonly ProductCategory[] = ["gumus", "doviz"
 export function isGoldProduct(productId: string): boolean {
   const product = BY_ID.get(productId);
   return product ? !NON_GOLD_CATEGORIES.includes(product.category) : false;
+}
+
+/**
+ * Bir ürünün miktar ondalık sınırı. Ürün bilinmiyorsa gram varsayılanı (6)
+ * döner: bilinmeyen bir kimlik yüzünden geçerli bir miktarı reddetmek yerine
+ * katalog denetimine bırakılır (`requireProduct` zaten hata verir).
+ */
+export function quantityScaleFor(productId: string): number {
+  return BY_ID.get(productId)?.quantityScale ?? 6;
 }
 
 export function productsByCategory(): { category: ProductCategory; label: string; products: GoldProduct[] }[] {

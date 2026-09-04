@@ -150,7 +150,7 @@ const MOCK: ProviderDescriptor = {
 };
 
 /**
- * Sarraf TV Kayseri EKRAN GÖZLEMİ — deneysel, özel pilot.
+ * Sarraf TV Kayseri EKRAN GÖZLEMİ.
  *
  * `sarraf-pro-kayseri` ile AYRI bir kimliktir. Biri ileride gelebilecek yetkili
  * API sözleşmesi, diğeri tarayıcıda gözlenen ekrandır. Aynı kimlik altında
@@ -170,9 +170,11 @@ const SARRAF_TV_SCREEN: ProviderDescriptor = {
   referenceUrl: "https://kaysarder.org.tr/altin-fiyatlari",
   attribution:
     "Kayseri Sarraflar ve Kuyumcular Derneği fiyat sayfasından açılan Sarraf TV Kayseri ekranının " +
-    "normal tarayıcı oturumundaki gözlemidir. RESMÎ API DEĞİLDİR, lisanslı veri değildir; " +
-    "yalnızca yöneticinin izin verdiği portföylerde ve özel pilotta kullanılır.",
-  requiredEnv: ["PRICE_EXPERIMENTAL_SARRAF_SCREEN", "PRICE_SCREEN_WORKER_SECRET"],
+    "normal tarayıcı oturumundaki gözlemidir. RESMÎ API DEĞİLDİR ve lisanslı veri değildir.",
+  // Kaynağın çalışması için gereken TEK ayar. Burada bir zamanlar
+  // PRICE_EXPERIMENTAL_SARRAF_SCREEN de yazıyordu; o bayrak kaldırıldı ve
+  // listede kalması "eksik ayar var" izlenimi veriyordu.
+  requiredEnv: ["PRICE_SCREEN_WORKER_SECRET"],
   devOnly: false,
 };
 

@@ -20,7 +20,6 @@ import type {
   QuarantineRow,
   ScreenRawRow,
   ScreenRowsSnapshot,
-  ExperimentalAccessRow,
   MappingApprovalRow,
   WorkerLeaseState,
   PriceHistoryRow,
@@ -373,20 +372,6 @@ export interface AuthBackend {
   /** Açık global varsayılan kaynak (yoksa null). */
   defaultPriceProvider(): Promise<string | null>;
 
-  // --- Deneysel özel pilot (Sprint 3.2) ---
-  /** Yönetici, bir kullanıcının portföyüne deneysel kaynak erişimi verir/kaldırır. */
-  setExperimentalAccess(
-    userId: string,
-    code: string,
-    enabled: boolean,
-    adminId: string,
-    reason: string,
-    expiresAt: string | null,
-  ): Promise<void>;
-  /** Bu kullanıcının portföyü deneysel kaynağı kullanabilir mi? */
-  experimentalAccessAllowed(userId: string, code: string): Promise<boolean>;
-  /** İzin listesi (yalnızca yönetim). */
-  listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]>;
   /** Yönetici ekran eşlemesini onaylar veya geri alır. */
   approvePriceMapping(input: {
     code: string;

@@ -237,40 +237,6 @@ describe("3. deneysel erişim izin listesi", () => {
   }
 
   /*
-   * ÜRETİMDE YAŞANDI: ekran kaynağına izin vardı, gram altının geldiği
-   * Kapalıçarşı kaynağına yoktu. Portföyün bir kısmı fiyatlandı, gram
-   * "fiyat yok" kaldı ve kullanıcı uygulamayı bozuk sandı. Hibrit değerleme
-   * üç kaynağı BİRLİKTE kullanır; izin de plan bütünü için verilir.
-   */
-  it("plan kaynağına izin verilince plandaki DİĞER kaynaklara da verilir", async () => {
-    const { admin, user } = await setup();
-    const service = new AdminService(backend);
-    await service.setExperimentalAccess(
-      adminActor(admin),
-      user.id,
-      SCREEN_PROVIDER_CODE,
-      true,
-      "ozel pilot",
-      null,
-    );
-
-    for (const code of PLAN_PROVIDER_CODES) {
-      expect(await backend.experimentalAccessAllowed(user.id, code), code).toBe(true);
-    }
-  });
-
-  it("izin geri alınınca plandaki bütün kaynaklar kapanır", async () => {
-    const { admin, user } = await setup();
-    const service = new AdminService(backend);
-    await service.setExperimentalAccess(adminActor(admin), user.id, SCREEN_PROVIDER_CODE, true, "ac", null);
-    await service.setExperimentalAccess(adminActor(admin), user.id, SCREEN_PROVIDER_CODE, false, "kapat", null);
-
-    for (const code of PLAN_PROVIDER_CODES) {
-      expect(await backend.experimentalAccessAllowed(user.id, code), code).toBe(false);
-    }
-  });
-
-  /*
    * KULLANICI BAZLI İZİN LİSTESİ KALDIRILDI.
    *
    * Tek karar noktası yöneticinin `enabled` bayrağıdır. İkinci bir kapı
@@ -621,7 +587,7 @@ describe("7. yönetici onayı ve eşleme sürümü", () => {
   });
 
   it("yönetim ekranı eski sürümdeki onayı geçerli göstermez", () => {
-    const source = readFileSync(join(process.cwd(), "src/components/admin/admin-experimental-view.tsx"), "utf8");
+    const source = readFileSync(join(process.cwd(), "src/components/admin/admin-screen-source-view.tsx"), "utf8");
     // Sürüm karşılaştırması yapılıyor ve sonucu satırın görünümünü belirliyor.
     expect(source).toMatch(/row\.appliesToCurrentMapping === false/);
     expect(source).toMatch(/Geçersiz — eski eşleme sürümü/);

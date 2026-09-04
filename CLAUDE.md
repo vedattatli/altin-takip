@@ -150,6 +150,12 @@ Arayüz yönlendirmesine tek başına güvenme.
   eksikse bellek sınırlayıcısına **sessizce düşme**; açık yapılandırma hatası ver.
 - Giriş üç sayaçtan geçer: IP, kullanıcı adı, IP+kullanıcı adı (`loginRateLimitBuckets`).
   Başarılı girişte yalnızca kombinasyon sayacını sıfırla.
+- **Kayıt (üye olma) AYRI sayaç kullanır** (`registerRateLimitBuckets`, `register:` ön eki).
+  İki sebeple: (1) kayıt giriş sayacını doldursaydı saldırgan bilinen bir kullanıcı adıyla
+  "üye ol" spam'i yapıp hesabın gerçek sahibini GİRİŞTEN kilitlerdi; (2) giriş sayacı
+  yalnızca BAŞARISIZ denemeyi sayar — kayıtta her seferinde yeni ad kullanan bir betiğin
+  bütün denemeleri başarılı olur ve hiçbir sayaç ilerlemezdi. Kayıt ucunda BAŞARILI
+  deneme de sayaca yazılır.
 - Anahtarı ham saklama; `RATE_LIMIT_PEPPER` ile HMAC'le. Ham IP hiçbir loga/tabloya yazılmaz.
 - `X-Forwarded-For`'u doğrudan okuma; `resolveClientIp()` + `TRUSTED_PROXY_PROVIDER` kullan.
 - Sınırlayıcı sorgusu hata verirse isteği geçirme (fail closed).
@@ -174,6 +180,14 @@ Arayüz yönlendirmesine tek başına güvenme.
 
 ## Muhasebe kuralları (ihlal edilemez)
 
+- **Miktar ondalık sınırı ÜRÜNDEN gelir** (`product.quantityScale`), birimden değil.
+  `unit === "adet"` kısayolunu geri getirme: "adet" hem bölünemeyen ziynet altınını
+  (0 ondalık) hem de bölünebilen dövizi (2 ondalık) taşır; kısayol yüzünden kullanıcı
+  1.500,50 dolar giremiyordu. Aynı tablo veritabanında `enforce_transaction_unit`
+  tetikleyicisindedir (0027) ve ikisi birlikte değişir.
+- **Altın olmayan varlığın "has altın" karşılığını yazma.** Gümüş ve döviz portföy
+  DEĞERİNE girer, has altın gramına girmez; satırda "0 gr has" göstermek anlamsızdır.
+  Ayrım `isGoldProduct` ile yapılır.
 - **Finansal hesapta `number` kullanma.** Miktar/tutar API'de ondalık DİZE, motorda
   `decimal.js` (`src/domain/accounting`), veritabanında `numeric`. `decimal.js`'te
   `isPositive()` sıfır için de true döner; `> 0` için `greaterThan(0)` kullan.
@@ -315,8 +329,9 @@ Arayüz yönlendirmesine tek başına güvenme.
 
 - `tools/experimental/` altındaki araçlar ÜRETİM YOLUNUN PARÇASI DEĞİLDİR. Sağlayıcı kaydına
   otomatik ekleme, kullanıcı portföyüne bağlama.
-- Sarraf TV ekran toplayıcısı yalnızca `PRICE_EXPERIMENTAL_SARRAF_SCREEN=true` iken ve üretim
-  dağıtımı DIŞINDA çalışır. Veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir; "resmî API" denmez.
+- Sarraf TV ekran toplayıcısının TEK gereken ayarı `PRICE_SCREEN_WORKER_SECRET`'tır.
+  `PRICE_EXPERIMENTAL_SARRAF_SCREEN` / `PRICE_EXPERIMENTAL_PRIVATE_PILOT` bayrakları
+  KALDIRILDI; geri ekleme. Veri türü `LIVE_SCREEN_EXPERIMENTAL`'dir; "resmî API" denmez.
 - **CAPTCHA/bot koruması aşılmaz.** Etkileşim istenirse sonuç BLOCKED'dır. Sayfanın yüklediği
   koruma altyapısı raporlanır ama delinmez.
 - Artefaktlara cookie, authorization, token veya kişisel veri yazma; yazmadan önce
@@ -381,6 +396,14 @@ karar kondu: yöneticinin `enabled` bayrağı.
   `price_providers_enabled_requires_license` ile AYNI. Üçü birlikte değişir.
 - **Lisanssız/yapılandırılmamış kaynak hâlâ etkinleştirilemez.** Kapı gevşetilmedi;
   yalnızca "deneysel" ayrımı kalktı.
+- **Aynı kuralı iki yerde tutma.** 0023 tablo kısıtını düşürdü ama aynı kuralı uygulayan
+  üç RPC'yi (`price_providers_sync`, `price_provider_set_flags`, `price_preference_set`)
+  atladı; kapı kapalı kaldı ve katalog eşitlemesi `user_selectable` alanını her açılışta
+  SESSİZCE geri aldı. 0028 üçünü de düzeltti. Bir kuralı kaldırırken onu uygulayan
+  BÜTÜN yerleri ara — `tests/integrity.test.ts` bunu kilitler.
+- **Kullanıcı bazlı "deneysel erişim izin listesi" YOKTUR.** `experimental_access_*`
+  RPC'leri ve servis/arka uç yöntemleri kaldırıldı. Geri ekleme; tek karar noktası
+  yöneticinin `enabled` / `user_selectable` bayrağıdır.
 - **`selectable` ile `canEnable` ayrı kavramlardır.** `selectable` = kullanıcı
   seçebilir mi; `canEnable` = sistem bu kaynaktan fiyat çekebilir mi. Arayüzde
   etkinleştirme düğmesini `selectable`e bağlama — deneysel kaynak arayüzden hiç

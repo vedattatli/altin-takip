@@ -1,5 +1,6 @@
 import { appConfig } from "@/config/app.config";
 import { AccountingDecimal, dec } from "@/domain/accounting/decimal";
+import { getProduct } from "@/domain/catalog";
 
 /**
  * Biçimlendirme — YALNIZCA gösterim.
@@ -67,8 +68,18 @@ export function formatSignedMoney(value: NumericText): string {
   return `${sign}${formatMoney(value)}`;
 }
 
-export function formatQuantity(value: NumericText, unit: "gram" | "adet"): string {
-  const digits = unit === "adet" ? 0 : 6;
+/**
+ * Miktar gösterimi — basamak sayısı ÜRÜNDEN gelir.
+ *
+ * Birime bakmak yanlıştır: "adet" hem bölünemeyen çeyrek altını hem de
+ * bölünebilen doları taşır. Birime bakan eski sürüm 1.500,50 doları ekranda
+ * "1.501 adet" gösteriyordu — kullanıcının bakiyesini yuvarlayarak yalan
+ * söylüyordu.
+ */
+export function formatQuantity(value: NumericText, productId: string): string {
+  const product = getProduct(productId);
+  const unit = product?.unit ?? "gram";
+  const digits = product?.quantityScale ?? 6;
   const n = displayNumber(value, digits);
   if (Number.isNaN(n)) return `— ${unit}`;
   const formatted = new Intl.NumberFormat(LOCALE, {

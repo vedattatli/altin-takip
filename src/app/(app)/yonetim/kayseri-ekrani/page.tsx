@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 
 import {
-  AdminExperimentalView,
+  AdminScreenSourceView,
   type ApprovalRow,
   type WorkerStateView,
-} from "@/components/admin/admin-experimental-view";
+} from "@/components/admin/admin-screen-source-view";
 import { GOLD_PRODUCTS } from "@/domain/catalog";
 import { SARRAF_TV_SCREEN_MAPPING_VERSION } from "@/prices/providers/sarraf-tv-screen-mapping";
 import { getAdminService, getPriceIngestionService, requireCurrentAdmin } from "@/server/auth";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 const SCREEN_CODE = "sarraf-tv-kayseri-screen";
 
-export default async function AdminExperimentalPage() {
+export default async function AdminScreenSourcePage() {
   const actor = await requireCurrentAdmin();
   await getPriceIngestionService().syncCatalog();
 
@@ -26,7 +26,7 @@ export default async function AdminExperimentalPage() {
   ]);
 
   return (
-    <AdminExperimentalView
+    <AdminScreenSourceView
       initialWorker={worker}
       initialApprovals={approvals}
       products={GOLD_PRODUCTS.map((product) => ({ id: product.id, name: product.name }))}

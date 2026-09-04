@@ -87,6 +87,44 @@ describe("BUY komutu", () => {
     expect(tooFine.ok).toBe(false);
   });
 
+  /*
+   * MİKTAR ONDALIĞI BİRİMDEN DEĞİL ÜRÜNDEN GELİR.
+   *
+   * Dolar ve euro da "adet" birimiyle tutulur ama BÖLÜNEBİLİR. Kural birime
+   * bağlıyken kullanıcı 1.500,50 dolar kaydedemiyordu; bakiyesini ya yuvarlamak
+   * ya da eksik girmek zorundaydı.
+   */
+  it("döviz kesirli girilebilir; ziynet altını girilemez", () => {
+    const fx = parseLedgerCommand(
+      buyCommand({ productId: "usd", quantity: "1500.50", unitPrice: "48" }),
+      { now: NOW },
+    );
+    expect(fx.ok).toBe(true);
+    if (fx.ok) expect(fx.request.quantity).toBe("1500.5");
+
+    // Kuruşun altı kabul edilmez: sınır gevşetilmedi, doğru yere taşındı.
+    const tooFine = parseLedgerCommand(
+      buyCommand({ productId: "usd", quantity: "1500.505", unitPrice: "48" }),
+      { now: NOW },
+    );
+    expect(tooFine.ok).toBe(false);
+    if (!tooFine.ok) expect(tooFine.errors.quantity).toMatch(/2 ondalık/);
+
+    // Ziynet altını hâlâ bölünemez.
+    const coin = parseLedgerCommand(
+      buyCommand({ productId: "yeni-ceyrek", quantity: "1.5", unitPrice: "11000" }),
+      { now: NOW },
+    );
+    expect(coin.ok).toBe(false);
+
+    // Gümüş gram bazlıdır; 6 ondalığa kadar girilebilir.
+    const silver = parseLedgerCommand(
+      buyCommand({ productId: "gumus-gram", quantity: "12.345678", unitPrice: "100" }),
+      { now: NOW },
+    );
+    expect(silver.ok).toBe(true);
+  });
+
   it("NaN / Infinity / bilimsel gösterim / negatif / sıfır tutarlar reddedilir", () => {
     for (const unitPrice of ["NaN", "Infinity", "1e3", "-5", "0", "abc"]) {
       const result = parseLedgerCommand(buyCommand({ unitPrice }), { now: NOW });

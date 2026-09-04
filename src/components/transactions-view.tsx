@@ -111,7 +111,7 @@ function LedgerRow({
             </p>
           </div>
           <p className="tabular mt-1 text-xs text-muted" data-testid="ledger-row-summary">
-            {formatQuantity(entry.quantity, entry.unit)} · {formatOccurred(entry.occurredAt, entry.occurredTime)}
+            {formatQuantity(entry.quantity, entry.productId)} · {formatOccurred(entry.occurredAt, entry.occurredTime)}
           </p>
           {prices ? <p className="tabular mt-0.5 text-xs text-muted">{prices}</p> : null}
           {hasFees || hasWorkmanship ? (
@@ -288,7 +288,7 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
               distinguish: true,
             })}{" "}
             ·{" "}
-            {formatQuantity(pendingVoid.quantity, pendingVoid.unit)} ·{" "}
+            {formatQuantity(pendingVoid.quantity, pendingVoid.productId)} ·{" "}
             {formatOccurred(pendingVoid.occurredAt, pendingVoid.occurredTime)}.
             Kayıt silinmez; &quot;İptal edildi&quot; olarak listede kalır ve toplamlar yeniden hesaplanır.
             Bir alışın iptali sonraki bir satışı eldeki miktarın üstüne çıkarıyorsa iptal reddedilir.

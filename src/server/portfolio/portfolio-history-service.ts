@@ -26,6 +26,10 @@ import type { PriceHistoryRow } from "@/server/prices/types";
  *     Eksik ürünü sıfır saymak toplam değeri düşük gösterirdi.
  *  4. Fiyat ileriye taşınır ama sonsuza kadar değil: `MAX_CARRY_FORWARD_MS`.
  *     Kaynak sustuğunda son fiyat sabit çizgi olarak uzatılmaz.
+ *  5. Aralık içinde alım/satım yapıldıysa bu AÇIKÇA bildirilir
+ *     (`ledgerChangesInRange`). Portföy değerindeki sıçrama o zaman fiyat
+ *     hareketi DEĞİL, para giriş/çıkışıdır; grafiğin altındaki değişim rakamı
+ *     "kâr" gibi okunamaz.
  */
 
 /** Bir fiyat en fazla bu kadar süre "hâlâ geçerli" sayılıp ileri taşınır. */
@@ -65,6 +69,15 @@ export interface PortfolioHistory {
   medianStepMs: number | null;
   /** Hiç fiyat geçmişi yoksa true: grafik yerine açıklama gösterilir. */
   empty: boolean;
+  /**
+   * Çizilen aralıkta kaç AKTİF defter kaydı var (alış, satış, mevcut ekleme).
+   *
+   * Sıfırdan büyükse ilk-son farkı yalnızca fiyat hareketi değildir: kullanıcı
+   * bu aralıkta varlık eklemiş veya çıkarmıştır. Arayüz bunu bilmeden farkı
+   * yeşil bir "kâr" gibi gösterirdi — 50.000 TL'lik bir alım "+%500 kazanç"
+   * diye okunurdu.
+   */
+  ledgerChangesInRange: number;
 }
 
 interface PriceTimeline {
@@ -140,7 +153,7 @@ export class PortfolioHistoryService {
 
     const timelines = buildTimelines(rows);
     if (timelines.size === 0) {
-      return { range, points: [], medianStepMs: null, empty: true };
+      return { range, points: [], medianStepMs: null, empty: true, ledgerChangesInRange: 0 };
     }
 
     // Nokta zamanları: gerçekte gözlem yapılan anlar. Eşit aralığa ZORLANMAZ.
@@ -184,11 +197,25 @@ export class PortfolioHistoryService {
       });
     }
 
+    // Yalnızca ÇİZİLEN pencere sayılır: grafikte görünmeyen bir işlem çizgiyi
+    // de kırmaz, dolayısıyla uyarı gerektirmez.
+    const from = points.length > 0 ? Date.parse(points[0]!.at) : 0;
+    const to = points.length > 0 ? Date.parse(points[points.length - 1]!.at) : 0;
+    const ledgerChangesInRange =
+      points.length < 2
+        ? 0
+        : entries.filter((entry) => {
+            if (entry.status !== "ACTIVE") return false;
+            const instant = Date.parse(entry.occurredAtInstant);
+            return Number.isFinite(instant) && instant > from && instant <= to;
+          }).length;
+
     return {
       range,
       points,
       medianStepMs: medianStep(points.map((point) => Date.parse(point.at))),
       empty: points.length === 0,
+      ledgerChangesInRange,
     };
   }
 }

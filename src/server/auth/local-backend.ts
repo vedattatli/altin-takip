@@ -33,7 +33,6 @@ import {
   type IngestionQuoteInput,
   type IngestionResult,
   type QuarantineRow,
-  type ExperimentalAccessRow,
   type MappingApprovalRow,
   type WorkerLeaseState,
   type PricePreferenceResult,
@@ -160,7 +159,6 @@ interface StoreShape {
   pricePreferences: StoredPricePreference[];
   priceSourceEvents: StoredPriceSourceEvent[];
   priceQuarantine: StoredPriceQuarantine[];
-  experimentalAccess: StoredExperimentalAccess[];
   mappingApprovals: StoredMappingApproval[];
   workerNonces: { nonce: string; workerId: string; seenAt: string }[];
   workerLeases: StoredWorkerLease[];
@@ -195,18 +193,6 @@ interface StoredPriceProvider extends ProviderSyncInput {
   mappingVersion: string;
   mappingCount: number;
   health: ProviderStateRow["health"];
-}
-
-/** Deneysel kaynağa portföy bazlı erişim izni. */
-interface StoredExperimentalAccess {
-  portfolioId: string;
-  userId: string;
-  providerCode: string;
-  enabled: boolean;
-  approvedBy: string | null;
-  approvedAt: string;
-  expiresAt: string | null;
-  reason: string;
 }
 
 /** Yönetici onaylı ekran eşlemesi. */
@@ -304,7 +290,6 @@ function emptyStore(): StoreShape {
     pricePreferences: [],
     priceSourceEvents: [],
     priceQuarantine: [],
-    experimentalAccess: [],
     mappingApprovals: [],
     workerNonces: [],
     workerLeases: [],
@@ -1292,8 +1277,9 @@ export class LocalAuthBackend implements AuthBackend {
     this.refresh();
     const provider = this.providerRow(code);
     if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
-    // Sunucudaki kısıtla aynı: deneysel kaynak da etkinleştirilebilir ama
-    // LİSANSLI SAYILMAZ ve "kullanıcıya açık" listesine giremez.
+    // Sunucudaki kısıtla aynı (0028): lisanssız kaynak da etkinleştirilebilir
+    // VE kullanıcı listesine açılabilir. Lisans durumu ayrı bir alandır,
+    // arayüzde açıkça yazar; erişimi engellemez.
     const activatable = ["LICENSED", "DEV_ONLY", "EXPERIMENTAL_PRIVATE"];
     if (enabled && !activatable.includes(provider.licenseStatus)) {
       throw new ProviderNotSelectableError(code, "Bu kaynak lisans/izin olmadan etkinleştirilemez.");
@@ -1554,76 +1540,6 @@ export class LocalAuthBackend implements AuthBackend {
     return this.store.priceProviders.find((provider) => provider.isDefault)?.code ?? null;
   }
 
-  // --- Deneysel özel pilot (Sprint 3.2) ---
-
-  async setExperimentalAccess(
-    userId: string,
-    code: string,
-    enabled: boolean,
-    adminId: string,
-    reason: string,
-    expiresAt: string | null,
-  ): Promise<void> {
-    this.refresh();
-    const provider = this.providerRow(code);
-    if (!provider) throw new Error(`Bilinmeyen fiyat sağlayıcısı: ${code}`);
-    if (provider.licenseStatus !== "EXPERIMENTAL_PRIVATE") {
-      throw new ProviderNotSelectableError(code, "Bu kaynak deneysel değildir; izin listesi kullanılamaz.");
-    }
-    const portfolio = this.store.portfolios.find((row) => row.userId === userId);
-    if (!portfolio) throw new Error("Portföy bulunamadı");
-    const existing = this.store.experimentalAccess.find(
-      (row) => row.portfolioId === portfolio.id && row.providerCode === code,
-    );
-    if (existing) {
-      existing.enabled = enabled;
-      existing.approvedBy = adminId;
-      existing.approvedAt = this.nowISO();
-      existing.expiresAt = expiresAt;
-      existing.reason = reason;
-    } else {
-      this.store.experimentalAccess.push({
-        portfolioId: portfolio.id,
-        userId,
-        providerCode: code,
-        enabled,
-        approvedBy: adminId,
-        approvedAt: this.nowISO(),
-        expiresAt,
-        reason,
-      });
-    }
-    this.write();
-  }
-
-  async experimentalAccessAllowed(userId: string, code: string): Promise<boolean> {
-    this.refresh();
-    const row = this.store.experimentalAccess.find(
-      (candidate) => candidate.userId === userId && candidate.providerCode === code,
-    );
-    if (!row || !row.enabled) return false;
-    if (row.expiresAt && Date.parse(row.expiresAt) <= Date.parse(this.nowISO())) return false;
-    return true;
-  }
-
-  async listExperimentalAccess(code: string): Promise<ExperimentalAccessRow[]> {
-    this.refresh();
-    return this.store.experimentalAccess
-      .filter((row) => row.providerCode === code)
-      .map((row) => {
-        const user = this.store.users.find((candidate) => candidate.id === row.userId);
-        return {
-          username: user?.username ?? "(bilinmiyor)",
-          displayName: user?.displayName ?? "",
-          portfolioId: row.portfolioId,
-          enabled: row.enabled,
-          approvedAt: row.approvedAt,
-          expiresAt: row.expiresAt,
-          reason: row.reason,
-        };
-      })
-      .sort((a, b) => a.username.localeCompare(b.username));
-  }
 
   async approvePriceMapping(input: {
     code: string;

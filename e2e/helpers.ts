@@ -242,7 +242,7 @@ export async function addPurchase(
 ) {
   await page.getByTestId("add-buy").click();
   if (options.product) {
-    await page.getByLabel("Altın türü").selectOption({ label: options.product });
+    await page.getByLabel("Varlık türü").selectOption({ label: options.product });
   }
   await page.getByLabel(/^Miktar/).fill(options.quantity);
   await page.getByLabel(/^Birim alış fiyatı/).fill(options.unitPrice);
@@ -259,7 +259,7 @@ export async function addSale(
 ) {
   await page.getByTestId("add-sell").click();
   if (options.product) {
-    await page.getByLabel("Altın türü").selectOption({ label: options.product });
+    await page.getByLabel("Varlık türü").selectOption({ label: options.product });
   }
   await page.getByLabel(/^Miktar/).fill(options.quantity);
   await page.getByLabel(/^Birim satış fiyatı/).fill(options.unitPrice);

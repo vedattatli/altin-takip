@@ -3,6 +3,7 @@ import { formatRetryAfter } from "@/auth/rate-limit";
 import {
   DEFAULT_LOGIN_RATE_LIMIT_POLICY,
   loginRateLimitBuckets,
+  registerRateLimitBuckets,
   type LoginRateLimitBucket,
   type LoginRateLimitPolicy,
   type LoginRateLimiter,
@@ -154,19 +155,32 @@ export class AuthService {
     clientKey: string,
   ): Promise<UserProfile> {
     const username = validateUsername(input.username ?? "");
-    const buckets = loginRateLimitBuckets(clientKey, username.value, this.loginRateLimits);
+
+    /*
+     * KAYIT SAYACI GİRİŞ SAYACINDAN AYRIDIR (bkz. registerRateLimitBuckets).
+     *
+     * Giriş sayaçlarını kullanmak iki hata doğuruyordu:
+     *  - bilinen bir kullanıcı adıyla "üye ol" spam'i o kullanıcının GİRİŞ
+     *    sayacını doldurup gerçek sahibini kilitliyordu;
+     *  - yalnızca BAŞARISIZ denemeler sayıldığı için, her seferinde yeni bir
+     *    kullanıcı adıyla başarıyla hesap açan bir betik hiçbir sayaca
+     *    takılmadan sınırsız hesap açabiliyordu.
+     *
+     * Bu yüzden burada her deneme — BAŞARILI OLAN DÂHİL — sayaca yazılır.
+     */
+    const buckets = registerRateLimitBuckets(clientKey, username.value);
     const decisions = await Promise.all(
       buckets.map((bucket) => this.rateLimiter.check(bucket.key, bucket.settings)),
     );
     const locked = decisions.find((decision) => !decision.allowed);
-    if (locked) throw this.lockedOut(locked.retryAfterMs);
+    if (locked) throw this.registerLockedOut(locked.retryAfterMs);
+    // Denemeyi ÖNCE yaz: aşağıdaki her çıkış yolu (hata ya da başarı) sayılmış olur.
+    await this.recordFailure(buckets);
 
     if (!username.ok) {
-      await this.recordFailure(buckets);
       throw badRequest(username.error ?? "Kullanıcı adı geçersiz.");
     }
     if (isReservedUsername(username.value)) {
-      await this.recordFailure(buckets);
       throw badRequest("Bu kullanıcı adı sistem tarafından ayrılmıştır.");
     }
 
@@ -185,8 +199,6 @@ export class AuthService {
 
     const existing = await this.backend.findProfileByUsername(username.value);
     if (existing) {
-      // Sayaç ilerletilir: kullanıcı adı taraması ücretsiz olmasın.
-      await this.recordFailure(buckets);
       throw conflict("Bu kullanıcı adı zaten kullanılıyor.");
     }
 
@@ -252,6 +264,14 @@ export class AuthService {
       buckets.map((bucket) => this.rateLimiter.recordFailure(bucket.key, bucket.settings)),
     );
     return Math.max(0, ...results.map((result) => result.retryAfterMs));
+  }
+
+  /** Kayıt ucu için ayrı mesaj: burada "başarısız giriş" diye bir şey yoktur. */
+  private registerLockedOut(retryAfterMs: number): AppError {
+    return tooManyRequests(
+      `Çok fazla kayıt denemesi. ${formatRetryAfter(retryAfterMs)} sonra tekrar deneyin.`,
+      retryAfterMs,
+    );
   }
 
   private lockedOut(retryAfterMs: number): AppError {

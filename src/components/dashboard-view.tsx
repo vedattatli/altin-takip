@@ -30,6 +30,7 @@ import {
   VALUATION_PLAN_DESCRIPTION,
   VALUATION_PLAN_NAME,
 } from "@/prices/valuation-plan";
+import { isGoldProduct } from "@/domain/catalog";
 import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
 import { PortfolioChart } from "./portfolio-chart";
@@ -129,8 +130,14 @@ function HoldingRow({
             <CostQualityBadge holding={holding} />
             <SourceBadge productId={product.id} quoteProvider={quote?.provider ?? null} />
           </div>
+          {/*
+            "has" karşılığı YALNIZCA altında yazılır. Gümüş ve dövizin has altın
+            karşılığı yoktur; satırda "0 gr has" yazmak ürünü değersiz gibi
+            gösteren anlamsız bir bilgiydi.
+          */}
           <p className="tabular mt-0.5 text-xs text-muted">
-            {formatQuantity(position.quantity, product.unit)} · {formatGrams(holding.pureGoldGrams)} has
+            {formatQuantity(position.quantity, product.id)}
+            {isGoldProduct(product.id) ? ` · ${formatGrams(holding.pureGoldGrams)} has` : ""}
           </p>
           <p className="tabular mt-0.5 text-xs text-muted">
             Ortalama maliyet: {position.averageCost ? formatMoney(position.averageCost) : "—"}/{product.unit}
@@ -520,7 +527,11 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           title="Varlıklarım"
           description={
             isOpen
-              ? `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
+              ? // Portföyde hiç altın yoksa (yalnız gümüş/döviz) "0 gr has altın"
+                // yazmak yanlış olurdu; o durumda has altın satırı hiç yazılmaz.
+                dec(summary.totalPureGoldGrams).greaterThan(0)
+                ? `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
+                : `${summary.positionCount} varlık`
               : isClosed
                 ? "Açık pozisyon yok"
                 : undefined

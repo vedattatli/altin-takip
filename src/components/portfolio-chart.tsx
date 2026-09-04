@@ -40,6 +40,8 @@ interface HistoryResponse {
   points: HistoryPoint[];
   medianStepMs: number | null;
   empty: boolean;
+  /** Çizilen aralıkta yapılan alış/satış/mevcut ekleme sayısı. */
+  ledgerChangesInRange: number;
 }
 
 const VIEW_WIDTH = 600;
@@ -143,6 +145,20 @@ export function PortfolioChart() {
   const changePct = change !== null && first ? (change / first) * 100 : null;
   const partial = points.some((point) => point.missingProducts > 0);
 
+  /*
+   * ARALIK İÇİNDE ALIM/SATIM VARSA FARK "KÂR" DEĞİLDİR.
+   *
+   * Grafik portföyün DEĞERİNİ çizer. Kullanıcı aralık içinde altın aldıysa
+   * değer, fiyat hiç değişmese bile yükselir. Bu farkı yeşil bir yüzdeyle
+   * göstermek 50.000 TL'lik bir alımı "+%500 kazanç" diye okuturdu.
+   *
+   * Bu durumda rakam GİZLENMEZ — portföy değeri gerçekten o kadar değişti —
+   * ama kâr/zarar rengi kaldırılır ve neyin dâhil olduğu yazılır. Gerçek
+   * kâr/zarar zaten üstteki K/Z kartlarında, maliyete karşı hesaplanıyor.
+   */
+  const flows = data?.ledgerChangesInRange ?? 0;
+  const changeIsPriceOnly = flows === 0;
+
   return (
     <Card className="p-4" data-testid="portfolio-chart">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -151,13 +167,21 @@ export function PortfolioChart() {
           <p className="mt-0.5 text-xs text-muted">Bozdurma değerinin zaman içindeki seyri</p>
         </div>
         {change !== null && changePct !== null ? (
-          <p
-            className={cx("tabular text-sm font-semibold", change >= 0 ? "text-positive" : "text-negative")}
-            data-testid="chart-change"
-          >
-            {change >= 0 ? "+" : "−"}
-            {formatMoney(Math.abs(change).toFixed(2))} ({changePct >= 0 ? "+" : "−"}
-            {Math.abs(changePct).toFixed(2)}%)
+          <p className="text-right">
+            <span
+              className={cx(
+                "tabular text-sm font-semibold",
+                !changeIsPriceOnly ? "text-ink" : change >= 0 ? "text-positive" : "text-negative",
+              )}
+              data-testid="chart-change"
+            >
+              {change >= 0 ? "+" : "−"}
+              {formatMoney(Math.abs(change).toFixed(2))} ({changePct >= 0 ? "+" : "−"}
+              {Math.abs(changePct).toFixed(2)}%)
+            </span>
+            <span className="mt-0.5 block text-[11px] font-normal text-subtle" data-testid="chart-change-basis">
+              {changeIsPriceOnly ? "yalnızca fiyat hareketi" : "alım/satım dâhil — kâr/zarar değildir"}
+            </span>
           </p>
         ) : null}
       </div>
@@ -248,6 +272,9 @@ export function PortfolioChart() {
         <p className="mt-2 break-words text-[11px] leading-relaxed text-subtle" data-testid="chart-note">
           {String(points.length)} gerçek gözlem çizildi. {describeStep(data?.medianStepMs ?? null)} Noktaların arası
           doldurulmaz; grafik yalnızca fiyat geldiğinde kırılır.
+          {changeIsPriceOnly
+            ? ""
+            : ` Bu aralıkta ${String(flows)} işlem yaptınız; çizgideki sıçramaların bir kısmı fiyat değil, eklediğiniz veya çıkardığınız varlıktır.`}
           {partial ? " Bazı noktalarda elde olan ürünlerin bir kısmının fiyatı yoktu; o ürünler toplama katılmadı." : ""}
         </p>
       ) : null}

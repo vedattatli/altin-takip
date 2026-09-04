@@ -16,7 +16,9 @@ import type { LedgerAppendRequest, LedgerCommand, PriceSnapshotInput } from "./t
  * Komut doğrulama — istemciden gelen gövde SIKI biçimde denetlenir.
  *
  * - Ürün katalogdan; birim istemciden ALINMAZ.
- * - Miktar: gram üründe en fazla 6 ondalık, adet üründe yalnızca pozitif tam sayı.
+ * - Miktar: sınırı ÜRÜN belirler (`product.quantityScale`) — gram/gümüş 6 ondalık,
+ *   ziynet altını tam sayı, döviz 2 ondalık. Birime bakmak yanlıştır: "adet"
+ *   hem bölünemeyen çeyrek altını hem de bölünebilen doları taşır.
  * - Tutarlar: pozitif ondalık dize; NaN/Infinity/bilimsel gösterim/aşırı büyük değer/
  *   iç boşluk/belirsiz ayırıcı reddedilir.
  * - Tarih: gerçek takvim tarihi (YYYY-MM-DD, Europe/Istanbul); isteğe bağlı saat HH:MM;
@@ -148,14 +150,13 @@ function parseClientRequestId(raw: unknown, errors: CommandErrors): string | nul
 }
 
 export function parseQuantity(raw: unknown, product: GoldProduct, errors: CommandErrors): string {
-  const parsed = parseDecimalInput(raw, {
-    maxScale: product.unit === "adet" ? 0 : QUANTITY_SCALE,
-    allowZero: false,
-  });
+  // Sınır üründen gelir; QUANTITY_SCALE yalnızca üst tavandır.
+  const maxScale = Math.min(product.quantityScale, QUANTITY_SCALE);
+  const parsed = parseDecimalInput(raw, { maxScale, allowZero: false });
   if (!parsed.ok) {
     errors.quantity =
-      product.unit === "adet" && parsed.error.includes("tam sayı")
-        ? "Adet ile takip edilen ürünlerde miktar pozitif tam sayı olmalıdır."
+      maxScale === 0 && parsed.error.includes("tam sayı")
+        ? "Bu ürün adet ile takip edilir; miktar pozitif tam sayı olmalıdır."
         : parsed.error === "Geçerli bir sayı girin."
           ? "Miktar için geçerli bir sayı girin."
           : parsed.error.replace("Değer", "Miktar");

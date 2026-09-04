@@ -133,7 +133,7 @@ test.describe("görünüm modu", () => {
    * ürün eklemeyi engellememelidir.
    *
    * Sadelik korunuyor: altı ürün HÂLÂ en üstte ve ilk sıralarda; gerisi
-   * "Tüm altın türleri" başlığı altında.
+   * "Tüm varlıklar" başlığı altında.
    */
   test("altı ürün en üstte; kataloğun tamamı seçilebilir", async ({ page }) => {
     const username = scopedUsername("altiurun");
@@ -141,7 +141,7 @@ test.describe("görünüm modu", () => {
 
     await gotoReady(page, "/islemler");
     await page.getByTestId("add-buy").click();
-    const select = page.getByLabel("Altın türü");
+    const select = page.getByLabel("Varlık türü");
     const labels = await select.locator("option").allTextContents();
 
     // İlk altı sıra değişmedi: sık kullanılanlar önce gelir.
@@ -184,7 +184,7 @@ test.describe("görünüm modu", () => {
     // Ve satılabilmesi için seçim listesine eklenir.
     await gotoReady(page, "/islemler");
     await page.getByTestId("add-buy").click();
-    const labels = await page.getByLabel("Altın türü").locator("option").allTextContents();
+    const labels = await page.getByLabel("Varlık türü").locator("option").allTextContents();
     expect(labels.join("|")).toContain("Cumhuriyet");
   });
 });

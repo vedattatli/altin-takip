@@ -133,6 +133,9 @@ export type AdminAction =
   | "price.refresh"
   | "price.quarantine_view"
   | "price.default_source"
+  | "price.screen_worker"
+  // Kullanıcı bazlı deneysel izin listesi kaldırıldı; eylem artık ÜRETİLMEZ
+  // ama geçmiş denetim kayıtları için korunur (denetim kaydı değiştirilemez).
   | "price.experimental_access"
   | "price.mapping_approve"
   | "data.export"
