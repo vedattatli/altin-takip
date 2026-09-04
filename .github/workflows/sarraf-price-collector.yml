@@ -26,10 +26,17 @@ on:
   # Elle çalıştırma: doğrulama ve acil güncelleme için.
   workflow_dispatch:
   schedule:
-    # Saat başı yoğunluğundan kaçınmak için 17. dakika. GitHub zamanlanmış
-    # koşumları yoğun anlarda geciktirebilir; bu best-effort bir programdır.
-    # Sıklık ücretsiz kotaya göre seçildi: bkz. docs/CLOUD_PRICE_COLLECTOR.md
-    - cron: "17 * * * *"
+    # 5 dakika, GitHub'ın izin verdiği EN SIK programdır; daha sık istenemez.
+    #
+    # Depo public olduğu için Actions dakikaları ücretsiz ve sınırsızdır —
+    # private iken saatlik program bile aylık 2.000 dakikalık kotanın
+    # %70'ini yiyordu. Depo tekrar private yapılırsa bu satır saatliğe
+    # döndürülmelidir, yoksa kota ilk günlerde biter.
+    #
+    # GitHub zamanlanmış koşumları yoğun anlarda geciktirir veya atlar; bu
+    # best-effort bir programdır, garanti değildir. Gerçekten sürekli fiyat
+    # için kalıcı worker (services/sarraf-screen-worker/) kullanılır.
+    - cron: "*/5 * * * *"
 
 # Aynı anda tek koşum: önceki koşum sürerken ikincisi paralel fiyat göndermesin.
 concurrency:

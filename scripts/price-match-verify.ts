@@ -16,8 +16,8 @@
  *
  * GERÇEK KULLANICILARA DOKUNMAZ
  * Panel okuması için GEÇİCİ bir test kullanıcısı oluşturulur, sonunda
- * kullanıcı ve bütün verisi SİLİNİR. Vedat ve bilalozdemir hesaplarına
- * hiçbir işlem yapılmaz.
+ * kullanıcı ve bütün verisi SİLİNİR. Gerçek pilot hesaplarına hiçbir işlem
+ * yapılmaz.
  */
 
 import { readFileSync } from "node:fs";

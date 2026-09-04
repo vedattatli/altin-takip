@@ -14,7 +14,7 @@
  *   - çapraz erişimin ENGELLENDİĞİNİ doğrular,
  *   - kullanıcıları ve verilerini SİLER.
  *
- * Vedat ve bilalozdemir hesaplarına DOKUNMAZ.
+ * Gerçek pilot hesaplarına DOKUNMAZ.
  */
 
 import { readFileSync } from "node:fs";
