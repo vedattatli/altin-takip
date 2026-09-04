@@ -201,7 +201,7 @@ test.describe("yönetim paneli", () => {
     await page.getByTestId("open-delete-user").click();
 
     await expect(page.getByText("Bu işlem geri alınamaz")).toBeVisible();
-    await expect(page.getByText(/portföy kaydı ile/)).toBeVisible();
+    await expect(page.getByText(/hesabı, portföyü ve/)).toBeVisible();
 
     // Yanlış onay metni silmeyi engeller.
     await page.getByLabel(/Onaylamak için kullanıcı adını yazın/).fill("yanlisad");
@@ -278,7 +278,8 @@ test.describe("yetkilendirme", () => {
 
     await signInAsAdmin(page);
     await gotoReady(page, `/yonetim/${user.id}`);
-    await expect(page.getByText("Kullanıcının portföyü")).toBeVisible();
+    // Yönetici portföy GÖRMEZ; görüntülenen şey hesabın kendisidir.
+    await expect(page.getByText("Aktif oturumlar")).toBeVisible();
 
     const response = await browserApi<{ action: string; targetUsername: string | null }[]>(
       page,
@@ -289,7 +290,7 @@ test.describe("yetkilendirme", () => {
     const rows = response.data!;
 
     const entries = rows.filter((row) => row.targetUsername === username);
-    expect(entries.some((row) => row.action === "user.portfolio_view")).toBe(true);
+    expect(entries.some((row) => row.action === "user.account_view")).toBe(true);
     expect(JSON.stringify(rows)).not.toContain(TEST_PASSWORD);
   });
 });
