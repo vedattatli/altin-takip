@@ -126,8 +126,11 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } },
     },
     {
-      name: "tablet-768",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
+      // Tablet/küçük masaüstü. 1024 px, iki sütunlu panel düzeninin ALT
+      // eşiğidir: bu genişlikte panel dashboard'un altına iner ve kartlar
+      // sıkışmaz. Kırılım davranışı tam burada sınanır.
+      name: "tablet-1024",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } },
     },
     {
       name: "masaustu-1440",

@@ -538,8 +538,30 @@ describe("8. Sarraf TV ekran okuma mantığı", () => {
   it("belirsiz veya katalog dışı satırlar tahmin edilmez", () => {
     const result = extractQuotes(rows, "dom");
     const reasons = new Map(result.unresolved.map((row) => [row.rawProductName, row.reason]));
-    expect(reasons.get("ATA - REŞAT LİRA")).toBe("TEK_SATIRDA_İKİ_ÜRÜN");
     expect(reasons.get("KÜLÇE GÜMÜŞ")).toBe("ALTIN_DEĞİL");
+    // Gramajı ekranda yazmayan paket satırı hâlâ eşlenmez.
+    const paketli = extractQuotes(
+      [{ label: "24 AYAR PAKETLİ", cells: { ALIŞ: "6.860", SATIŞ: "7.040" } }],
+      "dom",
+    );
+    expect(paketli.quotes).toHaveLength(0);
+    expect(paketli.unresolved[0]?.reason).toBe("KATALOGDA_KARŞILIĞI_BELİRSİZ");
+  });
+
+  it("kaynağın AÇIKÇA grupladığı satır, aynı fiyatla her iki ürüne yazılır", () => {
+    // "ATA - REŞAT LİRA" başlığı iki ürünü ADIYLA sayar: bu bir tahmin değil,
+    // kaynağın kendi beyanıdır. Fiyat türetilmez, bölünmez — birebir kopyalanır.
+    const result = extractQuotes(rows, "dom");
+    const ata = result.quotes.find((quote) => quote.canonicalProductId === "ata-altin");
+    const resat = result.quotes.find((quote) => quote.canonicalProductId === "resat-altin");
+    expect(ata?.mappingConfidence).toBe("GROUPED_EXPLICIT");
+    expect(resat?.mappingConfidence).toBe("GROUPED_EXPLICIT");
+    expect(ata?.liquidationPrice).toBe("44900");
+    expect(ata?.replacementPrice).toBe("47100");
+    expect(resat?.liquidationPrice).toBe(ata?.liquidationPrice);
+    expect(resat?.replacementPrice).toBe(ata?.replacementPrice);
+    // Gümüş bu yolla da altın ürününe giremez.
+    expect(result.quotes.some((quote) => quote.canonicalProductId.includes("gumus"))).toBe(false);
   });
 
   it("yeni/eski ayrımı yazmayan satırlar CONVENTION olarak işaretlenir", () => {

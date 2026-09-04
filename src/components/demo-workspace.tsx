@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { ViewModeProvider, ViewModeToggle } from "@/state/view-mode";
 import { AppShell } from "./app-shell";
 import { DashboardView } from "./dashboard-view";
 import { TransactionsView } from "./transactions-view";
@@ -17,6 +18,7 @@ export function DemoWorkspace() {
   const [tab, setTab] = useState<"panel" | "islemler">("panel");
 
   return (
+    <ViewModeProvider>
     <AppShell
       user={null}
       navItems={[]}
@@ -60,6 +62,8 @@ export function DemoWorkspace() {
           <TransactionsView />
         )}
       </div>
+      <ViewModeToggle />
     </AppShell>
+    </ViewModeProvider>
   );
 }

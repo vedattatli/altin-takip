@@ -4,7 +4,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { GOLD_PRODUCTS } from "@/domain/catalog";
-import type { NormalizedQuote } from "@/prices/contract";
+import type { NormalizedQuote, ProviderId } from "@/prices/contract";
 import { devOnlyProviderBlocked } from "@/prices/dev-gate";
 import { getProviderInstance, listProviderDescriptors } from "@/prices/registry";
 import { evaluateSnapshot, type QuoteRejectionCode } from "@/prices/quality";
@@ -36,6 +36,20 @@ export function ingestionIntervalMs(): number {
 
 const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
 const KNOWN_PRODUCT_IDS = new Set(ALL_PRODUCT_IDS);
+
+/**
+ * GÖZLEM ZAMANI POLİTİKASI OLAN SAĞLAYICILAR
+ *
+ * Bu tabloda OLMAYAN bir sağlayıcı, zaman damgasının kökenini beyan etmeden
+ * fiyat yazamaz. Liste kasten kısadır ve her satırın gerekçesi sağlayıcı
+ * dosyasındaki "ZAMAN DAMGASI" notundadır.
+ */
+const OBSERVED_TIME_POLICIES: Readonly<
+  Partial<Record<string, { providerId: ProviderId; maxObservationAgeMs: number }>>
+> = {
+  "truncgil-turkiye": { providerId: "truncgil-turkiye", maxObservationAgeMs: 30 * 60_000 },
+  "anlik-altin-kapalicarsi": { providerId: "anlik-altin-kapalicarsi", maxObservationAgeMs: 45 * 60_000 },
+};
 
 export interface IngestionOutcome {
   providerCode: string;
@@ -207,18 +221,16 @@ export class PriceIngestionService {
       previousLiquidation: (productId) => previous.get(productId) ?? null,
       // GÖZLEM ZAMANI POLİTİKASI
       //
-      // Truncgil yanıtın kökünde tek bir `Update_Date` yayımlar; ürün başına
-      // sağlayıcı damgası YOKTUR ve zaman dilimi yazmaz. Bu yüzden damga
-      // "sağlayıcı zamanı" değil GÖZLEM zamanı sayılır.
+      // İki kaynak da kendi güncelleme zamanını yayımlar ama SAAT DİLİMİ
+      // yazmaz; +03:00 varsayımı bizimdir. Bu yüzden damga "sağlayıcı zamanı"
+      // değil GÖZLEM zamanı sayılır ve bu politika olmadan kalite kapısı
+      // fiyatı TIMESTAMP_PROVENANCE_UNKNOWN ile reddeder.
       //
-      // Politika yalnızca bu sağlayıcı için açılır; başka hiçbir kaynak bu
-      // yolla zaman damgası kuralını atlayamaz. Yaş sınırı, kaynağın kendi
-      // güncelleme sıklığından (birkaç dakika) belirgin biçimde geniştir ama
-      // bayat veriyi güncel göstermeyecek kadar dardır.
-      observedTimePolicy:
-        provider.providerId === "truncgil-turkiye"
-          ? { providerId: "truncgil-turkiye", maxObservationAgeMs: 30 * 60_000 }
-          : undefined,
+      // Politika SAĞLAYICI BAŞINA açılır; listede olmayan hiçbir kaynak bu
+      // yolla zaman damgası kuralını atlayamaz. Yaş sınırları, kaynakların
+      // kendi güncelleme sıklığından (birkaç dakika) belirgin biçimde geniştir
+      // ama bayat veriyi güncel göstermeyecek kadar dardır.
+      observedTimePolicy: OBSERVED_TIME_POLICIES[provider.providerId],
     });
 
     const payload: IngestionPayload = {

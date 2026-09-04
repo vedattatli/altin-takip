@@ -259,3 +259,167 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =============================================================================
+   PORTFÖY PANELİ + KAYSERİ CANLI EKRANI
+   ============================================================================= */
+
+/*
+ * Masaüstünde iki sütun: solda portföy, sağda dar canlı panel.
+ *
+ * Eşik 1280 px'tir, 1024 değil. 1024'te iki sütun denendiğinde ana sütun
+ * ~490 px'e düşüyor ve özet kartları (lg kırılımında 3 sütun) sıkışıyor.
+ * Bu yüzden 1024'te kontrollü ALT YERLEŞİM kullanılır: panel dashboard'un
+ * altındadır ve hiçbir şey sıkışmaz.
+ *
+ * Panel genişliği ekranın yaklaşık beşte biridir (1440 px'te ~288 px).
+ */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (min-width: 1280px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(270px, 20vw, 350px);
+    gap: 1.5rem;
+  }
+}
+
+.live-panel {
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .live-panel {
+    position: sticky;
+    top: 5rem;
+  }
+}
+
+.live-panel-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.live-panel-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+.live-panel-chevron {
+  transition: transform 0.15s ease;
+  font-size: 0.75rem;
+}
+
+/* Mobil/tablet: varsayılan kapalı, dokununca açılır. */
+.live-panel-body {
+  display: none;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.live-panel-body.is-open {
+  display: flex;
+  max-height: 320px;
+  min-height: 0;
+}
+.live-panel-head[aria-expanded="true"] .live-panel-chevron {
+  transform: rotate(180deg);
+}
+
+.live-panel-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.625rem 0.875rem;
+  min-height: 0;
+}
+
+.live-panel-foot {
+  border-top: 1px solid var(--line);
+  padding: 0.5rem 0.875rem 0.625rem;
+  background: var(--surface-2);
+}
+
+/*
+ * Masaüstünde panel her zaman açıktır ve aç/kapa düğmesi yalnızca başlıktır.
+ * Yükseklik 360–430 px arasında tutulur; içerik taşarsa panelin KENDİ
+ * kaydırması devreye girer, sayfa kaymaz.
+ */
+@media (min-width: 1280px) {
+  .live-panel-body,
+  .live-panel-body.is-open {
+    display: flex;
+    max-height: none;
+  }
+  .live-panel-card {
+    min-height: 360px;
+    max-height: 430px;
+  }
+  .live-panel-body,
+  .live-panel-body.is-open {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .live-panel-head {
+    cursor: default;
+  }
+  .live-panel-chevron {
+    display: none;
+  }
+}
+
+/* Hiçbir kırılımda yatay taşma olmaz. */
+.dashboard-grid,
+.live-panel,
+.live-panel-card {
+  max-width: 100%;
+}
+
+/* Görünüm modu düğmesi — küçük, sabit, sol altta. */
+.view-mode-toggle {
+  position: fixed;
+  left: 0.75rem;
+  /* Mobilde alt sekme çubuğunun üstünde durur; çubuğu örtmez. */
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+}
+.view-mode-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.view-mode-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1024px) {
+  .view-mode-toggle {
+    bottom: 1rem;
+  }
+}

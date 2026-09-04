@@ -88,13 +88,18 @@ test.describe("fiyat kaynakları", () => {
 
     await gotoReady(page, "/fiyat-kaynagi");
     await expect(page.getByTestId("active-source")).toBeVisible();
-    await expect(page.getByTestId("source-options")).toContainText("Test Verisi");
+    // Ekran artık teknik sağlayıcı SEÇTİRMEZ: tek bir değerleme planı vardır
+    // ve hangi ürünün hangi kaynaktan geldiği plan tablosunda yazar.
+    await expect(page.getByTestId("plan-table")).toBeVisible();
+    await expect(page.getByTestId("active-source")).toContainText("Hibrit Kayseri Değerlemesi");
+    await expect(page.getByTestId("select-mock")).toHaveCount(0);
+    await expect(page.getByTestId("confirm-source-change")).toHaveCount(0);
 
-    // Kaynak değişimi açık onay ister.
-    await page.getByTestId("select-mock").click();
-    await expect(page.getByTestId("source-confirm")).toContainText("Geçmiş işlem maliyetleriniz");
-    await page.getByTestId("confirm-source-change").click();
-    await expect(page.getByTestId("source-events")).toBeVisible();
+    // Kaynak değişimi API'si YERİNDEDİR (yönetici ve geçiş yolu için) ve
+    // hâlâ denetim kaydı üretir; yalnızca normal kullanıcı arayüzünden
+    // kaldırılmıştır.
+    const changed = await browserApi(page, "POST", "/api/price-sources", { providerCode: "mock" });
+    expect(changed.status).toBe(200);
 
     // Defter ve gerçekleşmiş K/Z değişmez.
     const ledger = await browserApi<{ totalPaid: string }[]>(page, "GET", "/api/transactions");
@@ -140,9 +145,12 @@ test.describe("fiyat kaynakları", () => {
     });
 
     await gotoReady(page, "/panel");
-    await expect(page.getByTestId("active-price-source")).toContainText("Test Verisi");
-    await expect(page.getByTestId("active-price-source")).toContainText("Gerçek piyasa verisi değil");
-    await expect(page.getByTestId("active-price-source")).toContainText("Son güncelleme");
+    // Panelde artık teknik sağlayıcı adı değil DEĞERLEME PLANI görünür.
+    await expect(page.getByTestId("active-price-source")).toContainText("Hibrit Kayseri Değerlemesi");
+    await expect(page.getByTestId("active-price-source")).toContainText("Son fiyat güncellemesi");
+    // Test verisi etiketi kaynak ekranında korunur.
+    await gotoReady(page, "/fiyat-kaynagi");
+    await expect(page.getByTestId("compare-table")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 

@@ -20,10 +20,12 @@ import {
   type OpeningCostMethod,
   type SellCommand,
 } from "@/domain/accounting";
-import { getProduct, productsByCategory } from "@/domain/catalog";
+import { getProduct, GOLD_PRODUCTS } from "@/domain/catalog";
 import type { GoldProduct } from "@/domain/types";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
+import { displayProductName, isPrimaryProduct, PRIMARY_DISPLAY_GROUPS } from "@/prices/valuation-plan";
+import { usePortfolio } from "@/state/portfolio-store";
 import { marketLabel } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
@@ -42,6 +44,19 @@ function firstErrorText(errors: CommandErrors): string | null {
   return Object.values(errors).find(Boolean) ?? null;
 }
 
+/**
+ * ALTIN TÜRÜ SEÇİMİ — SADE LİSTE
+ *
+ * İlk ve varsayılan liste ALTI üründen oluşur. Katalogdaki diğer ürünler
+ * silinmez; ama yeni kayıt açarken kalabalık yapmasın diye varsayılan listede
+ * görünmezler.
+ *
+ * İKİ İSTİSNA VARDIR VE ZORUNLUDUR:
+ *  1. Kullanıcının ELİNDE olan gizli bir ürün listeye eklenir — yoksa o
+ *     varlığı satamaz ve kayıt kilitlenirdi.
+ *  2. DÜZELTİLEN kaydın ürünü listeye eklenir — yoksa düzeltme formu ürünü
+ *     sessizce başka bir ürüne çevirirdi.
+ */
 function ProductSelect({
   id,
   value,
@@ -55,7 +70,31 @@ function ProductSelect({
   error?: string;
   disabled?: boolean;
 }) {
-  const groups = useMemo(() => productsByCategory(), []);
+  const { summary } = usePortfolio();
+
+  const options = useMemo(() => {
+    const primary = PRIMARY_DISPLAY_GROUPS.map((group) => ({
+      id: group.primaryProductId,
+      label: group.label,
+    }));
+
+    const heldIds = new Set(
+      summary.holdings
+        .filter((holding) => dec(holding.position.quantity).greaterThan(0))
+        .map((holding) => holding.product.id),
+    );
+    const extraIds = new Set<string>();
+    for (const productId of heldIds) if (!isPrimaryProduct(productId)) extraIds.add(productId);
+    if (value !== "" && !isPrimaryProduct(value)) extraIds.add(value);
+
+    const others = GOLD_PRODUCTS.filter((product) => extraIds.has(product.id)).map((product) => ({
+      id: product.id,
+      label: displayProductName(product.id, product.name, { distinguish: true }),
+    }));
+
+    return { primary, others };
+  }, [summary.holdings, value]);
+
   return (
     <Field label="Altın türü" htmlFor={id} error={error}>
       <select
@@ -66,15 +105,20 @@ function ProductSelect({
         aria-invalid={Boolean(error)}
         disabled={disabled}
       >
-        {groups.map((group) => (
-          <optgroup key={group.category} label={group.label}>
-            {group.products.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
+        {options.primary.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+        {options.others.length > 0 ? (
+          <optgroup label="Diğer varlıklarınız">
+            {options.others.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
               </option>
             ))}
           </optgroup>
-        ))}
+        ) : null}
       </select>
     </Field>
   );
@@ -1093,7 +1137,8 @@ export function OpeningBalanceForm({
           <>
             <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3 text-sm">
               <p className="font-semibold text-ink">
-                {product.name} · {formatQuantity(state.quantity, unit)}
+                {displayProductName(product.id, product.name, { distinguish: true })} ·{" "}
+                {formatQuantity(state.quantity, unit)}
               </p>
               <p className="mt-0.5 text-xs text-muted">{COST_METHOD_LABELS[state.costMethod].title}</p>
             </div>

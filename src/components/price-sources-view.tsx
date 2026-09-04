@@ -2,17 +2,33 @@
 
 import { useState } from "react";
 
-import { apiFetch } from "@/lib/api-client";
-import { formatDateTime, formatMoney } from "@/lib/format";
 import { requireProduct } from "@/domain/catalog";
-import { Alert, Card, SectionTitle, cx } from "./ui";
+import { formatDateTime, formatMoney } from "@/lib/format";
+import {
+  displayProductName,
+  PRIMARY_DISPLAY_GROUPS,
+  plannedProviderFor,
+  SHARED_CATEGORY_NOTE,
+  sourceBadgeFor,
+  VALUATION_PLAN_DESCRIPTION,
+  VALUATION_PLAN_NAME,
+  VALUATION_SOURCE_PLAN,
+} from "@/prices/valuation-plan";
+import { Alert, Card, SectionTitle } from "./ui";
 
 /**
- * KAYNAK SEÇİMİ VE KARŞILAŞTIRMA
+ * FİYAT KAYNAKLARI — BİLGİ EKRANI
  *
- * - Kullanıcı yalnızca yöneticinin açtığı kaynakları görür.
- * - Karşılaştırma ekranındaki fiyatlar DEĞERLEMEYE karışmaz.
- * - Kaynak değişimi açık onay ister ve denetim kaydı üretir.
+ * Normal kullanıcıdan teknik sağlayıcı seçmesi İSTENMEZ. Tek bir değerleme
+ * planı vardır ve bu ekran yalnızca planı görünür kılar:
+ *
+ *   - hangi ürünün fiyatı hangi kaynaktan geliyor,
+ *   - kaynaklar en son ne zaman güncellendi,
+ *   - kaynaklar arasındaki fark ne kadar.
+ *
+ * Karşılaştırma tablosundaki fiyatlar DEĞERLEMEYE karışmaz; yalnız bilgidir.
+ * Teknik sağlayıcı kimliği, lisans durumu ve güven seviyeleri burada da
+ * gösterilmez — bunlar yönetim ekranının konusudur.
  */
 
 export interface SourceOption {
@@ -39,6 +55,7 @@ export interface ActiveSource {
   status: "ok" | "stale" | "unavailable" | "not_selected";
   coverage: number;
   userSelectable: boolean;
+  planProviderCodes?: readonly string[];
 }
 
 export interface SourceChangeEvent {
@@ -86,6 +103,34 @@ function spread(liquidation: string, replacement: string): string {
   return `%${(((high - low) / low) * 100).toFixed(2)}`;
 }
 
+/** Altı ana ürün için "hangi kaynak" tablosu. */
+function PlanTable() {
+  return (
+    <table className="w-full text-left text-xs" data-testid="plan-table">
+      <thead className="text-subtle">
+        <tr className="border-b border-line">
+          <th className="px-3 py-2 font-semibold">Ürün</th>
+          <th className="px-3 py-2 font-semibold">Fiyat kaynağı</th>
+        </tr>
+      </thead>
+      <tbody>
+        {PRIMARY_DISPLAY_GROUPS.map((group) => {
+          const badge = sourceBadgeFor(plannedProviderFor(group.primaryProductId));
+          return (
+            <tr key={group.id} className="border-b border-line last:border-b-0">
+              <td className="px-3 py-2 font-medium text-ink">{group.label}</td>
+              <td className="px-3 py-2 text-muted">
+                {badge ? badge.label : "—"}
+                {badge ? <span className="block text-subtle">{badge.description}</span> : null}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 export function PriceSourcesView({
   initialOptions,
   initialActive,
@@ -97,60 +142,28 @@ export function PriceSourcesView({
   initialEvents: SourceChangeEvent[];
   initialCompare: { activeProviderCode: string | null; providers: CompareProvider[] };
 }) {
-  const [options, setOptions] = useState(initialOptions);
-  const [active, setActive] = useState(initialActive);
-  const [events, setEvents] = useState(initialEvents);
-  const [compare, setCompare] = useState(initialCompare);
-  const [pending, setPending] = useState<SourceOption | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function confirmChange() {
-    if (!pending) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await apiFetch("/api/price-sources", {
-        method: "POST",
-        body: JSON.stringify({ providerCode: pending.providerCode, reason: "Kullanıcı seçimi" }),
-      });
-      const [next, nextCompare] = await Promise.all([
-        apiFetch<{ options: SourceOption[]; active: ActiveSource; events: SourceChangeEvent[] }>("/api/price-sources"),
-        apiFetch<{ activeProviderCode: string | null; providers: CompareProvider[] }>("/api/price-sources/compare"),
-      ]);
-      setOptions(next.options);
-      setActive(next.active);
-      setEvents(next.events);
-      setCompare(nextCompare);
-      setNotice(`Fiyat kaynağı "${pending.displayName}" olarak güncellendi. Geçmiş işlemleriniz değişmedi.`);
-      setPending(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Kaynak değiştirilemedi.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [options] = useState(initialOptions);
+  const [active] = useState(initialActive);
+  const [events] = useState(initialEvents);
+  const [compare] = useState(initialCompare);
 
   const products = [
     ...new Set(compare.providers.flatMap((provider) => provider.quotes.map((quote) => quote.productId))),
   ].sort();
 
+  const planned = new Set(Object.keys(VALUATION_SOURCE_PLAN));
+
   return (
     <div className="space-y-5">
       <SectionTitle
         title="Fiyat kaynağı"
-        description="Portföyünüz tek bir piyasanın fiyatıyla değerlenir. Kaynak başarısız olursa başka bir piyasanın fiyatı gösterilmez."
+        description="Portföyünüz tek bir değerleme planıyla hesaplanır. Bir ürünün alış ve satış fiyatı her zaman aynı kaynaktan gelir."
       />
 
       <Card className="p-4" data-testid="active-source">
-        <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Aktif kaynak</p>
-        <p className="mt-1 text-base font-semibold text-ink">{active.displayName}</p>
-        <p className="mt-0.5 text-xs text-muted" title={active.technicalName}>
-          {active.technicalName}
-          {active.upstreamSourceLabel ? ` · ${active.upstreamSourceLabel}` : ""}
-          {!active.isRealMarketData ? " · Gerçek piyasa verisi değil" : ""}
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Değerleme planı</p>
+        <p className="mt-1 text-base font-semibold text-ink">{VALUATION_PLAN_NAME}</p>
+        <p className="mt-0.5 break-words text-xs text-muted">{VALUATION_PLAN_DESCRIPTION}</p>
         <p className="tabular mt-1 text-xs text-subtle">
           Durum: {STATUS_LABELS[active.status]}
           {active.lastQuoteAt ? ` · Son fiyat: ${formatDateTime(active.lastQuoteAt)}` : ""}
@@ -158,72 +171,46 @@ export function PriceSourcesView({
         </p>
       </Card>
 
-      {notice ? <Alert tone="success">{notice}</Alert> : null}
-      {error ? <Alert tone="danger">{error}</Alert> : null}
-
-      {pending ? (
-        <Card className="border-accent-line space-y-3 p-4" data-testid="source-confirm">
-          <p className="text-sm font-semibold text-ink">Fiyat kaynağı değiştirilsin mi?</p>
-          <p className="text-sm text-muted">{SOURCE_CHANGE_WARNING}</p>
-          <p className="text-sm text-ink">
-            Yeni kaynak: <strong>{pending.displayName}</strong> ({pending.technicalName})
-          </p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" className="btn btn-secondary min-h-11" onClick={() => setPending(null)} disabled={busy}>
-              Vazgeç
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary min-h-11"
-              data-testid="confirm-source-change"
-              onClick={() => void confirmChange()}
-              disabled={busy}
-            >
-              {busy ? "Değiştiriliyor…" : "Evet, değiştir"}
-            </button>
-          </div>
-        </Card>
-      ) : null}
-
-      <Card>
-        {options.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">
-            Yönetici henüz seçilebilir bir fiyat kaynağı açmadı.
-          </p>
-        ) : (
-          <ul data-testid="source-options">
-            {options.map((option) => (
-              <li key={option.providerCode} className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink">
-                    {option.displayName}{" "}
-                    {option.active ? <span className="badge badge-positive">Aktif</span> : null}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted">{option.technicalName}</p>
-                  <p className="tabular mt-0.5 text-xs text-subtle">
-                    {option.coverage} üründe fiyat
-                    {option.lastSuccessAt ? ` · Son güncelleme ${formatDateTime(option.lastSuccessAt)}` : ""}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className={cx("btn min-h-11", option.active ? "btn-secondary" : "btn-primary")}
-                  disabled={option.active || busy}
-                  data-testid={`select-${option.providerCode}`}
-                  onClick={() => setPending(option)}
-                >
-                  {option.active ? "Kullanılıyor" : "Bu kaynağı kullan"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+      <Card className="overflow-x-auto">
+        <PlanTable />
       </Card>
+
+      <Alert tone="info">
+        Bir kaynak veri veremezse o ürünün fiyatı <strong>bayat</strong> veya{" "}
+        <strong>kullanılamıyor</strong> gösterilir; başka bir kaynağın fiyatı o ürüne yazılmaz.{" "}
+        {SHARED_CATEGORY_NOTE}
+      </Alert>
+
+      {options.length > 0 ? (
+        <section>
+          <SectionTitle title="Kaynak durumu" description="Her kaynağın en son ne zaman güncellendiği." />
+          <Card>
+            <ul data-testid="source-options">
+              {options.map((option) => {
+                const badge = sourceBadgeFor(option.providerCode);
+                return (
+                  <li
+                    key={option.providerCode}
+                    className="border-b border-line px-4 py-3 last:border-b-0"
+                    data-testid={`source-${option.providerCode}`}
+                  >
+                    <p className="text-sm font-semibold text-ink">{badge?.label ?? option.displayName}</p>
+                    <p className="tabular mt-0.5 text-xs text-subtle">
+                      {option.coverage} üründe fiyat
+                      {option.lastSuccessAt ? ` · Son güncelleme ${formatDateTime(option.lastSuccessAt)}` : ""}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        </section>
+      ) : null}
 
       <section>
         <SectionTitle
           title="Kaynakları karşılaştır"
-          description="Bu tablodaki fiyatlar yalnızca bilgi içindir; portföy değerlemeniz aktif kaynakla hesaplanır."
+          description="Bu tablodaki fiyatlar yalnızca bilgi içindir; portföyünüz yukarıdaki planla hesaplanır."
         />
         <Card className="overflow-x-auto">
           {products.length === 0 ? (
@@ -235,38 +222,45 @@ export function PriceSourcesView({
                   <th className="px-3 py-2 font-semibold">Ürün</th>
                   {compare.providers.map((provider) => (
                     <th key={provider.providerCode} className="px-3 py-2 font-semibold">
-                      {provider.displayName}
-                      {provider.active ? " (aktif)" : ""}
-                      <span className="block font-normal text-subtle">{provider.marketDisplayName}</span>
+                      {sourceBadgeFor(provider.providerCode)?.label ?? provider.displayName}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {products.map((productId) => (
-                  <tr key={productId} className="border-b border-line last:border-b-0">
-                    <td className="px-3 py-2 text-ink">{requireProduct(productId).name}</td>
-                    {compare.providers.map((provider) => {
-                      const quote = provider.quotes.find((candidate) => candidate.productId === productId);
-                      return (
-                        <td key={provider.providerCode} className="tabular px-3 py-2 text-muted">
-                          {quote ? (
-                            <>
-                              <span className="block text-ink">{formatMoney(quote.liquidationPrice)}</span>
-                              <span className="block">{formatMoney(quote.replacementPrice)}</span>
-                              <span className="block text-subtle">
-                                Makas {spread(quote.liquidationPrice, quote.replacementPrice)} ·{" "}
-                                {formatDateTime(quote.providerTimestamp)}
-                              </span>
-                            </>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                {products.map((productId) => {
+                  const plannedCode = plannedProviderFor(productId);
+                  return (
+                    <tr key={productId} className="border-b border-line last:border-b-0">
+                      <td className="px-3 py-2 text-ink">
+                        {displayProductName(productId, requireProduct(productId).name, { distinguish: true })}
+                        {planned.has(productId) ? null : (
+                          <span className="block text-subtle">değerlemede kullanılmıyor</span>
+                        )}
+                      </td>
+                      {compare.providers.map((provider) => {
+                        const quote = provider.quotes.find((candidate) => candidate.productId === productId);
+                        const isPlanned = provider.providerCode === plannedCode;
+                        return (
+                          <td key={provider.providerCode} className="tabular px-3 py-2 text-muted">
+                            {quote ? (
+                              <>
+                                <span className="block text-ink">{formatMoney(quote.liquidationPrice)}</span>
+                                <span className="block">{formatMoney(quote.replacementPrice)}</span>
+                                <span className="block text-subtle">
+                                  Makas {spread(quote.liquidationPrice, quote.replacementPrice)}
+                                  {isPlanned ? " · hesapta kullanılan" : ""}
+                                </span>
+                              </>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

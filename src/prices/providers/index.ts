@@ -21,6 +21,7 @@ import {
   SARRAFPRO_MAPPING_VERSION,
 } from "./mappings";
 import { PrototypeJsonProvider } from "./rest-provider";
+import { AnlikAltinProvider } from "./anlik-altin-provider";
 import { TruncgilProvider } from "./truncgil-provider";
 import {
   SCREEN_OBSERVATION_FRESH_MS,
@@ -289,6 +290,8 @@ export function createProvider(providerId: string): CanonicalPriceProvider | nul
       return createSarrafTvScreenProvider();
     case "truncgil-turkiye":
       return new TruncgilProvider();
+    case "anlik-altin-kapalicarsi":
+      return new AnlikAltinProvider();
     default:
       return null;
   }

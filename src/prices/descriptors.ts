@@ -199,6 +199,42 @@ const TRUNCGIL: ProviderDescriptor = {
   devOnly: false,
 };
 
+/**
+ * ANLIK ALTIN — KAPALIÇARŞI ÖNERİLEN TABLOSU
+ *
+ * NE OLDUĞU ÖLÇÜLDÜ (bkz. `docs/ANLIK_ALTIN_DOGRULAMA.md`):
+ * Sayfanın adresi `/altin/kayseri` olmasına rağmen okunan tablo Kayseri
+ * tezgâh fiyatı değildir. Tablonun kendi işaretleri şunu söyler:
+ *   data-market="5"  data-type="harem"  id="kapalicarsi_h"
+ *   tablo başlığı "Kapalı Çarşı Altın", sekme adı "KAPALIÇARŞI ÖNERİLEN"
+ *
+ * Aynı sayfadaki "KAYSARDER" sekmesi (data-market="4") yalnızca
+ * tv.sarraf.pro iframe'i içerir: 257 bayt, sıfır fiyat hücresi. Yani bu
+ * sağlayıcıdan KAYSERİ fiyatı çıkarmak MÜMKÜN DEĞİLDİR ve denenmez.
+ *
+ * Üç ayrı gözlemde Sarraf TV ekranıyla karşılaştırıldı: 24 hücrenin
+ * 0'ı eşleşti. İki kaynak farklı piyasalardır ve öyle etiketlenir.
+ */
+const ANLIK_ALTIN: ProviderDescriptor = {
+  providerId: "anlik-altin-kapalicarsi",
+  displayName: MARKET_DISPLAY_NAMES.kapalicarsi,
+  technicalName: "anlikaltinfiyatlari.com — Kapalıçarşı Önerilen tablosu",
+  marketId: "kapalicarsi",
+  marketDisplayName: MARKET_DISPLAY_NAMES.kapalicarsi,
+  providerType: "REST",
+  capabilities: ["REST", "PRODUCT_LEVEL", "PROTOTYPE"],
+  advertisedCapabilities: [],
+  referenceUrl: "https://anlikaltinfiyatlari.com/altin/kayseri",
+  attribution:
+    "anlikaltinfiyatlari.com sayfasındaki 'KAPALIÇARŞI ÖNERİLEN' tablosu (kaynak işareti: harem). " +
+    "Bağımsız bir yayıncıdır; bir borsanın, derneğin veya kuyumcunun resmî servisi değildir. " +
+    "Kapalıçarşı referans fiyatıdır; Kayseri tezgâh fiyatı DEĞİLDİR. Aynı sayfadaki KAYSARDER " +
+    "sekmesi yalnızca Sarraf TV ekranının gömülü penceresidir ve bu sağlayıcı oradan veri okumaz.",
+  // Anahtar GEREKTİRMEZ; sayfa herkese açık ve düz sunucu isteğiyle okunur.
+  requiredEnv: [],
+  devOnly: false,
+};
+
 export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   MOCK,
   SARRAF_PRO,
@@ -209,6 +245,7 @@ export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
   BIST_REFERENCE,
   SARRAF_TV_SCREEN,
   TRUNCGIL,
+  ANLIK_ALTIN,
 ];
 
 const BY_ID = new Map(PROVIDER_DESCRIPTORS.map((descriptor) => [descriptor.providerId, descriptor]));

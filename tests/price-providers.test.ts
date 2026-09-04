@@ -407,13 +407,35 @@ describe("4. secret ve kaynak sınırı", () => {
     }
   });
 
+  /**
+   * TEK İSTİSNA: Anlık Altın sağlayıcısı bilinçli olarak HTML okur.
+   *
+   * Kural kaldırılmadı, DARALTILDI. Bu dosyada bile DOM kütüphanesiyle serbest
+   * scraping yasaktır; okunacak tablo üç işaretle (market, data-type, tablo
+   * kimliği) doğrulanmak zorundadır. Aşağıdaki testler bunu ayrıca kanıtlar.
+   */
+  const HTML_CONTRACT_FILE = join("src", "prices", "providers", "anlik-altin-provider.ts");
+
   it("sağlayıcı kodunda HTML scraping veya gizli endpoint izi yoktur", () => {
     for (const file of walk(join("src", "prices"))) {
       const source = readFileSync(file, "utf8");
-      expect(source, file).not.toMatch(/cheerio|jsdom|querySelector|innerHTML|text\/html/i);
-      // Sözleşmesi bilinmeyen kaynaklar için sabit endpoint YAZILMAZ.
+      // DOM kütüphanesiyle serbest scraping HİÇBİR dosyada yapılmaz.
+      expect(source, file).not.toMatch(/cheerio|jsdom|querySelector|innerHTML/i);
+      // Sayfa indirmek yalnızca sözleşmesi yazılı olan tek dosyada serbesttir.
+      if (file !== HTML_CONTRACT_FILE) {
+        expect(source, file).not.toMatch(/text\/html/i);
+      }
+      // Ekran kaynağının adresi sağlayıcı katmanında YAZILMAZ; o iş worker'ındır.
       expect(source, file).not.toMatch(/https?:\/\/(tv\.sarraf|www\.kaysarder\.org\.tr\/[a-z])/i);
     }
+  });
+
+  it("HTML okuyan tek sağlayıcı, okuduğu tabloyu sözleşmeyle doğrular", () => {
+    const source = readFileSync(HTML_CONTRACT_FILE, "utf8");
+    expect(source).toContain("ANLIK_ALTIN_TABLE_CONTRACT");
+    expect(source).toContain("tableContractOk");
+    // Sözleşme tutmazsa fail closed olunur.
+    expect(source).toContain("CONTRACT_MISMATCH");
   });
 
   it("migration 0013/0014 fiyat tablolarını istemciye kapatır ve credential saklamaz", () => {

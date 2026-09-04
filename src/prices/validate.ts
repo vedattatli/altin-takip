@@ -105,8 +105,25 @@ export function validateUsableQuote(
   if (quote.currency !== "TRY") return reject("currency");
   if (typeof quote.provider !== "string" || quote.provider.trim() === "") return reject("provider");
   if (typeof quote.market !== "string" || quote.market.trim() === "") return reject("market");
-  if (quote.provider !== snapshot.provider.id) return reject("provider_mismatch");
-  if (quote.market !== snapshot.provider.market) return reject("market_mismatch");
+
+  /*
+   * HİBRİT PLAN DENETİMİ
+   *
+   * Plan yoksa (tek sağlayıcılı klasik anlık görüntü) fiyat, anlık görüntünün
+   * kendi kimliğiyle eşleşmelidir — eski davranış aynen korunur.
+   *
+   * Plan varsa ürünün kaynağı ÖNCEDEN beyan edilmiştir: planda adı geçmeyen
+   * ürün değerlemeye GİREMEZ ve beyandan farklı sağlayıcıdan gelen fiyat
+   * reddedilir. Böylece "Çeyrek'in alışı bir kaynaktan, satışı başkasından"
+   * gibi bir karışım oluşamaz.
+   */
+  const plan = snapshot.provider.memberProviders;
+  const member = plan ? plan[productId] : undefined;
+  if (plan && !member) return reject("provider_mismatch");
+  const expectedProvider = member?.provider ?? snapshot.provider.id;
+  const expectedMarket = member?.market ?? snapshot.provider.market;
+  if (quote.provider !== expectedProvider) return reject("provider_mismatch");
+  if (quote.market !== expectedMarket) return reject("market_mismatch");
 
   const providerTs = parseInstant(quote.providerTimestamp);
   const quoteFetched = parseInstant(quote.fetchedAt);
@@ -118,8 +135,19 @@ export function validateUsableQuote(
   if (providerTs > futureLimit || quoteFetched > futureLimit || snapshotFetched > futureLimit) {
     return reject("future");
   }
-  const staleAfter = snapshot.provider.staleAfterMs;
-  if (now - providerTs > staleAfter || now - quoteFetched > staleAfter || now - snapshotFetched > staleAfter) {
+  /*
+   * Bayatlık her kaynağın KENDİ eşiğiyle ölçülür. Kayseri ekranı saatte bir
+   * toplanır, Kapalıçarşı tablosu dakikalarda bir yenilenir; tek bir ortak
+   * eşik ya taze veriyi bayat sayardı ya da bayat veriyi güncel gösterirdi.
+   *
+   * Anlık görüntünün kendi zamanı (en yeni kayıt) ayrıca en geniş eşikle
+   * denetlenir: hiçbir kaynak güncellenmiyorsa görüntü tümüyle bayattır.
+   */
+  const staleAfter = member?.staleAfterMs ?? snapshot.provider.staleAfterMs;
+  if (now - providerTs > staleAfter || now - quoteFetched > staleAfter) {
+    return reject("stale");
+  }
+  if (now - snapshotFetched > snapshot.provider.staleAfterMs) {
     return reject("stale");
   }
   if (quoteFetched < providerTs - SNAPSHOT_FUTURE_TOLERANCE_MS) return reject("fetched_before_provider");

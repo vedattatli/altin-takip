@@ -26,7 +26,7 @@ test("panel ekran görüntüsü", async ({ page }, testInfo) => {
   await addPurchase(page, { product: "Gram Altın", quantity: "24,5", unitPrice: "5180" });
   await addPurchase(page, { product: "Cumhuriyet Altını", quantity: "6", unitPrice: "38400" });
   await addPurchase(page, { product: "22 Ayar Bilezik", quantity: "42", unitPrice: "4750" });
-  await addPurchase(page, { product: "Yeni Çeyrek", quantity: "12", unitPrice: "8950" });
+  await addPurchase(page, { product: "Çeyrek Altın", quantity: "12", unitPrice: "8950" });
 
   await gotoReady(page, "/panel");
   await expect(page.getByTestId("holdings-list")).toBeVisible();

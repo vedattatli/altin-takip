@@ -20,6 +20,20 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
   "form-action 'self'",
   "img-src 'self' data: blob:",
+  /*
+   * TEK İSTİSNA: Kayseri canlı fiyat ekranı.
+   *
+   * `default-src 'self'` yüzünden frame-src de kapalıydı ve kaynağın kendi
+   * ekranı hiç yüklenemezdi. Yalnızca BU adres açılır; başka hiçbir dış
+   * kaynak (script, stil, görsel, XHR) hâlâ yüklenemez.
+   *
+   * Framelenen sayfa kendi origin'indedir: bizim DOM'umuzu, çerezimizi veya
+   * depomuzu okuyamaz. `iframe` etiketinde ayrıca `sandbox` ile üst pencereyi
+   * yönlendirme ve form gönderme izinleri verilmez.
+   *
+   * `frame-ancestors 'none'` DEĞİŞMEDİ: bizi kimse frameleyemez.
+   */
+  "frame-src https://tv.sarraf.pro",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   isProduction

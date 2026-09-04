@@ -1,4 +1,5 @@
 import { formatDateTime } from "@/lib/format";
+import { SARRAF_TV_URL } from "./kayseri-live-panel";
 import { Alert, Card, SectionTitle, cx } from "./ui";
 
 /**
@@ -44,6 +45,25 @@ const REASON_TEXT: Record<string, string> = {
   ALTIN_DEĞİL: "Altın değil — altın portföyüne katılmaz",
   DEGERLEMEYE_GIRMEDI: "Değerlemeye girmedi",
 };
+
+/**
+ * Eşleme güveni kullanıcı diline çevrilir.
+ *
+ * NETWORK_VERIFIED / GROUPED_EXPLICIT gibi teknik enum'lar kullanıcıya
+ * gösterilmez; bunlar iç denetim kavramlarıdır.
+ */
+const CONFIDENCE_TEXT: Record<string, string> = {
+  NETWORK_VERIFIED: "Kaynak alış/satış ayrımını kendi verisinde belirtiyor",
+  GROUPED_EXPLICIT: "Kaynak bu fiyatın birden çok ürünü kapsadığını yazıyor",
+  OPERATOR_VERIFIED: "Yönetici ekran kanıtını görüp onayladı",
+  EXACT: "Başlık ürünü tek anlamlı belirtiyor",
+  CONVENTION: "Piyasa teamülü — onay olmadan hesaba girmez",
+};
+
+function confidenceText(confidence: string | null): string {
+  if (confidence === null) return "—";
+  return CONFIDENCE_TEXT[confidence] ?? confidence;
+}
 
 function reasonText(reason: string | null): string {
   if (reason === null) return "";
@@ -122,6 +142,31 @@ export function KayseriPricesView({ snapshot }: { snapshot: KayseriSnapshot }) {
         </p>
       </Card>
 
+      <Card>
+        <p className="text-sm font-semibold text-ink">Sarraf TV Kayseri — canlı ekran</p>
+        <p className="mt-1 break-words text-xs text-muted">
+          Aşağıdaki pencere kaynağın kendi canlı ekranıdır ve <strong>görsel referanstır</strong>.
+          Portföy hesabı bu pencereden değil, yukarıdaki doğrulanmış gözlemden hesaplanır; ekran
+          kendi kendini sürekli güncellediği için hesaptan daha yeni bir fiyat gösteriyor olabilir.
+        </p>
+        <iframe
+          title="Sarraf TV Kayseri canlı ekranı"
+          src={SARRAF_TV_URL}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-same-origin"
+          className="mt-3 h-[420px] w-full rounded-[var(--radius-sm)] border border-line bg-black sm:h-[560px]"
+          data-testid="sarraf-tv-frame"
+        />
+        <p className="mt-2 text-xs text-subtle">
+          Pencere açılmazsa kaynak framelemeye izin vermiyor olabilir; koruma aşılmaz. Fiyatlar
+          yukarıdaki tablolarda zaten yazılıdır.{" "}
+          <a className="text-accent underline" href={SARRAF_TV_URL} target="_blank" rel="noreferrer noopener">
+            Ekranı yeni sekmede aç
+          </a>
+        </p>
+      </Card>
+
       {snapshot.freshness === "unusable" ? (
         <Alert tone="danger">
           Son gözlem 3 saatten eski. Fiyatlar <strong>kullanılamıyor</strong> sayılır ve portföy
@@ -151,7 +196,7 @@ export function KayseriPricesView({ snapshot }: { snapshot: KayseriSnapshot }) {
                       <th className="py-1 pr-3 font-medium">Ekrandaki ad</th>
                       <th className="py-1 pr-3 text-right font-medium">Bozdurma (alış)</th>
                       <th className="py-1 pr-3 text-right font-medium">Yeniden alma (satış)</th>
-                      <th className="py-1 pr-3 font-medium">Eşleme güveni</th>
+                      <th className="py-1 pr-3 font-medium">Neden güvenilir</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -160,7 +205,7 @@ export function KayseriPricesView({ snapshot }: { snapshot: KayseriSnapshot }) {
                         <td className="py-1.5 pr-3 font-medium text-ink">{row.rawLabel}</td>
                         <td className="tabular py-1.5 pr-3 text-right">{money(row.buy)}</td>
                         <td className="tabular py-1.5 pr-3 text-right">{money(row.sell)}</td>
-                        <td className="py-1.5 pr-3 text-muted">{row.confidence ?? "—"}</td>
+                        <td className="py-1.5 pr-3 text-muted">{confidenceText(row.confidence)}</td>
                       </tr>
                     ))}
                   </tbody>

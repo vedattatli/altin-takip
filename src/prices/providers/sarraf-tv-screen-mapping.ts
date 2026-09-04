@@ -13,7 +13,12 @@
  *    tahmin yürütülmez.
  */
 
-export const SARRAF_TV_SCREEN_MAPPING_VERSION = "sarraf-tv-screen-observed-3";
+/**
+ * Sürüm 4: "ATA - REŞAT LİRA" ve "ATA - REŞAT BEŞLİ" satırları GROUPED_EXPLICIT
+ * olarak eşlendi (aşağıdaki gerekçeye bakın). Sürüm değiştiği için önceki
+ * sürümde kaydedilmiş yönetici onayları geçersizdir ve yeniden alınır.
+ */
+export const SARRAF_TV_SCREEN_MAPPING_VERSION = "sarraf-tv-screen-observed-4";
 
 /**
  * EŞLEME GÜVEN SEVİYELERİ
@@ -90,12 +95,33 @@ export const SARRAF_TV_SCREEN_MAPPING_CONVENTION: Readonly<Record<string, string
 };
 
 /**
+ * KAYNAĞIN AÇIKÇA GRUPLADIĞI SATIRLAR — GROUPED_EXPLICIT
+ *
+ * Ekran bu satırlarda TEK fiyatın BİRDEN ÇOK ürünü kapsadığını başlıkta
+ * AÇIKÇA yazar: "ATA - REŞAT LİRA". Bu bir tahmin değil, kaynağın kendi
+ * beyanıdır — gruplama kuralının tanımı budur.
+ *
+ * Neden güvenli:
+ *  - Ata ve Reşat lirası katalogda da aynı gramaj (7,216 g) ve aynı ayardadır
+ *    (0,916); ürünler fiziksel olarak birbirinin dengidir.
+ *  - Ölçüm: ekran 45.350/47.600 gösterirken Kapalıçarşı referansı Ata için
+ *    45.464/46.028 gösteriyordu — aynı büyüklük sınıfı, tutarlı.
+ *
+ * Beşli satırı aynı mantıkla 5 liralık ürüne (36,08 g) eşlenir.
+ *
+ * "24 AYAR PAKETLİ" BİLEREK DIŞARIDA: kaç gramlık paket olduğu ekranda
+ * yazmıyor ve katalogdaki karşılığı belirsiz.
+ */
+export const SARRAF_TV_SCREEN_MAPPING_GROUPED: Readonly<Record<string, readonly string[]>> = {
+  "ata - reşat lira": ["ata-altin", "resat-altin"],
+  "ata - reşat beşli": ["besli-altin"],
+};
+
+/**
  * BİLEREK EŞLENMEYEN başlıklar ve nedenleri.
  * Rapor bunları "çözülemedi" olarak gösterir; tahmin YAPILMAZ.
  */
 export const SARRAF_TV_SCREEN_UNMAPPED_REASONS: Readonly<Record<string, string>> = {
-  "ata - reşat lira": "TEK_SATIRDA_İKİ_ÜRÜN",
-  "ata - reşat beşli": "TEK_SATIRDA_İKİ_ÜRÜN",
   "24 ayar paketli": "KATALOGDA_KARŞILIĞI_BELİRSİZ",
   "külçe gümüş": "ALTIN_DEĞİL",
   dolar: "ALTIN_DEĞİL",
@@ -105,6 +131,12 @@ export const SARRAF_TV_SCREEN_UNMAPPED_REASONS: Readonly<Record<string, string>>
 
 export interface ScreenMappingResult {
   productId: string;
+  confidence: MappingConfidence;
+}
+
+/** Bir ekran satırının kapsadığı ürünler. Gruplu satırlarda birden çok olur. */
+export interface ScreenMappingGroup {
+  productIds: readonly string[];
   confidence: MappingConfidence;
 }
 
@@ -126,21 +158,33 @@ export function normalizeScreenLabel(label: string): string {
  * yüklediği yanıtta ayrı alan adlarıyla kanıtlandıysa true geçilir; bu durumda
  * EXACT eşleme NETWORK_VERIFIED'a yükselir.
  */
-export function screenLabelToProduct(
+export function screenLabelToProducts(
   label: string,
   options: { networkVerifiedDirection?: boolean } = {},
-): ScreenMappingResult | null {
+): ScreenMappingGroup | null {
   const key = normalizeScreenLabel(label);
   const exact = SARRAF_TV_SCREEN_MAPPING_EXACT[key];
   if (exact) {
     return {
-      productId: exact,
+      productIds: [exact],
       confidence: options.networkVerifiedDirection === true ? "NETWORK_VERIFIED" : "EXACT",
     };
   }
+  const grouped = SARRAF_TV_SCREEN_MAPPING_GROUPED[key];
+  if (grouped) return { productIds: grouped, confidence: "GROUPED_EXPLICIT" };
   const convention = SARRAF_TV_SCREEN_MAPPING_CONVENTION[key];
-  if (convention) return { productId: convention, confidence: "CONVENTION" };
+  if (convention) return { productIds: [convention], confidence: "CONVENTION" };
   return null;
+}
+
+/** Tek ürünlü kısayol. Gruplu satırlarda grubun İLK ürününü döner. */
+export function screenLabelToProduct(
+  label: string,
+  options: { networkVerifiedDirection?: boolean } = {},
+): ScreenMappingResult | null {
+  const group = screenLabelToProducts(label, options);
+  if (!group || group.productIds.length === 0) return null;
+  return { productId: group.productIds[0]!, confidence: group.confidence };
 }
 
 /** Eşlenmeyen başlık için bilinen bir gerekçe varsa döner. */

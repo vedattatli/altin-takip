@@ -20,7 +20,18 @@ import {
   formatQuantity,
   formatSignedMoney,
 } from "@/lib/format";
+import {
+  displayProductName,
+  isPrimaryProduct,
+  plannedProviderFor,
+  SHARED_CATEGORY_NOTE,
+  sourceBadgeFor,
+  summarizeSources,
+  VALUATION_PLAN_DESCRIPTION,
+  VALUATION_PLAN_NAME,
+} from "@/prices/valuation-plan";
 import { usePortfolio } from "@/state/portfolio-store";
+import { useViewMode } from "@/state/view-mode";
 import { PriceSourceLine } from "./price-source-line";
 import { Card, DeltaValue, EmptyState, SectionTitle, cx } from "./ui";
 
@@ -70,29 +81,68 @@ function CostQualityBadge({ holding }: { holding: HoldingView }) {
   );
 }
 
-function HoldingRow({ holding, screenSource = false }: { holding: HoldingView; screenSource?: boolean }) {
+/**
+ * KAYNAK ROZETİ
+ *
+ * Kullanıcıya teknik sağlayıcı kimliği veya güven seviyesi gösterilmez;
+ * yalnızca piyasanın adı görünür. Fiyat henüz gelmediyse PLANLANAN kaynak
+ * yazılır — böylece "bu ürün hangi kaynaktan değerlenecek" sorusu fiyat
+ * gelmeden de yanıtlıdır.
+ */
+function SourceBadge({ productId, quoteProvider }: { productId: string; quoteProvider: string | null }) {
+  const badge = sourceBadgeFor(quoteProvider ?? plannedProviderFor(productId));
+  if (!badge) return null;
+  return (
+    <span className="badge" title={badge.description} data-testid="source-badge">
+      {badge.label}
+    </span>
+  );
+}
+
+function HoldingRow({
+  holding,
+  distinguish,
+  sharedFrom,
+  simple,
+}: {
+  holding: HoldingView;
+  /** Aynı görünüm grubundan birden çok kayıt varsa satırlar ayırt edilir. */
+  distinguish: boolean;
+  /** Fiyat ortak kategori fiyatından alındıysa kaynak ürünün kimliği. */
+  sharedFrom: string | null;
+  /** Basit modda muhasebe ayrıntıları gizlenir; hesaplar değişmez. */
+  simple: boolean;
+}) {
   const { product, position, quote } = holding;
   const priced = holding.priceAvailable && holding.liquidationValue !== null;
+  const name = displayProductName(product.id, product.name, { distinguish });
 
   return (
     <li className="border-b border-line px-4 py-3 last:border-b-0" data-testid="holding-row">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
+            <p className="truncate text-sm font-semibold text-ink">{name}</p>
             <CostQualityBadge holding={holding} />
+            <SourceBadge productId={product.id} quoteProvider={quote?.provider ?? null} />
           </div>
           <p className="tabular mt-0.5 text-xs text-muted">
             {formatQuantity(position.quantity, product.unit)} · {formatGrams(holding.pureGoldGrams)} has
           </p>
           <p className="tabular mt-0.5 text-xs text-muted">
-            Ortalama takip maliyeti: {position.averageCost ? formatMoney(position.averageCost) : "—"}/{product.unit} ·
-            Kalan maliyet: {formatMoney(position.remainingCostBasis)}
+            Ortalama maliyet: {position.averageCost ? formatMoney(position.averageCost) : "—"}/{product.unit}
+            {simple ? "" : ` · Kalan maliyet: ${formatMoney(position.remainingCostBasis)}`}
           </p>
           {quote ? (
             <p className="tabular mt-0.5 text-xs text-subtle">
               Bozdurma: {formatMoney(quote.liquidationPrice)}/{product.unit} · Yeniden alım:{" "}
-              {formatMoney(quote.replacementPrice)}/{product.unit}
+              {formatMoney(quote.replacementPrice)}/{product.unit} · Son güncelleme:{" "}
+              {formatDateTime(quote.fetchedAt)}
+            </p>
+          ) : null}
+          {sharedFrom !== null ? (
+            <p className="mt-0.5 text-xs text-subtle" title={SHARED_CATEGORY_NOTE} data-testid="shared-category">
+              Ortak kategori fiyatı
             </p>
           ) : null}
           {holding.costQuality === "MIXED" ? (
@@ -115,16 +165,15 @@ function HoldingRow({ holding, screenSource = false }: { holding: HoldingView; s
             formatted={formatSignedMoney(holding.unrealizedPnl)}
             suffix={holding.unrealizedPnlPercent !== null ? formatPercent(holding.unrealizedPnlPercent) : undefined}
           />
-          <span className="ml-1 text-subtle">gerçekleşmemiş</span>
+          <span className="ml-1 text-subtle">{simple ? "kâr/zarar" : "gerçekleşmemiş"}</span>
         </p>
       ) : (
         <p className="mt-1.5 text-xs text-muted">
-          {screenSource
-            ? "Bu ürün için güvenilir Kayseri fiyatı alınamıyor; değerleme ve gerçekleşmemiş K/Z hesaplanmadı."
-            : "Bu ürün için kullanılabilir fiyat yok; değerleme ve gerçekleşmemiş K/Z hesaplanmadı."}
+          Bu ürün için güncel fiyat alınamıyor; değerleme ve gerçekleşmemiş K/Z hesaplanmadı. Başka
+          bir kaynağın fiyatı bu ürüne yazılmaz.
         </p>
       )}
-      {!dec(position.realizedPnl).isZero() ? (
+      {!simple && !dec(position.realizedPnl).isZero() ? (
         <p className="tabular mt-0.5 text-xs text-muted">
           Gerçekleşmiş: <DeltaValue value={position.realizedPnl} formatted={formatSignedMoney(position.realizedPnl)} />
         </p>
@@ -146,19 +195,27 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
     lastSyncedAt,
     syncStatus,
   } = usePortfolio();
+  const { isSimple } = useViewMode();
 
   const base = addHref ?? "/islemler";
+  /*
+   * Basit modda SATIŞ düğmesi gösterilmez: günlük kullanımda altın eklenir,
+   * satılmaz. Satış özelliği KALDIRILMADI — detaylı moda geçince yerindedir
+   * ve kayıtlar aynen durur.
+   */
   const actionButtons = onAdd ? (
     <div className="flex flex-wrap gap-2">
       <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
         Mevcut Altını Ekle
       </button>
       <button type="button" className="btn btn-primary min-h-11" onClick={onAdd}>
-        Yeni Alış Ekle
+        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
       </button>
-      <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
-        Satış Ekle
-      </button>
+      {isSimple ? null : (
+        <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
+          Satış Ekle
+        </button>
+      )}
     </div>
   ) : (
     <div className="flex flex-wrap gap-2">
@@ -166,11 +223,13 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         Mevcut Altını Ekle
       </Link>
       <Link href={`${base}?ekle=alis`} className="btn btn-primary min-h-11">
-        Yeni Alış Ekle
+        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
       </Link>
-      <Link href={`${base}?ekle=satis`} className="btn btn-secondary min-h-11">
-        Satış Ekle
-      </Link>
+      {isSimple ? null : (
+        <Link href={`${base}?ekle=satis`} className="btn btn-secondary min-h-11">
+          Satış Ekle
+        </Link>
+      )}
     </div>
   );
 
@@ -215,6 +274,43 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   const valuation = (value: string) => (noPrices ? PRICE_UNAVAILABLE : formatMoney(value));
   const pnlText = PNL_LABELS[summary.pnlLabel];
 
+  /*
+   * GÖRÜNÜM AYIRIMI
+   *
+   * Katalogdaki 21 ürünün hepsi korunur; varsayılan ekranda yalnız altı
+   * ürünün grubu görünür. Gizlenen bir üründe kayıt varsa kayıt KAYBOLMAZ,
+   * "Diğer varlıklar" başlığı altında listelenir.
+   */
+  const openHoldings = summary.holdings.filter((holding) => dec(holding.position.quantity).greaterThan(0));
+  const primaryHoldings = openHoldings.filter((holding) => isPrimaryProduct(holding.product.id));
+  const otherHoldings = openHoldings.filter((holding) => !isPrimaryProduct(holding.product.id));
+
+  /*
+   * Aynı görünüm grubundan (örn. Yeni Çeyrek + Eski Çeyrek) birden çok kayıt
+   * varsa satırlar aynı adı taşırdı. Bu durumda katalog adı parantez içinde
+   * eklenerek kayıtların birbirine karışması engellenir.
+   */
+  const groupCounts = new Map<string, boolean>();
+  for (const holding of openHoldings) {
+    const label = displayProductName(holding.product.id, holding.product.name);
+    const clash = openHoldings.some(
+      (other) =>
+        other.product.id !== holding.product.id &&
+        displayProductName(other.product.id, other.product.name) === label,
+    );
+    groupCounts.set(holding.product.id, clash);
+  }
+
+  /** Fiyat ortak kategori fiyatından mı geldi? Plan bunu anlık görüntüde beyan eder. */
+  const sharedFrom = (productId: string): string | null =>
+    summary.snapshot?.provider.memberProviders?.[productId]?.sharedFrom ?? null;
+
+  const sourceSummary = summarizeSources(
+    openHoldings
+      .map((holding) => holding.quote?.provider)
+      .filter((code): code is string => typeof code === "string"),
+  );
+
   return (
     <div className="space-y-5" data-portfolio-state={portfolioState} data-valuation-status={summary.valuationStatus}>
       <div>
@@ -237,69 +333,105 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         </div>
       ) : null}
 
+      {/*
+        BASİT MOD: üç kart yeter — portföy değeri, maliyet, kâr/zarar.
+        "Kâr/Zarar" olarak TOPLAM kâr/zarar gösterilir (gerçekleşmiş +
+        gerçekleşmemiş). Kullanıcı hiç satış yapmadıysa bu zaten
+        gerçekleşmemiş kâr/zarara eşittir; satış yaptıysa sayıyı eksik
+        göstermek yerine tamamını gösterir.
+      */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          label={`Tahmini bozdurma değeri${partialSuffix}`}
+          label={isSimple ? `Portföy değeri${partialSuffix}` : `Tahmini bozdurma değeri${partialSuffix}`}
           value={valuation(summary.totalLiquidationValue)}
-          hint={coverageText ?? "Bugün bozdurursanız yaklaşık elinize geçecek tutar (test fiyatı)"}
+          hint={coverageText ?? "Bugün bozdurursanız yaklaşık elinize geçecek tutar"}
           emphasis
           testId="stat-liquidation"
         />
+        {isSimple ? null : (
+          <StatCard
+            label={`Yeniden alım değeri${partialSuffix}`}
+            value={valuation(summary.totalReplacementValue)}
+            hint={coverageText ?? "Aynı miktarı bugün almanın yaklaşık maliyeti"}
+            testId="stat-repurchase"
+          />
+        )}
         <StatCard
-          label={`Yeniden alım değeri${partialSuffix}`}
-          value={valuation(summary.totalReplacementValue)}
-          hint={coverageText ?? "Aynı miktarı bugün almanın yaklaşık maliyeti"}
-          testId="stat-repurchase"
-        />
-        <StatCard
-          label="Elde kalan maliyet"
+          label={isSimple ? "Toplam maliyet" : "Elde kalan maliyet"}
           value={formatMoney(summary.totalRemainingCostBasis)}
           hint="Elde kalan altınların maliyet bazı (masraflar dâhil)"
           testId="stat-cost"
         />
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmemiş K/Z{partialSuffix}</p>
-          <p data-testid="stat-unrealized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
-            {isEmpty || priceOk ? (
-              <DeltaValue value={summary.totalUnrealizedPnl} formatted={formatSignedMoney(summary.totalUnrealizedPnl)} />
-            ) : (
-              <span className="text-muted">{PRICE_UNAVAILABLE}</span>
-            )}
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            {summary.totalUnrealizedPnlPercent !== null && priceOk
-              ? `${pnlText} · ${formatPercent(summary.totalUnrealizedPnlPercent)}`
-              : pnlText}
-            {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
-          </p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmiş K/Z</p>
-          <p data-testid="stat-realized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
-            <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            Satışlardan oluşan sonuç; portföy değerine eklenmez{partial ? "; fiyat eksikliğinden etkilenmez" : ""}.
-          </p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z{partialSuffix}</p>
-          <p data-testid="stat-total-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
-            {isEmpty || priceOk ? (
-              <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
-            ) : (
-              <span className="text-muted">{PRICE_UNAVAILABLE}</span>
-            )}
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            {noPrices
-              ? `Gerçekleşmemiş K/Z hesaplanamadı; gerçekleşmiş K/Z ${formatSignedMoney(summary.totalRealizedPnl)}`
-              : isClosed
-                ? "Açık pozisyon yok; toplam K/Z gerçekleşmiş K/Z'ye eşittir"
-                : `Gerçekleşmiş + gerçekleşmemiş · ${pnlText}`}
-            {partial ? " · kesin toplam değildir (fiyatı olmayan varlıklar hariç)" : ""}
-          </p>
-        </Card>
+        {isSimple ? (
+          <Card className="p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Kâr/Zarar{partialSuffix}</p>
+            <p data-testid="stat-simple-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+              {isEmpty || priceOk ? (
+                <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
+              ) : (
+                <span className="text-muted">{PRICE_UNAVAILABLE}</span>
+              )}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              {summary.totalUnrealizedPnlPercent !== null && priceOk
+                ? `Maliyete göre ${formatPercent(summary.totalUnrealizedPnlPercent)}`
+                : "Güncel fiyatla maliyetiniz arasındaki fark"}
+              {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
+            </p>
+          </Card>
+        ) : (
+          <>
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
+                Gerçekleşmemiş K/Z{partialSuffix}
+              </p>
+              <p data-testid="stat-unrealized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+                {isEmpty || priceOk ? (
+                  <DeltaValue
+                    value={summary.totalUnrealizedPnl}
+                    formatted={formatSignedMoney(summary.totalUnrealizedPnl)}
+                  />
+                ) : (
+                  <span className="text-muted">{PRICE_UNAVAILABLE}</span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {summary.totalUnrealizedPnlPercent !== null && priceOk
+                  ? `${pnlText} · ${formatPercent(summary.totalUnrealizedPnlPercent)}`
+                  : pnlText}
+                {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmiş K/Z</p>
+              <p data-testid="stat-realized" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+                <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Satışlardan oluşan sonuç; portföy değerine eklenmez
+                {partial ? "; fiyat eksikliğinden etkilenmez" : ""}.
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z{partialSuffix}</p>
+              <p data-testid="stat-total-pnl" className="mt-1.5 text-xl font-semibold sm:text-2xl">
+                {isEmpty || priceOk ? (
+                  <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
+                ) : (
+                  <span className="text-muted">{PRICE_UNAVAILABLE}</span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {noPrices
+                  ? `Gerçekleşmemiş K/Z hesaplanamadı; gerçekleşmiş K/Z ${formatSignedMoney(summary.totalRealizedPnl)}`
+                  : isClosed
+                    ? "Açık pozisyon yok; toplam K/Z gerçekleşmiş K/Z'ye eşittir"
+                    : `Gerçekleşmiş + gerçekleşmemiş · ${pnlText}`}
+                {partial ? " · kesin toplam değildir (fiyatı olmayan varlıklar hariç)" : ""}
+              </p>
+            </Card>
+          </>
+        )}
       </div>
 
       {summary.hasEstimatedOrBaseline ? (
@@ -347,6 +479,11 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           }
           action={isNeverUsed ? undefined : actionButtons}
         />
+        {sourceSummary !== "" ? (
+          <p className="mb-2 text-xs text-muted" data-testid="source-summary">
+            {sourceSummary}
+          </p>
+        ) : null}
         <Card>
           {isNeverUsed ? (
             <EmptyState
@@ -361,36 +498,64 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
             />
           ) : (
             <ul data-testid="holdings-list">
-              {summary.holdings
-                .filter((holding) => dec(holding.position.quantity).greaterThan(0))
-                .map((holding) => (
-                  <HoldingRow
-                    key={holding.product.id}
-                    holding={holding}
-                    screenSource={summary.snapshot?.provider.id === "sarraf-tv-kayseri-screen"}
-                  />
-                ))}
+              {primaryHoldings.map((holding) => (
+                <HoldingRow
+                  key={holding.product.id}
+                  holding={holding}
+                  distinguish={groupCounts.get(holding.product.id) === true}
+                  sharedFrom={sharedFrom(holding.product.id)}
+                  simple={isSimple}
+                />
+              ))}
             </ul>
           )}
         </Card>
       </section>
 
-      {/* Fiyat kaynağı bilgisi ekranın ortasında yer kaplamaz; altta tek satırdır. */}
-      {summary.priceSource ? (
+      {/*
+        DİĞER VARLIKLAR
+        Varsayılan listede görünmeyen ürünlerden elde kayıt varsa burada
+        görünür. Kayıt SİLİNMEZ ve gizlenmez; yalnız ana listeyi
+        kalabalıklaştırmaz. Bu ürünler satılabilir de.
+      */}
+      {otherHoldings.length > 0 ? (
+        <section data-testid="other-holdings-section">
+          <SectionTitle
+            title="Diğer varlıklar"
+            description={`Varsayılan listede yer almayan ${String(otherHoldings.length)} üründe kaydınız var. Bu kayıtlar korunur ve satılabilir.`}
+          />
+          <Card>
+            <ul data-testid="other-holdings-list">
+              {otherHoldings.map((holding) => (
+                <HoldingRow
+                  key={holding.product.id}
+                  holding={holding}
+                  distinguish={groupCounts.get(holding.product.id) === true}
+                  sharedFrom={sharedFrom(holding.product.id)}
+                  simple={isSimple}
+                />
+              ))}
+            </ul>
+          </Card>
+        </section>
+      ) : null}
+
+      {/*
+        DEĞERLEME PLANI
+        Kullanıcıya teknik sağlayıcı seçimi sunulmaz: tek bir plan vardır ve
+        hangi ürünün hangi kaynaktan geldiği satır rozetlerinde zaten yazar.
+      */}
+      {summary.priceSource && !isSimple ? (
         <div
           className="rounded-[var(--radius)] border border-line bg-surface-2 px-3.5 py-3 text-xs"
           data-testid="active-price-source"
         >
-          <p className="text-sm font-semibold text-ink">{summary.priceSource.displayName}</p>
-          <p className="mt-0.5 text-muted" title={summary.priceSource.technicalName}>
-            {summary.priceSource.technicalName}
-            {summary.priceSource.upstreamSourceLabel ? ` · ${summary.priceSource.upstreamSourceLabel}` : ""}
-            {!summary.priceSource.isRealMarketData ? " · Gerçek piyasa verisi değil" : ""}
-          </p>
+          <p className="text-sm font-semibold text-ink">{VALUATION_PLAN_NAME}</p>
+          <p className="mt-0.5 break-words text-muted">{VALUATION_PLAN_DESCRIPTION}</p>
           <p className="tabular mt-0.5 text-subtle">
             {summary.priceSource.lastQuoteAt
-              ? `Son güncelleme: ${formatDateTime(summary.priceSource.lastQuoteAt)}`
-              : "Son güncelleme: —"}
+              ? `Son fiyat güncellemesi: ${formatDateTime(summary.priceSource.lastQuoteAt)}`
+              : "Son fiyat güncellemesi: —"}
             {" · Durum: "}
             {summary.priceSource.status === "ok"
               ? "Güncel"
@@ -409,7 +574,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               : "Açık pozisyon yok"}
           </p>
           <Link className="mt-1 inline-block text-accent underline" href="/fiyat-kaynagi">
-            Fiyat kaynağını görüntüle veya değiştir
+            Fiyat kaynaklarını görüntüle
           </Link>
         </div>
       ) : null}

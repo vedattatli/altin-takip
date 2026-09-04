@@ -53,6 +53,34 @@ export interface PriceProviderMeta {
   disclaimer: string;
   /** Verinin bayatlamış sayılacağı süre (ms). */
   staleAfterMs: number;
+  /**
+   * HİBRİT PLAN — ürün başına BEYAN EDİLMİŞ kaynak.
+   *
+   * Alan doluysa anlık görüntü birden çok sağlayıcıdan derlenmiştir. O zaman
+   * bir quote'un sağlayıcısı, anlık görüntünün sanal kimliğiyle DEĞİL, bu
+   * plandaki ürüne ait girdiyle karşılaştırılır.
+   *
+   * Bu, "başka piyasanın fiyatı sessizce kullanılmaz" güvencesini
+   * GEVŞETMEZ, tersine KEskinleştirir: plan doluyken planda ADI GEÇMEYEN
+   * hiçbir ürün değerlemeye giremez. Fiyatın hangi kaynaktan geleceği,
+   * fiyat gelmeden ÖNCE yazılmıştır.
+   */
+  memberProviders?: Readonly<Record<string, PriceSourceMember>>;
+}
+
+export interface PriceSourceMember {
+  /** Bu ürün için tek geçerli sağlayıcı kimliği. */
+  provider: string;
+  /** Bu ürün için tek geçerli piyasa kimliği. */
+  market: string;
+  /** Bu kaynağın kendi bayatlama süresi (ms). */
+  staleAfterMs: number;
+  /**
+   * Fiyat, aynı kategorideki başka bir üründen ORTAK KATEGORİ FİYATI olarak
+   * alındıysa o ürünün kimliği. Kaynak yeni/eski ayrımı yayımlamadığında
+   * kullanılır ve arayüzde açıkça belirtilir.
+   */
+  sharedFrom?: string;
 }
 
 export interface PriceSnapshot {

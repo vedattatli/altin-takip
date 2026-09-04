@@ -33,6 +33,21 @@ export type ProviderId =
    */
   | "truncgil-turkiye"
   /**
+   * anlikaltinfiyatlari.com Kayseri sayfasındaki GENİŞ TABLO.
+   *
+   * DÜRÜST ETİKETLEME — ÖLÇÜLEREK BELİRLENDİ:
+   * Sayfanın adresi "kayseri" olsa da bu tablonun kendi `data-type` alanı
+   * "harem", tablo kimliği `kapalicarsi_h`, başlığı "Kapalı Çarşı Altın" ve
+   * sekme adı "KAPALIÇARŞI ÖNERİLEN"dir. Yani Kayseri tezgâh fiyatı DEĞİL,
+   * Kapalıçarşı referansıdır ve öyle etiketlenir.
+   *
+   * Aynı sayfadaki "KAYSARDER" sekmesi ise SADECE tv.sarraf.pro iframe'idir;
+   * içinde tek bir sayı bile yoktur (ölçüm: 257 bayt, 0 fiyat hücresi).
+   * Bu yüzden bu sağlayıcı Kayseri fiyatı ÜRETMEZ ve üretiyormuş gibi
+   * gösterilmez.
+   */
+  | "anlik-altin-kapalicarsi"
+  /**
    * Sarraf TV Kayseri EKRAN GÖZLEMİ.
    *
    * `sarraf-pro-kayseri` ile AYNI KİMLİK ALTINDA TUTULMAZ: biri ileride
@@ -88,12 +103,13 @@ export type ProviderCapability =
 export type TimestampProvenance = "UPSTREAM" | "OBSERVED" | "UNKNOWN";
 
 /** Kanonik piyasa kimlikleri. Farklı piyasaların fiyatı birbirinin yerine KULLANILMAZ. */
-export type MarketId = "test" | "kayseri" | "turkiye-genel" | "composite" | "bist";
+export type MarketId = "test" | "kayseri" | "turkiye-genel" | "kapalicarsi" | "composite" | "bist";
 
 export const MARKET_DISPLAY_NAMES: Record<MarketId, string> = {
   test: "Test Piyasası",
   kayseri: "Kayseri Yerel Piyasa",
   "turkiye-genel": "Genel Türkiye",
+  kapalicarsi: "Kapalıçarşı Referansı",
   composite: "Çoklu Kaynak",
   bist: "BIST Referans",
 };

@@ -1,13 +1,26 @@
-# Sarraf TV Kayseri — ücretsiz bulut fiyat toplayıcısı
+# Altın Takip — ücretsiz bulut fiyat toplayıcısı
 #
-# Sürekli çalışan bir worker DEĞİLDİR. Her koşum bağımsızdır: Ubuntu runner
-# Chromium'u açar, ekranı bir kez okur, imzalı gözlemi uygulamanın HMAC makine
-# ucuna gönderir ve kapanır. Kimsenin bilgisayarının açık olması gerekmez.
+# Sürekli çalışan bir worker DEĞİLDİR. Her koşum bağımsızdır ve kimsenin
+# bilgisayarının açık olması gerekmez.
 #
-# Maliyet: GitHub Actions ücretsiz kotası içinde kalır (aşağıdaki nota bakın).
-# Docker imajı ÇEKİLMEZ; yalnız Chromium indirilir ve önbelleğe alınır.
+# TEK KOŞUMDA İKİ AYRI YOL — bilinçli olarak TEK İŞ (job) içinde:
+#
+#   1. HTTP kaynakları (Kapalıçarşı / Türkiye geneli)
+#      Sayfa ve JSON düz sunucu isteğiyle okunur, TARAYICI GEREKMEZ. Toplama
+#      uygulamanın kendi zamanlanmış ucunda yapılır; runner yalnızca tetikler.
+#
+#   2. Ekran kaynağı (Sarraf TV Kayseri)
+#      Bayi fiyatı yalnız tarayıcıda hesaplanıyor; bu yüzden Chromium açılır,
+#      ekran BİR KEZ okunur ve imzalı gözlem HMAC makine ucuna gönderilir.
+#
+# NEDEN TEK İŞ: GitHub Actions dakikayı iş başına YUKARI YUVARLAR. İki ayrı
+# iş kurmak ~70 saniyelik bir koşumu 2 dakika yerine 3 dakika olarak faturalar
+# ve saatlik programda ücretsiz kotayı aşardı.
+#
+# Adımlar birbirini ENGELLEMEZ: HTTP kaynakları başarısız olsa da ekran
+# toplanır, ekran başarısız olsa da HTTP kaynakları toplanmıştır.
 
-name: Sarraf fiyat toplayıcı
+name: Fiyat toplayıcı
 
 on:
   # Elle çalıştırma: doğrulama ve acil güncelleme için.
@@ -15,11 +28,12 @@ on:
   schedule:
     # Saat başı yoğunluğundan kaçınmak için 17. dakika. GitHub zamanlanmış
     # koşumları yoğun anlarda geciktirebilir; bu best-effort bir programdır.
+    # Sıklık ücretsiz kotaya göre seçildi: bkz. docs/CLOUD_PRICE_COLLECTOR.md
     - cron: "17 * * * *"
 
 # Aynı anda tek koşum: önceki koşum sürerken ikincisi paralel fiyat göndermesin.
 concurrency:
-  group: sarraf-price-collector
+  group: altin-price-collector
   cancel-in-progress: false
 
 permissions:
@@ -44,7 +58,17 @@ jobs:
       - name: Bağımlılıklar
         run: npm ci --no-audit --no-fund
 
+      # --- 1. HTTP kaynakları: tarayıcı gerektirmez, saniyeler sürer ---
+      - name: Kapalıçarşı ve Türkiye geneli fiyatlarını topla
+        id: http-sources
+        env:
+          APP_BASE_URL: ${{ secrets.ALTIN_TAKIP_APP_URL }}
+          PRICE_CRON_SECRET: ${{ secrets.PRICE_CRON_SECRET }}
+        run: node scripts/trigger-price-ingestion.mjs
+
       - name: Chromium önbelleği
+        # Önceki adım başarısız olsa da ekran kaynağı denenir.
+        if: always()
         id: chromium-cache
         uses: actions/cache@v4
         with:
@@ -52,11 +76,13 @@ jobs:
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Chromium kurulumu
-        if: steps.chromium-cache.outputs.cache-hit != 'true'
+        if: always() && steps.chromium-cache.outputs.cache-hit != 'true'
         # YALNIZ Chromium; başka tarayıcı indirilmez.
         run: npx playwright install --with-deps chromium
 
-      - name: Fiyatı topla ve gönder
+      # --- 2. Ekran kaynağı: Kayseri tezgâh fiyatı yalnız DOM'da hesaplanıyor ---
+      - name: Kayseri ekran fiyatını topla ve gönder
+        if: always()
         env:
           APP_BASE_URL: ${{ secrets.ALTIN_TAKIP_APP_URL }}
           PRICE_SCREEN_WORKER_SECRET: ${{ secrets.PRICE_SCREEN_WORKER_SECRET }}

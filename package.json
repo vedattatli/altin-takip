@@ -36,7 +36,11 @@
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle",
     "price:sarraf:collect-once": "node --import tsx services/sarraf-screen-worker/src/collect-once.ts",
     "probe:remote-isolation": "node scripts/remote-isolation-probe.mjs",
-    "mappings:approve": "node scripts/approve-mappings.mjs"
+    "mappings:approve": "node scripts/approve-mappings.mjs",
+    "price:truncgil:collect-once": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/provider-read-check.ts truncgil-turkiye",
+    "price:anlik:collect-once": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/provider-read-check.ts anlik-altin-kapalicarsi",
+    "price:anlik:compare": "node --import tsx tools/experimental/anlik-altin/compare-probe.ts",
+    "price:ingest:trigger": "node scripts/trigger-price-ingestion.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

@@ -130,3 +130,53 @@ export const TRUNCGIL_GROUPED_MAPPING: Readonly<Record<string, string>> = {
   YARIMALTIN: "eski-yarim",
   TAMALTIN: "eski-tam",
 };
+
+// ---------------------------------------------------------------------------
+
+export const ANLIK_ALTIN_MAPPING_VERSION = "anlik-altin-kapalicarsi-1";
+
+/**
+ * ANLIK ALTIN "KAPALIÇARŞI ÖNERİLEN" TABLOSU → KANONİK ÜRÜNLER
+ *
+ * Anahtarlar sayfadaki `data-name="<ANAHTAR>_alis|satis"` öneklerdir; ekranda
+ * görünen Türkçe başlık DEĞİLDİR. Başlık metni sayfa tasarımıyla değişebilir,
+ * `data-name` ise veri sözleşmesidir.
+ *
+ * Beyaz liste AÇIKTIR: listede olmayan sembol sessizce başka ürüne yazılmaz.
+ *
+ * Eşlenmeyenler ve nedeni:
+ *   HGUMUSTRY / HXAGUSD  gümüştür, altın portföyüne katılmaz
+ *   HXAUXAG              orandır, fiyat değildir
+ *   HONS                 dolar bazlı ons; TL ürün değildir
+ *   HAYAR22              tabloda "22 Ayar Altın" hurda/işlenmiş ayrımı yazmıyor
+ *   HCEYREK_ESKI         aşağıda ayrı ele alınıyor
+ */
+export const ANLIK_ALTIN_MAPPING: Readonly<Record<string, string>> = {
+  HGRAM: "gram-altin",
+  HHAS: "has-altin",
+  HAYAR14: "altin-14-ayar",
+  HCEYREK: "yeni-ceyrek",
+  HCEYREK_ESKI: "eski-ceyrek",
+  HYARIM: "yeni-yarim",
+  HTEK: "yeni-tam",
+  HATA: "ata-altin",
+  HATA5: "besli-altin",
+  HGREMSE: "gremse-altin",
+};
+
+/**
+ * Tablonun kimlik mührü.
+ *
+ * Sayfada ÜÇ ayrı blok var ve yalnızca biri okunur:
+ *   data-market="3"  data-type="kuyumcu"                    (gizli, Altınkaynak)
+ *   data-market="5"  data-type="harem"   id="kapalicarsi_h" (OKUNAN TABLO)
+ *   data-market="4"  data-type="KAYSARDER: Kayseri Sarraflar" (yalnız iframe)
+ *
+ * Bu üç değer birlikte doğrulanır. Sayfa yeniden düzenlenir ve blok kayarsa
+ * fail closed olunur; "yakın görünen" başka bir tablo okunmaz.
+ */
+export const ANLIK_ALTIN_TABLE_CONTRACT = {
+  market: "5",
+  dataType: "harem",
+  tableId: "kapalicarsi_h",
+} as const;

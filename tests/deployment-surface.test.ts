@@ -97,12 +97,31 @@ describe("cihaz izinleri istenmez", () => {
 });
 
 describe("kimlik bilgisi ve portföy verisi tarayıcı deposuna yazılmaz", () => {
+  /**
+   * TEK İSTİSNA: görünüm modu tercihi (basit/detaylı).
+   *
+   * Kural kaldırılmadı, DARALTILDI. Bu bir GÖRÜNÜM tercihidir; kimlik bilgisi
+   * veya portföy verisi değildir. Aşağıdaki ikinci test o dosyanın gerçekten
+   * yalnızca iki sabit değerden birini yazdığını ayrıca kanıtlar.
+   */
+  const VIEW_MODE_FILE = join("src", "state", "view-mode.tsx");
+
   it("localStorage veya sessionStorage kullanılmaz", () => {
     // Yorumlar ayıklanır: denetlenen şey kural metni değil, çalışan koddur.
-    const offenders = SOURCE_FILES.filter((file) =>
-      /\b(localStorage|sessionStorage)\b/.test(readCode(file)),
+    const offenders = SOURCE_FILES.filter(
+      (file) => file !== VIEW_MODE_FILE && /\b(localStorage|sessionStorage)\b/.test(readCode(file)),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("görünüm modu deposu yalnızca iki sabit değer tutar", () => {
+    const code = readCode(VIEW_MODE_FILE);
+    // Tek anahtar, tek tür değer.
+    expect(code).toContain('const STORAGE_KEY = "altin-takip:gorunum-modu"');
+    expect(code.match(/localStorage\.setItem\(/gu)).toHaveLength(1);
+    expect(code).toContain("window.localStorage.setItem(STORAGE_KEY, mode)");
+    // Kimlik bilgisi, oturum veya portföy verisi ADI BİLE geçmez.
+    expect(code).not.toMatch(/token|password|parola|session|portfolio|portfoy|quantity|cost/i);
   });
 
   it("IndexedDB yalnızca geliştirme demo deposunda kullanılır", () => {

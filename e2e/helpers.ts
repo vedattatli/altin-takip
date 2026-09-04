@@ -56,6 +56,31 @@ export async function gotoReady(page: Page, path: string) {
   await page.waitForSelector('html[data-hydrated="true"]', { timeout: 30_000 });
 }
 
+/**
+ * GÖRÜNÜM MODU
+ *
+ * Uygulamanın VARSAYILANI "basit" moddur. Var olan testlerin çoğu satış
+ * ekleme ve gerçekleşmiş/gerçekleşmemiş K/Z ayrımı gibi DETAYLI mod
+ * ekranlarını doğrular; bu yüzden giriş yardımcıları modu açıkça detaylıya
+ * çeker.
+ *
+ * Tercih localStorage'ta tutulduğu için sayfa yüklenmeden ÖNCE yazılır:
+ * düğmeye tıklamak yerine baştan sabitlenir, böylece test yarış durumuna
+ * girmez.
+ *
+ * Basit modun kendisi ayrı bir dosyada (simple-mode.spec.ts) sınanır ve orada
+ * bu yardımcı KULLANILMAZ.
+ */
+export async function enableDetailedMode(page: Page) {
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem("altin-takip:gorunum-modu", "detayli");
+    } catch {
+      // Depolama kapalıysa test varsayılan modda koşar.
+    }
+  });
+}
+
 export interface LoginOptions {
   /** "Bu cihazda oturumumu açık tut" kutusu. Varsayılan: işaretli (testlerin çoğu kalıcı oturum bekler). */
   keepSignedIn?: boolean;
@@ -189,6 +214,7 @@ export async function loginAsUser(
   password = TEST_PASSWORD,
   options: LoginOptions = {},
 ) {
+  await enableDetailedMode(page);
   await login(page, username, password, options);
   await page.waitForURL("**/panel");
 }

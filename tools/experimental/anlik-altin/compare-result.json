@@ -1,0 +1,932 @@
+[
+  {
+    "index": 1,
+    "at": "2026-09-04T04:20:39.856Z",
+    "kaysarder": {
+      "dataType": "KAYSARDER: Kayseri Sarraflar",
+      "numericCells": 10,
+      "iframeSrc": "https://tv.sarraf.pro/?mode=frame&slug=kayseri&code=383838",
+      "visibleText": ".alt_text {display:block;font-size:85%;padding:5px;box-sizing:border-box;line-height:2.1;} .alt_text a{display:inline-block;margin-right:2px;margin-bottom:3px;border-radius:5px;padding:1px 5px;border:1px solid #ddd;background:#333;color:#fff;text-shadow:1px 1px 1px #111;} .alt_text a:hover {background:#fafafa;color:#333;text-shadow:1px 1px 1px #eee;} h2 { font-size: 20px; font-weight: 700; color: #333; margin-top: 24px; margin-bottom: 12px; line-height: 1.43; text-transform: uppercase; height: auto; border-bottom:2px solid rgba(0, 0, 0, 0.1); } h3 { font-size: 16px; font-weight: 600; color: #333; margin-top: 15px; margin-bottom: 5px; padding:5px 0 5px 5px; line-height: 1.45; text-transform: capitalize; background-color: rgba(0, 0, 0, 0.2); box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1); } Kayseri Altın Fiyatları neden farklı ? Kayseri kuyumcuları arasında, bankalarda, kapalıçarşı, kuyumcukent ve diğer serbest piyasa verilerinde fiyatların birbirinden farklı olmasını sağlayan çeşitli faktörler vardır. Bunlardan bazıları; Resmi Yönetmelikler, Arz ve Talep Dengesi, Likidite Seviyesi, Piyasa Bilgi ve Tecrübesi, İşlem Ücretleri ve Komisyonlar, Spekülasyon Etkisi olarak sıralanabilir. DÖVİZ FİYAT FARK MİKTAR Dolar 48.4412 0.22 % 0.11 Euro 56.3204 0.22 % 0.12 Sterlin 65.5497 0.26 % 0.17 Frank 59.9520 0.16 % 0.10 Riyal 12.9005 0.22 % 0.03 Serbest Piyasa Kapalıçarşı ALTIN FİYAT FARK MİKTAR Altın Ons 4468.8384 -0.09 % -4.22 Gram Altın 6959.9069 0.06 % 4.06 Çeyrek Altın 11553.4455 0.06 % 6.74 Cumhuriyet 47466.5651 0.06 % 27.68 22 Ayar Altın 6389.1945 0.06 % 3.73 $(document).ready(function() { function setSidebarHeight() { var contentHeight = $('#content').outerHeight(); var sidebarHeight = $('#sidebar').outerHeight(); if(sidebarHeight span.column { display:block; background: #2C2D2F; height: 30px; line-height: 30px; font-weight: 600; font-size: 14px; margin: 0 0 6px 0; padding: 0 0 0 10px; color: #F9F7ED; } window.addEventListener('scroll', function() { var chartElement = document.getElementById('columns'); var chartPosition = chartElement.getBoundingClientRect().top; var windowPosition = window.innerHeight; if (chartPosition GRAM ALTIN DOLAR KURU EURO KURU &copy; Copyright 2026 - anlikaltinfiyatlari.com | Anlık Altın | Anlık Döviz | Gram Altın try { var yaCounter28577486 = new Ya.Metrika({id:28577486, webvisor:true, accurateTrackBounce:true}); } catch(e) { }"
+    },
+    "wideTable": {
+      "dataType": "harem",
+      "tableId": "kapalicarsi_h",
+      "rowCount": 15,
+      "rows": [
+        {
+          "key": "HGRAM",
+          "label": "Gram Altın 07:19:57",
+          "buy": "6874.77",
+          "sell": "6958.35",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR22",
+          "label": "22 Ayar Altın 07:19:57",
+          "buy": "6284.66",
+          "sell": "6506.94",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR14",
+          "label": "14 Ayar Altın 07:19:30",
+          "buy": "3778.72",
+          "sell": "5013.31",
+          "time": "07:19:30"
+        },
+        {
+          "key": "HCEYREK",
+          "label": "Çeyrek Altın 07:19:57",
+          "buy": "11212",
+          "sell": "11358",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HCEYREK_ESKI",
+          "label": "Çeyrek Eski 07:19:31",
+          "buy": "11026",
+          "sell": "11149",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HYARIM",
+          "label": "Yarım Altın 07:19:31",
+          "buy": "22452",
+          "sell": "22688",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HTEK",
+          "label": "Tam Altın 07:19:31",
+          "buy": "44697",
+          "sell": "45223",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HHAS",
+          "label": "Has Altın 07:19:57",
+          "buy": "6909.32",
+          "sell": "6944.46",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA",
+          "label": "Ata Altın 07:19:57",
+          "buy": "45457",
+          "sell": "46021",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA5",
+          "label": "Ata 5'li 07:19:31",
+          "buy": "227978",
+          "sell": "231965",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGREMSE",
+          "label": "Gremse (2.5) 07:19:31",
+          "buy": "111226",
+          "sell": "112675",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGUMUSTRY",
+          "label": "Gümüş Gram 07:19:55",
+          "buy": "96.554",
+          "sell": "103.783",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAGUSD",
+          "label": "Gümüş Ons 07:19:55",
+          "buy": "66.61",
+          "sell": "66.64",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAUXAG",
+          "label": "Altın/Gümüş 07:19:55",
+          "buy": "66.34",
+          "sell": "71.43",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HONS",
+          "label": "ALTIN ONS $ 07:19:55",
+          "buy": "4469.30",
+          "sell": "4469.80",
+          "time": "07:19:55"
+        }
+      ]
+    },
+    "screen": {
+      "signature": "headers:buy,sell|rows:12|directional:8",
+      "headers": [
+        "ALIŞ",
+        "SATIŞ"
+      ],
+      "rowCount": 12,
+      "rows": [
+        {
+          "label": "HAS",
+          "cells": {
+            "TEK_SUTUN": "0"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "22 AYAR",
+          "cells": {
+            "TEK_SUTUN": "0"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "14 AYAR",
+          "cells": {
+            "TEK_SUTUN": "0"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "8 AYAR",
+          "cells": {
+            "TEK_SUTUN": "0"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "ÇEYREK",
+          "cells": {
+            "ALIŞ": "0",
+            "SATIŞ": "0"
+          },
+          "directionResolved": true,
+          "top": 307,
+          "cellCount": 2
+        },
+        {
+          "label": "YARIM",
+          "cells": {
+            "ALIŞ": "-",
+            "SATIŞ": "-"
+          },
+          "directionResolved": true,
+          "top": 355,
+          "cellCount": 2
+        },
+        {
+          "label": "TAM ALTIN",
+          "cells": {
+            "ALIŞ": "-",
+            "SATIŞ": "-"
+          },
+          "directionResolved": true,
+          "top": 402,
+          "cellCount": 2
+        },
+        {
+          "label": "GREMSE",
+          "cells": {
+            "ALIŞ": "-",
+            "SATIŞ": "-"
+          },
+          "directionResolved": true,
+          "top": 450,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT LİRA",
+          "cells": {
+            "ALIŞ": "0",
+            "SATIŞ": "0"
+          },
+          "directionResolved": true,
+          "top": 497,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT BEŞLİ",
+          "cells": {
+            "ALIŞ": "0",
+            "SATIŞ": "0"
+          },
+          "directionResolved": true,
+          "top": 545,
+          "cellCount": 2
+        },
+        {
+          "label": "24 AYAR PAKETLİ",
+          "cells": {
+            "ALIŞ": "0",
+            "SATIŞ": "0"
+          },
+          "directionResolved": true,
+          "top": 592,
+          "cellCount": 2
+        },
+        {
+          "label": "KÜLÇE GÜMÜŞ",
+          "cells": {
+            "ALIŞ": "0",
+            "SATIŞ": "0"
+          },
+          "directionResolved": true,
+          "top": 640,
+          "cellCount": 2
+        }
+      ]
+    },
+    "comparisons": [
+      {
+        "product": "ÇEYREK",
+        "anlikKey": "HCEYREK",
+        "anlikLabel": "Çeyrek Altın 07:19:57",
+        "anlikBuy": "11212",
+        "anlikSell": "11358",
+        "anlikTime": "07:19:57",
+        "screenLabel": "ÇEYREK",
+        "screenBuy": "0",
+        "screenSell": "0",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -11212,
+        "sellDiff": -11358
+      },
+      {
+        "product": "YARIM",
+        "anlikKey": "HYARIM",
+        "anlikLabel": "Yarım Altın 07:19:31",
+        "anlikBuy": "22452",
+        "anlikSell": "22688",
+        "anlikTime": "07:19:31",
+        "screenLabel": "YARIM",
+        "screenBuy": "-",
+        "screenSell": "-",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": null,
+        "sellDiff": null
+      },
+      {
+        "product": "TAM",
+        "anlikKey": "HTEK",
+        "anlikLabel": "Tam Altın 07:19:31",
+        "anlikBuy": "44697",
+        "anlikSell": "45223",
+        "anlikTime": "07:19:31",
+        "screenLabel": "TAM ALTIN",
+        "screenBuy": "-",
+        "screenSell": "-",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": null,
+        "sellDiff": null
+      },
+      {
+        "product": "GREMSE",
+        "anlikKey": "HGREMSE",
+        "anlikLabel": "Gremse (2.5) 07:19:31",
+        "anlikBuy": "111226",
+        "anlikSell": "112675",
+        "anlikTime": "07:19:31",
+        "screenLabel": "GREMSE",
+        "screenBuy": "-",
+        "screenSell": "-",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": null,
+        "sellDiff": null
+      }
+    ]
+  },
+  {
+    "index": 2,
+    "at": "2026-09-04T04:21:05.519Z",
+    "kaysarder": {
+      "dataType": "KAYSARDER: Kayseri Sarraflar",
+      "numericCells": 10,
+      "iframeSrc": "https://tv.sarraf.pro/?mode=frame&slug=kayseri&code=383838",
+      "visibleText": ".alt_text {display:block;font-size:85%;padding:5px;box-sizing:border-box;line-height:2.1;} .alt_text a{display:inline-block;margin-right:2px;margin-bottom:3px;border-radius:5px;padding:1px 5px;border:1px solid #ddd;background:#333;color:#fff;text-shadow:1px 1px 1px #111;} .alt_text a:hover {background:#fafafa;color:#333;text-shadow:1px 1px 1px #eee;} h2 { font-size: 20px; font-weight: 700; color: #333; margin-top: 24px; margin-bottom: 12px; line-height: 1.43; text-transform: uppercase; height: auto; border-bottom:2px solid rgba(0, 0, 0, 0.1); } h3 { font-size: 16px; font-weight: 600; color: #333; margin-top: 15px; margin-bottom: 5px; padding:5px 0 5px 5px; line-height: 1.45; text-transform: capitalize; background-color: rgba(0, 0, 0, 0.2); box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1); } Kayseri Altın Fiyatları neden farklı ? Kayseri kuyumcuları arasında, bankalarda, kapalıçarşı, kuyumcukent ve diğer serbest piyasa verilerinde fiyatların birbirinden farklı olmasını sağlayan çeşitli faktörler vardır. Bunlardan bazıları; Resmi Yönetmelikler, Arz ve Talep Dengesi, Likidite Seviyesi, Piyasa Bilgi ve Tecrübesi, İşlem Ücretleri ve Komisyonlar, Spekülasyon Etkisi olarak sıralanabilir. DÖVİZ FİYAT FARK MİKTAR Dolar 48.4412 0.22 % 0.11 Euro 56.3204 0.22 % 0.12 Sterlin 65.5497 0.26 % 0.17 Frank 59.9520 0.16 % 0.10 Riyal 12.9005 0.22 % 0.03 Serbest Piyasa Kapalıçarşı ALTIN FİYAT FARK MİKTAR Altın Ons 4468.8384 -0.09 % -4.22 Gram Altın 6959.9069 0.06 % 4.06 Çeyrek Altın 11553.4455 0.06 % 6.74 Cumhuriyet 47466.5651 0.06 % 27.68 22 Ayar Altın 6389.1945 0.06 % 3.73 $(document).ready(function() { function setSidebarHeight() { var contentHeight = $('#content').outerHeight(); var sidebarHeight = $('#sidebar').outerHeight(); if(sidebarHeight span.column { display:block; background: #2C2D2F; height: 30px; line-height: 30px; font-weight: 600; font-size: 14px; margin: 0 0 6px 0; padding: 0 0 0 10px; color: #F9F7ED; } window.addEventListener('scroll', function() { var chartElement = document.getElementById('columns'); var chartPosition = chartElement.getBoundingClientRect().top; var windowPosition = window.innerHeight; if (chartPosition GRAM ALTIN DOLAR KURU EURO KURU &copy; Copyright 2026 - anlikaltinfiyatlari.com | Anlık Altın | Anlık Döviz | Gram Altın try { var yaCounter28577486 = new Ya.Metrika({id:28577486, webvisor:true, accurateTrackBounce:true}); } catch(e) { }"
+    },
+    "wideTable": {
+      "dataType": "harem",
+      "tableId": "kapalicarsi_h",
+      "rowCount": 15,
+      "rows": [
+        {
+          "key": "HGRAM",
+          "label": "Gram Altın 07:19:57",
+          "buy": "6874.77",
+          "sell": "6958.35",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR22",
+          "label": "22 Ayar Altın 07:19:57",
+          "buy": "6284.66",
+          "sell": "6506.94",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR14",
+          "label": "14 Ayar Altın 07:19:30",
+          "buy": "3778.72",
+          "sell": "5013.31",
+          "time": "07:19:30"
+        },
+        {
+          "key": "HCEYREK",
+          "label": "Çeyrek Altın 07:19:57",
+          "buy": "11212",
+          "sell": "11358",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HCEYREK_ESKI",
+          "label": "Çeyrek Eski 07:19:31",
+          "buy": "11026",
+          "sell": "11149",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HYARIM",
+          "label": "Yarım Altın 07:19:31",
+          "buy": "22452",
+          "sell": "22688",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HTEK",
+          "label": "Tam Altın 07:19:31",
+          "buy": "44697",
+          "sell": "45223",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HHAS",
+          "label": "Has Altın 07:19:57",
+          "buy": "6909.32",
+          "sell": "6944.46",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA",
+          "label": "Ata Altın 07:19:57",
+          "buy": "45457",
+          "sell": "46021",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA5",
+          "label": "Ata 5'li 07:19:31",
+          "buy": "227978",
+          "sell": "231965",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGREMSE",
+          "label": "Gremse (2.5) 07:19:31",
+          "buy": "111226",
+          "sell": "112675",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGUMUSTRY",
+          "label": "Gümüş Gram 07:19:55",
+          "buy": "96.554",
+          "sell": "103.783",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAGUSD",
+          "label": "Gümüş Ons 07:19:55",
+          "buy": "66.61",
+          "sell": "66.64",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAUXAG",
+          "label": "Altın/Gümüş 07:19:55",
+          "buy": "66.34",
+          "sell": "71.43",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HONS",
+          "label": "ALTIN ONS $ 07:19:55",
+          "buy": "4469.30",
+          "sell": "4469.80",
+          "time": "07:19:55"
+        }
+      ]
+    },
+    "screen": {
+      "signature": "headers:buy,sell|rows:12|directional:8",
+      "headers": [
+        "ALIŞ",
+        "SATIŞ"
+      ],
+      "rowCount": 12,
+      "rows": [
+        {
+          "label": "HAS",
+          "cells": {
+            "TEK_SUTUN": "6.944"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "22 AYAR",
+          "cells": {
+            "TEK_SUTUN": "6.670"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "14 AYAR",
+          "cells": {
+            "TEK_SUTUN": "4.760"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "8 AYAR",
+          "cells": {
+            "TEK_SUTUN": "2.990"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "ÇEYREK",
+          "cells": {
+            "ALIŞ": "11.000",
+            "SATIŞ": "11.550"
+          },
+          "directionResolved": true,
+          "top": 307,
+          "cellCount": 2
+        },
+        {
+          "label": "YARIM",
+          "cells": {
+            "ALIŞ": "22.000",
+            "SATIŞ": "23.100"
+          },
+          "directionResolved": true,
+          "top": 355,
+          "cellCount": 2
+        },
+        {
+          "label": "TAM ALTIN",
+          "cells": {
+            "ALIŞ": "44.000",
+            "SATIŞ": "46.200"
+          },
+          "directionResolved": true,
+          "top": 402,
+          "cellCount": 2
+        },
+        {
+          "label": "GREMSE",
+          "cells": {
+            "ALIŞ": "110.000",
+            "SATIŞ": "115.500"
+          },
+          "directionResolved": true,
+          "top": 450,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT LİRA",
+          "cells": {
+            "ALIŞ": "45.350",
+            "SATIŞ": "47.600"
+          },
+          "directionResolved": true,
+          "top": 497,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT BEŞLİ",
+          "cells": {
+            "ALIŞ": "226.600",
+            "SATIŞ": "243.050"
+          },
+          "directionResolved": true,
+          "top": 545,
+          "cellCount": 2
+        },
+        {
+          "label": "24 AYAR PAKETLİ",
+          "cells": {
+            "ALIŞ": "6.860",
+            "SATIŞ": "7.040"
+          },
+          "directionResolved": true,
+          "top": 592,
+          "cellCount": 2
+        },
+        {
+          "label": "KÜLÇE GÜMÜŞ",
+          "cells": {
+            "ALIŞ": "96.573",
+            "SATIŞ": "106.400"
+          },
+          "directionResolved": true,
+          "top": 640,
+          "cellCount": 2
+        }
+      ]
+    },
+    "comparisons": [
+      {
+        "product": "ÇEYREK",
+        "anlikKey": "HCEYREK",
+        "anlikLabel": "Çeyrek Altın 07:19:57",
+        "anlikBuy": "11212",
+        "anlikSell": "11358",
+        "anlikTime": "07:19:57",
+        "screenLabel": "ÇEYREK",
+        "screenBuy": "11.000",
+        "screenSell": "11.550",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -212,
+        "sellDiff": 192
+      },
+      {
+        "product": "YARIM",
+        "anlikKey": "HYARIM",
+        "anlikLabel": "Yarım Altın 07:19:31",
+        "anlikBuy": "22452",
+        "anlikSell": "22688",
+        "anlikTime": "07:19:31",
+        "screenLabel": "YARIM",
+        "screenBuy": "22.000",
+        "screenSell": "23.100",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -452,
+        "sellDiff": 412
+      },
+      {
+        "product": "TAM",
+        "anlikKey": "HTEK",
+        "anlikLabel": "Tam Altın 07:19:31",
+        "anlikBuy": "44697",
+        "anlikSell": "45223",
+        "anlikTime": "07:19:31",
+        "screenLabel": "TAM ALTIN",
+        "screenBuy": "44.000",
+        "screenSell": "46.200",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -697,
+        "sellDiff": 977
+      },
+      {
+        "product": "GREMSE",
+        "anlikKey": "HGREMSE",
+        "anlikLabel": "Gremse (2.5) 07:19:31",
+        "anlikBuy": "111226",
+        "anlikSell": "112675",
+        "anlikTime": "07:19:31",
+        "screenLabel": "GREMSE",
+        "screenBuy": "110.000",
+        "screenSell": "115.500",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -1226,
+        "sellDiff": 2825
+      }
+    ]
+  },
+  {
+    "index": 3,
+    "at": "2026-09-04T04:21:28.014Z",
+    "kaysarder": {
+      "dataType": "KAYSARDER: Kayseri Sarraflar",
+      "numericCells": 10,
+      "iframeSrc": "https://tv.sarraf.pro/?mode=frame&slug=kayseri&code=383838",
+      "visibleText": ".alt_text {display:block;font-size:85%;padding:5px;box-sizing:border-box;line-height:2.1;} .alt_text a{display:inline-block;margin-right:2px;margin-bottom:3px;border-radius:5px;padding:1px 5px;border:1px solid #ddd;background:#333;color:#fff;text-shadow:1px 1px 1px #111;} .alt_text a:hover {background:#fafafa;color:#333;text-shadow:1px 1px 1px #eee;} h2 { font-size: 20px; font-weight: 700; color: #333; margin-top: 24px; margin-bottom: 12px; line-height: 1.43; text-transform: uppercase; height: auto; border-bottom:2px solid rgba(0, 0, 0, 0.1); } h3 { font-size: 16px; font-weight: 600; color: #333; margin-top: 15px; margin-bottom: 5px; padding:5px 0 5px 5px; line-height: 1.45; text-transform: capitalize; background-color: rgba(0, 0, 0, 0.2); box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1); } Kayseri Altın Fiyatları neden farklı ? Kayseri kuyumcuları arasında, bankalarda, kapalıçarşı, kuyumcukent ve diğer serbest piyasa verilerinde fiyatların birbirinden farklı olmasını sağlayan çeşitli faktörler vardır. Bunlardan bazıları; Resmi Yönetmelikler, Arz ve Talep Dengesi, Likidite Seviyesi, Piyasa Bilgi ve Tecrübesi, İşlem Ücretleri ve Komisyonlar, Spekülasyon Etkisi olarak sıralanabilir. DÖVİZ FİYAT FARK MİKTAR Dolar 48.4412 0.22 % 0.11 Euro 56.3204 0.22 % 0.12 Sterlin 65.5497 0.26 % 0.17 Frank 59.9520 0.16 % 0.10 Riyal 12.9005 0.22 % 0.03 Serbest Piyasa Kapalıçarşı ALTIN FİYAT FARK MİKTAR Altın Ons 4468.8384 -0.09 % -4.22 Gram Altın 6959.9069 0.06 % 4.06 Çeyrek Altın 11553.4455 0.06 % 6.74 Cumhuriyet 47466.5651 0.06 % 27.68 22 Ayar Altın 6389.1945 0.06 % 3.73 $(document).ready(function() { function setSidebarHeight() { var contentHeight = $('#content').outerHeight(); var sidebarHeight = $('#sidebar').outerHeight(); if(sidebarHeight span.column { display:block; background: #2C2D2F; height: 30px; line-height: 30px; font-weight: 600; font-size: 14px; margin: 0 0 6px 0; padding: 0 0 0 10px; color: #F9F7ED; } window.addEventListener('scroll', function() { var chartElement = document.getElementById('columns'); var chartPosition = chartElement.getBoundingClientRect().top; var windowPosition = window.innerHeight; if (chartPosition GRAM ALTIN DOLAR KURU EURO KURU &copy; Copyright 2026 - anlikaltinfiyatlari.com | Anlık Altın | Anlık Döviz | Gram Altın try { var yaCounter28577486 = new Ya.Metrika({id:28577486, webvisor:true, accurateTrackBounce:true}); } catch(e) { }"
+    },
+    "wideTable": {
+      "dataType": "harem",
+      "tableId": "kapalicarsi_h",
+      "rowCount": 15,
+      "rows": [
+        {
+          "key": "HGRAM",
+          "label": "Gram Altın 07:19:57",
+          "buy": "6874.77",
+          "sell": "6958.35",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR22",
+          "label": "22 Ayar Altın 07:19:57",
+          "buy": "6284.66",
+          "sell": "6506.94",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HAYAR14",
+          "label": "14 Ayar Altın 07:19:30",
+          "buy": "3778.72",
+          "sell": "5013.31",
+          "time": "07:19:30"
+        },
+        {
+          "key": "HCEYREK",
+          "label": "Çeyrek Altın 07:19:57",
+          "buy": "11212",
+          "sell": "11358",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HCEYREK_ESKI",
+          "label": "Çeyrek Eski 07:19:31",
+          "buy": "11026",
+          "sell": "11149",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HYARIM",
+          "label": "Yarım Altın 07:19:31",
+          "buy": "22452",
+          "sell": "22688",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HTEK",
+          "label": "Tam Altın 07:19:31",
+          "buy": "44697",
+          "sell": "45223",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HHAS",
+          "label": "Has Altın 07:19:57",
+          "buy": "6909.32",
+          "sell": "6944.46",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA",
+          "label": "Ata Altın 07:19:57",
+          "buy": "45457",
+          "sell": "46021",
+          "time": "07:19:57"
+        },
+        {
+          "key": "HATA5",
+          "label": "Ata 5'li 07:19:31",
+          "buy": "227978",
+          "sell": "231965",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGREMSE",
+          "label": "Gremse (2.5) 07:19:31",
+          "buy": "111226",
+          "sell": "112675",
+          "time": "07:19:31"
+        },
+        {
+          "key": "HGUMUSTRY",
+          "label": "Gümüş Gram 07:19:55",
+          "buy": "96.554",
+          "sell": "103.783",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAGUSD",
+          "label": "Gümüş Ons 07:19:55",
+          "buy": "66.61",
+          "sell": "66.64",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HXAUXAG",
+          "label": "Altın/Gümüş 07:19:55",
+          "buy": "66.34",
+          "sell": "71.43",
+          "time": "07:19:55"
+        },
+        {
+          "key": "HONS",
+          "label": "ALTIN ONS $ 07:19:55",
+          "buy": "4469.30",
+          "sell": "4469.80",
+          "time": "07:19:55"
+        }
+      ]
+    },
+    "screen": {
+      "signature": "headers:buy,sell|rows:12|directional:8",
+      "headers": [
+        "ALIŞ",
+        "SATIŞ"
+      ],
+      "rowCount": 12,
+      "rows": [
+        {
+          "label": "HAS",
+          "cells": {
+            "TEK_SUTUN": "6.944"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "22 AYAR",
+          "cells": {
+            "TEK_SUTUN": "6.670"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "14 AYAR",
+          "cells": {
+            "TEK_SUTUN": "4.760"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "8 AYAR",
+          "cells": {
+            "TEK_SUTUN": "2.990"
+          },
+          "directionResolved": false,
+          "top": 226,
+          "cellCount": 1
+        },
+        {
+          "label": "ÇEYREK",
+          "cells": {
+            "ALIŞ": "11.000",
+            "SATIŞ": "11.550"
+          },
+          "directionResolved": true,
+          "top": 307,
+          "cellCount": 2
+        },
+        {
+          "label": "YARIM",
+          "cells": {
+            "ALIŞ": "22.000",
+            "SATIŞ": "23.100"
+          },
+          "directionResolved": true,
+          "top": 355,
+          "cellCount": 2
+        },
+        {
+          "label": "TAM ALTIN",
+          "cells": {
+            "ALIŞ": "44.000",
+            "SATIŞ": "46.200"
+          },
+          "directionResolved": true,
+          "top": 402,
+          "cellCount": 2
+        },
+        {
+          "label": "GREMSE",
+          "cells": {
+            "ALIŞ": "110.000",
+            "SATIŞ": "115.500"
+          },
+          "directionResolved": true,
+          "top": 450,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT LİRA",
+          "cells": {
+            "ALIŞ": "45.350",
+            "SATIŞ": "47.600"
+          },
+          "directionResolved": true,
+          "top": 497,
+          "cellCount": 2
+        },
+        {
+          "label": "ATA - REŞAT BEŞLİ",
+          "cells": {
+            "ALIŞ": "226.600",
+            "SATIŞ": "243.050"
+          },
+          "directionResolved": true,
+          "top": 545,
+          "cellCount": 2
+        },
+        {
+          "label": "24 AYAR PAKETLİ",
+          "cells": {
+            "ALIŞ": "6.860",
+            "SATIŞ": "7.040"
+          },
+          "directionResolved": true,
+          "top": 592,
+          "cellCount": 2
+        },
+        {
+          "label": "KÜLÇE GÜMÜŞ",
+          "cells": {
+            "ALIŞ": "96.571",
+            "SATIŞ": "106.398"
+          },
+          "directionResolved": true,
+          "top": 640,
+          "cellCount": 2
+        }
+      ]
+    },
+    "comparisons": [
+      {
+        "product": "ÇEYREK",
+        "anlikKey": "HCEYREK",
+        "anlikLabel": "Çeyrek Altın 07:19:57",
+        "anlikBuy": "11212",
+        "anlikSell": "11358",
+        "anlikTime": "07:19:57",
+        "screenLabel": "ÇEYREK",
+        "screenBuy": "11.000",
+        "screenSell": "11.550",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -212,
+        "sellDiff": 192
+      },
+      {
+        "product": "YARIM",
+        "anlikKey": "HYARIM",
+        "anlikLabel": "Yarım Altın 07:19:31",
+        "anlikBuy": "22452",
+        "anlikSell": "22688",
+        "anlikTime": "07:19:31",
+        "screenLabel": "YARIM",
+        "screenBuy": "22.000",
+        "screenSell": "23.100",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -452,
+        "sellDiff": 412
+      },
+      {
+        "product": "TAM",
+        "anlikKey": "HTEK",
+        "anlikLabel": "Tam Altın 07:19:31",
+        "anlikBuy": "44697",
+        "anlikSell": "45223",
+        "anlikTime": "07:19:31",
+        "screenLabel": "TAM ALTIN",
+        "screenBuy": "44.000",
+        "screenSell": "46.200",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -697,
+        "sellDiff": 977
+      },
+      {
+        "product": "GREMSE",
+        "anlikKey": "HGREMSE",
+        "anlikLabel": "Gremse (2.5) 07:19:31",
+        "anlikBuy": "111226",
+        "anlikSell": "112675",
+        "anlikTime": "07:19:31",
+        "screenLabel": "GREMSE",
+        "screenBuy": "110.000",
+        "screenSell": "115.500",
+        "buyMatch": false,
+        "sellMatch": false,
+        "buyDiff": -1226,
+        "sellDiff": 2825
+      }
+    ]
+  }
+]

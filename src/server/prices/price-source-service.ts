@@ -7,7 +7,17 @@ import {
   SCREEN_OBSERVATION_MAX_AGE_MS,
 } from "@/prices/providers/sarraf-tv-screen-collector";
 import { describeProvider, listProviderStatuses } from "@/prices/registry";
-import type { PriceQuote, PriceSnapshot } from "@/prices/types";
+import type { PriceQuote, PriceSnapshot, PriceSourceMember } from "@/prices/types";
+import {
+  HYBRID_MARKET_ID,
+  HYBRID_PROVIDER_ID,
+  PLAN_PROVIDER_CODES,
+  plannedProviderFor,
+  SHARED_CATEGORY_QUOTE,
+  VALUATION_PLAN_DESCRIPTION,
+  VALUATION_PLAN_NAME,
+  VALUATION_SOURCE_PLAN,
+} from "@/prices/valuation-plan";
 import { adminScope, ownScope, type AdminActor, type DataScope, type UserActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";
@@ -46,13 +56,29 @@ const DEFAULT_STALE_AFTER_MS = 5 * 60_000;
  * (veritabanı kısıtı da bunu ayrıca engeller). Erişim portföy bazlıdır ve
  * kaynak BAŞINA verilir; bir kaynağa izin verilmesi diğerini açmaz.
  */
-const EXPERIMENTAL_CODES = ["sarraf-tv-kayseri-screen", "truncgil-turkiye"] as const;
+const EXPERIMENTAL_CODES = PLAN_PROVIDER_CODES;
 
 function isExperimentalCode(code: string): boolean {
   return (EXPERIMENTAL_CODES as readonly string[]).includes(code);
 }
 
 const EXPERIMENTAL_SCREEN_CODE = "sarraf-tv-kayseri-screen";
+
+/**
+ * HİBRİT PLANDA BAYATLIK EŞİKLERİ
+ *
+ * Kaynakların kendi güncelleme sıklığı değil, BİZİM toplama sıklığımız
+ * belirler: ücretsiz bulut toplayıcısı saatte bir çalışır. Eşik toplama
+ * aralığından dar olsaydı her fiyat, henüz doğruyken bile "bayat" görünürdü.
+ *
+ * 0–90 dk    Güncel
+ * 90+ dk     Bayat (arayüzde açıkça bayat yazar, değerlemeye girmez)
+ */
+const PLAN_STALE_AFTER_MS: Readonly<Record<string, number>> = {
+  "sarraf-tv-kayseri-screen": SCREEN_OBSERVATION_FRESH_MS,
+  "anlik-altin-kapalicarsi": SCREEN_OBSERVATION_FRESH_MS,
+  "truncgil-turkiye": SCREEN_OBSERVATION_FRESH_MS,
+};
 
 function staleAfterMs(): number {
   return numberFromEnv("PRICE_STALE_AFTER_MS", DEFAULT_STALE_AFTER_MS, { min: 1 });
@@ -73,6 +99,11 @@ export interface ActiveSourceView {
   coverage: number;
   /** Kullanıcı bu kaynağı değiştirebilir mi? */
   userSelectable: boolean;
+  /**
+   * Hibrit planda gerçekten fiyat veren sağlayıcı kodları.
+   * Tek sağlayıcılı klasik yolda boştur.
+   */
+  planProviderCodes?: readonly string[];
 }
 
 export interface SourceOptionView {
@@ -311,9 +342,137 @@ export class PriceSourceService {
     return this.snapshotForScope(adminScope(admin, targetUserId));
   }
 
+  /**
+   * HİBRİT KAYSERİ DEĞERLEMESİ
+   *
+   * Ürün başına kaynak `valuation-plan.ts` içinde ÖNCEDEN yazılıdır. Burada
+   * yalnızca plan uygulanır:
+   *
+   *   - Her ürünün fiyatı YALNIZ kendi planlanmış sağlayıcısından alınır.
+   *   - Planlanan sağlayıcı veri vermiyorsa ürün fiyatsız kalır; başka
+   *     sağlayıcının fiyatı o ürüne YAZILMAZ.
+   *   - Alış ve satış hep aynı kaydın iki alanıdır; karıştırılamaz.
+   *   - Kullanıcının izni olmayan kaynak plana girmez.
+   *
+   * Kullanıcının hiçbir plan kaynağına izni yoksa null döner ve klasik
+   * tek-sağlayıcılı yol kullanılır.
+   */
+  private async hybridSnapshotForScope(scope: DataScope, now: number): Promise<ActiveSnapshotResult | null> {
+    const allowedCodes: string[] = [];
+    await Promise.all(
+      PLAN_PROVIDER_CODES.map(async (code) => {
+        const allowed = await this.backend.experimentalAccessAllowed(scope.userId, code).catch(() => false);
+        if (allowed) allowedCodes.push(code);
+      }),
+    );
+    if (allowedCodes.length === 0) return null;
+
+    const rows = await this.backend.comparePriceQuotes(allowedCodes);
+    const byProvider = new Map(rows.map((row) => [row.providerCode, row]));
+
+    const quotes: Record<string, PriceQuote> = {};
+    const memberProviders: Record<string, PriceSourceMember> = {};
+    const usedProviders = new Set<string>();
+    let newest: number | null = null;
+
+    for (const productId of Object.keys(VALUATION_SOURCE_PLAN)) {
+      const providerCode = plannedProviderFor(productId);
+      if (providerCode === null) continue;
+      if (!allowedCodes.includes(providerCode)) continue;
+      const row = byProvider.get(providerCode);
+      if (!row) continue;
+
+      // Ürünün kendi kaydı; yoksa ORTAK KATEGORİ fiyatı (aynı sağlayıcıdan).
+      const own = row.quotes.find((quote) => quote.canonicalProductId === productId);
+      const sharedFromId = SHARED_CATEGORY_QUOTE[productId];
+      const shared =
+        own === undefined && sharedFromId !== undefined && plannedProviderFor(sharedFromId) === providerCode
+          ? row.quotes.find((quote) => quote.canonicalProductId === sharedFromId)
+          : undefined;
+      const source = own ?? shared;
+      if (!source) continue;
+
+      const memberStaleAfterMs = PLAN_STALE_AFTER_MS[providerCode] ?? staleAfterMs();
+      memberProviders[productId] = {
+        provider: providerCode,
+        market: row.marketId,
+        staleAfterMs: memberStaleAfterMs,
+        ...(own === undefined && shared !== undefined ? { sharedFrom: sharedFromId } : {}),
+      };
+      quotes[productId] = {
+        productId,
+        liquidationPrice: source.liquidationPrice,
+        replacementPrice: source.replacementPrice,
+        currency: "TRY",
+        market: row.marketId,
+        provider: providerCode,
+        providerTimestamp: source.providerTimestamp,
+        fetchedAt: source.fetchedAt,
+        status: source.status === "ok" ? "ok" : "stale",
+      };
+      usedProviders.add(providerCode);
+
+      const parsed = Date.parse(source.fetchedAt);
+      if (Number.isFinite(parsed)) newest = newest === null ? parsed : Math.max(newest, parsed);
+    }
+
+    const productCount = Object.keys(quotes).length;
+    const snapshotStaleAfter = Math.max(
+      ...allowedCodes.map((code) => PLAN_STALE_AFTER_MS[code] ?? staleAfterMs()),
+    );
+    const fetchedAt = newest === null ? new Date(now).toISOString() : new Date(newest).toISOString();
+
+    return {
+      snapshot: {
+        provider: {
+          id: HYBRID_PROVIDER_ID,
+          label: VALUATION_PLAN_NAME,
+          market: HYBRID_MARKET_ID,
+          // Gerçek piyasa verisidir ama LİSANSLI değildir: kaynakların hiçbiri
+          // yeniden gösterim izni beyan etmiyor. Bu ayrım kullanıcıya
+          // sağlayıcı açıklamasında yazılır.
+          isRealMarketData: false,
+          disclaimer: VALUATION_PLAN_DESCRIPTION,
+          staleAfterMs: snapshotStaleAfter,
+          memberProviders,
+        },
+        quotes,
+        fetchedAt,
+        status: productCount === 0 ? "unavailable" : "ok",
+        error:
+          productCount === 0
+            ? "Planlanan fiyat kaynaklarından kullanılabilir fiyat alınamadı. Başka bir kaynağın fiyatı gösterilmez."
+            : null,
+      },
+      source: {
+        providerCode: HYBRID_PROVIDER_ID,
+        displayName: VALUATION_PLAN_NAME,
+        technicalName: VALUATION_PLAN_DESCRIPTION,
+        marketId: HYBRID_MARKET_ID,
+        marketDisplayName: "Kayseri + referans kaynaklar",
+        attribution: VALUATION_PLAN_DESCRIPTION,
+        upstreamSourceLabel: null,
+        isRealMarketData: false,
+        lastQuoteAt: newest === null ? null : new Date(newest).toISOString(),
+        status:
+          productCount === 0
+            ? "unavailable"
+            : newest !== null && now - newest > snapshotStaleAfter
+              ? "stale"
+              : "ok",
+        coverage: productCount,
+        // Plan kullanıcı tarafından değiştirilmez; teknik kaynak seçimi yoktur.
+        userSelectable: false,
+        planProviderCodes: [...usedProviders],
+      },
+    };
+  }
+
   private async snapshotForScope(scope: DataScope): Promise<ActiveSnapshotResult> {
     await this.ensureCatalog();
     const now = this.now();
+    const hybrid = await this.hybridSnapshotForScope(scope, now);
+    if (hybrid) return hybrid;
     const providerCode = await this.resolveProviderCodeForScope(scope);
     if (!providerCode) {
       return {

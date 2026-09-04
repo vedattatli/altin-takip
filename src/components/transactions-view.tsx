@@ -10,7 +10,9 @@ import {
 } from "@/domain/accounting";
 import { requireProduct } from "@/domain/catalog";
 import { formatDateTime, formatMoney, formatOccurred, formatQuantity } from "@/lib/format";
+import { displayProductName } from "@/prices/valuation-plan";
 import { usePortfolio } from "@/state/portfolio-store";
+import { useViewMode } from "@/state/view-mode";
 import { BuyForm, OpeningBalanceForm, SellForm } from "./ledger-forms";
 import { Alert, Card, EmptyState, Field, SectionTitle, cx } from "./ui";
 
@@ -104,7 +106,9 @@ function LedgerRow({
             </span>
             {!isActive ? <span className="badge">{STATUS_LABELS[entry.status]}</span> : null}
             {origin ? <span className="badge">{origin}</span> : null}
-            <p className="truncate text-sm font-semibold text-ink">{product.name}</p>
+            <p className="truncate text-sm font-semibold text-ink">
+              {displayProductName(product.id, product.name, { distinguish: true })}
+            </p>
           </div>
           <p className="tabular mt-1 text-xs text-muted" data-testid="ledger-row-summary">
             {formatQuantity(entry.quantity, entry.unit)} · {formatOccurred(entry.occurredAt, entry.occurredTime)}
@@ -172,6 +176,7 @@ function LedgerRow({
 export function TransactionsView({ initialForm = null }: { initialForm?: LedgerFormKind | null }) {
   const { ledger, summary, appendTransaction, replaceTransaction, voidTransaction, status } =
     usePortfolio();
+  const { isSimple } = useViewMode();
   const [form, setForm] = useState<LedgerFormKind | null>(initialForm);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [pendingVoid, setPendingVoid] = useState<LedgerEntry | null>(null);
@@ -235,17 +240,24 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
     );
   }
 
+  /*
+   * Basit modda satış düğmesi gösterilmez. Satış özelliği KALDIRILMADI:
+   * detaylı moda geçince yerindedir, geçmiş satış kayıtları ve gerçekleşmiş
+   * kâr/zarar hesabı her iki modda da aynen korunur.
+   */
   const addButtons = form ? null : (
     <div className="flex flex-wrap gap-2">
       <button type="button" className="btn btn-secondary min-h-11" data-testid="add-opening" onClick={() => openForm("opening")}>
         Mevcut Altını Ekle
       </button>
       <button type="button" className="btn btn-primary min-h-11" data-testid="add-buy" onClick={() => openForm("buy")}>
-        Yeni Alış Ekle
+        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
       </button>
-      <button type="button" className="btn btn-secondary min-h-11" data-testid="add-sell" onClick={() => openForm("sell")}>
-        Satış Ekle
-      </button>
+      {isSimple ? null : (
+        <button type="button" className="btn btn-secondary min-h-11" data-testid="add-sell" onClick={() => openForm("sell")}>
+          Satış Ekle
+        </button>
+      )}
     </div>
   );
 
@@ -272,7 +284,10 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
         <Card className="border-negative-soft space-y-3 p-4">
           <p className="text-sm font-semibold text-ink">İşlem iptal edilsin mi?</p>
           <p className="text-sm text-muted">
-            {requireProduct(pendingVoid.productId).name} ·{" "}
+            {displayProductName(pendingVoid.productId, requireProduct(pendingVoid.productId).name, {
+              distinguish: true,
+            })}{" "}
+            ·{" "}
             {formatQuantity(pendingVoid.quantity, pendingVoid.unit)} ·{" "}
             {formatOccurred(pendingVoid.occurredAt, pendingVoid.occurredTime)}.
             Kayıt silinmez; &quot;İptal edildi&quot; olarak listede kalır ve toplamlar yeniden hesaplanır.

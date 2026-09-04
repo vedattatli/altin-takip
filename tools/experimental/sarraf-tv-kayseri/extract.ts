@@ -1,5 +1,10 @@
 import {
-  screenLabelToProduct,
+  detectNumberFormat,
+  parseScreenNumber,
+  type NumberFormat,
+} from "../../../src/prices/number-format";
+import {
+  screenLabelToProducts,
   unmappedReason,
   type MappingConfidence,
 } from "../../../src/prices/providers/sarraf-tv-screen-mapping";
@@ -49,6 +54,9 @@ export interface UnresolvedRow {
   observedValues?: string[];
 }
 
+export { detectNumberFormat, parseScreenNumber };
+export type { NumberFormat };
+
 const BUY_HEADERS = ["alış", "alis", "alış fiyatı", "alım"];
 const SELL_HEADERS = ["satış", "satis", "satış fiyatı", "satım"];
 
@@ -64,63 +72,6 @@ export function classifyHeader(header: string): "buy" | "sell" | null {
   if (SELL_HEADERS.some((candidate) => value === candidate || value.startsWith(`${candidate} `))) return "sell";
   return null;
 }
-
-export type NumberFormat = "tr" | "en" | "plain" | "ambiguous";
-
-/**
- * Sayı biçimini BELGE DÜZEYİNDE belirler.
- *
- * "6.871" tek başına belirsizdir (6871 mi, 6,871 mi?). Ama ekrandaki BÜTÜN
- * sayılar `1.234` / `224.150` kalıbına uyuyor ve hiçbirinde ondalık virgül
- * yoksa, nokta binlik ayırıcıdır — bu, tek bir değere bakarak değil, belgenin
- * tamamına bakarak verilen bir karardır. Kalıplar karışıksa "ambiguous" döner
- * ve hiçbir sayı okunmaz.
- */
-export function detectNumberFormat(samples: readonly string[]): NumberFormat {
-  const values = samples.map((sample) => sample.replace(/[^\d.,]/gu, "")).filter((value) => value !== "");
-  if (values.length === 0) return "ambiguous";
-
-  const hasComma = values.some((value) => value.includes(","));
-  const hasDot = values.some((value) => value.includes("."));
-
-  if (hasComma && hasDot) {
-    const allTr = values
-      .filter((value) => value.includes(",") && value.includes("."))
-      .every((value) => value.lastIndexOf(",") > value.lastIndexOf("."));
-    return allTr ? "tr" : "ambiguous";
-  }
-  if (hasComma) return "tr";
-  if (hasDot) {
-    const allGrouped = values
-      .filter((value) => value.includes("."))
-      .every((value) => /^\d{1,3}(\.\d{3})+$/u.test(value));
-    return allGrouped ? "tr" : "en";
-  }
-  return "plain";
-}
-
-/** Ekrandaki sayıyı, belirlenen biçime göre ondalık dizeye çevirir. */
-export function parseScreenNumber(input: string, format: NumberFormat): string | null {
-  if (format === "ambiguous") return null;
-  if (/[eE]/u.test(input)) return null;
-  const cleaned = input.replace(/[^\d.,-]/gu, "").trim();
-  if (cleaned === "") return null;
-
-  let normalized: string;
-  if (format === "tr") {
-    normalized = cleaned.replace(/\./gu, "").replace(",", ".");
-  } else if (format === "en") {
-    normalized = cleaned.replace(/,/gu, "");
-  } else {
-    normalized = cleaned;
-  }
-
-  if (!/^\d+(\.\d+)?$/u.test(normalized)) return null;
-  const value = Number(normalized);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return normalized;
-}
-
 
 /**
  * Bir satırdaki okunabilir sayıları sırasıyla döndürür.
@@ -165,7 +116,7 @@ export function extractQuotes(
 
   for (const row of rows) {
     const networkVerified = options.networkVerifiedLabels?.has(row.label) === true;
-    const mapped = screenLabelToProduct(row.label, { networkVerifiedDirection: networkVerified });
+    const mapped = screenLabelToProducts(row.label, { networkVerifiedDirection: networkVerified });
     if (!mapped) {
       unresolved.push({
         rawProductName: row.label,
@@ -174,7 +125,9 @@ export function extractQuotes(
       });
       continue;
     }
-    if (seen.has(mapped.productId)) {
+    // Gruplu satırda ürünlerin HEPSİ yeni olmalıdır; biri daha önce başka bir
+    // satırdan geldiyse hangi satırın geçerli olduğu belirsizdir, satır atlanır.
+    if (mapped.productIds.some((productId) => seen.has(productId))) {
       unresolved.push({ rawProductName: row.label, reason: "AYNI_ÜRÜN_İKİ_KEZ", observedValues: observedValues(row, numberFormat) });
       continue;
     }
@@ -210,17 +163,21 @@ export function extractQuotes(
       continue;
     }
 
-    seen.add(mapped.productId);
-    quotes.push({
-      rawProductName: row.label,
-      canonicalProductId: mapped.productId,
-      mappingConfidence: mapped.confidence,
-      rawBuyLabel: buyHeader,
-      rawSellLabel: sellHeader,
-      liquidationPrice,
-      replacementPrice,
-      extractionMethod,
-    });
+    // Gruplu satır: AYNI fiyat, kaynağın açıkça saydığı her ürüne yazılır.
+    // Fiyat türetilmez, bölünmez, ölçeklenmez — birebir kopyalanır.
+    for (const productId of mapped.productIds) {
+      seen.add(productId);
+      quotes.push({
+        rawProductName: row.label,
+        canonicalProductId: productId,
+        mappingConfidence: mapped.confidence,
+        rawBuyLabel: buyHeader,
+        rawSellLabel: sellHeader,
+        liquidationPrice,
+        replacementPrice,
+        extractionMethod,
+      });
+    }
   }
 
   return { quotes, unresolved, numberFormat };
