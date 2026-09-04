@@ -45,10 +45,20 @@ export interface PriceProviderMeta {
   /** Piyasa kimliği. Farklı piyasalar birbirinin yerine kullanılamaz. */
   market: string;
   /**
-   * false ise bu sağlayıcı GERÇEK piyasa verisi vermez.
-   * Arayüz bu durumda mutlaka "Test Verisi" uyarısını göstermelidir.
+   * Kaynak, yeniden gösterim izni beyan edilmiş LİSANSLI bir servis mi?
+   *
+   * DİKKAT — bu alan "veri gerçek mi" sorusunun cevabı DEĞİLDİR. Kayseri
+   * tezgâh fiyatı gerçek piyasa verisidir ama lisanslı değildir. İkisini
+   * karıştırmak, gerçek fiyatı "gerçek değil" diye etiketlemeye yol açardı.
+   * Uyarı metni için `isTestData` kullanılır.
    */
   isRealMarketData: boolean;
+  /**
+   * true ise bu veri UYDURULMUŞTUR (test sağlayıcısı).
+   * Arayüz bu durumda "Gerçek piyasa verisi değil" uyarısını göstermek
+   * ZORUNDADIR. Lisanssız ama gerçek kaynaklarda false'tur.
+   */
+  isTestData?: boolean;
   /** Kullanıcıya gösterilecek kısa açıklama. */
   disclaimer: string;
   /** Verinin bayatlamış sayılacağı süre (ms). */

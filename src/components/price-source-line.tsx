@@ -85,7 +85,13 @@ export function PriceSourceLine({
         <span>Fiyat kaynağı:</span>
         <span className="font-semibold text-muted">{snapshot?.provider.label ?? "Bilinmiyor"}</span>
 
-        {snapshot && !snapshot.provider.isRealMarketData ? (
+        {/*
+          UYARI YALNIZ UYDURMA VERİ İÇİNDİR.
+          Lisanssız olmak ile gerçek olmamak ayrı şeylerdir: Kayseri tezgâh
+          fiyatı gerçektir ama lisanslı değildir. Lisans notu aşağıdaki
+          açıklama bölümünde durur.
+        */}
+        {snapshot?.provider.isTestData === true ? (
           <span className="badge badge-notice">Gerçek piyasa verisi değil</span>
         ) : null}
 

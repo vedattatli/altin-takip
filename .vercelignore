@@ -1,0 +1,24 @@
+# Vercel'e YÜKLENMEYECEK dosyalar.
+#
+# Neden gerekli: yerel `npm run build` ve E2E koşumları depoda yüzlerce
+# megabaytlık çıktı bırakıyor. Bunlar yüklenirse dağıtım dakikalarca sürer
+# (ölçüldü: 494 MB `.next` yüzünden yükleme 17 dakika sonra bile bitmedi) ve
+# hiçbirinin sunucuda karşılığı yoktur — Vercel derlemeyi kendisi yapar.
+
+# Yerel derleme çıktısı
+.next/
+out/
+
+# Test çıktıları ve kanıt dosyaları
+test-results/
+playwright-report/
+artifacts/
+.data/
+
+# Bağımlılıklar (Vercel kendisi kurar)
+node_modules/
+
+# Yerel ortam dosyaları — zaten commit edilmez, kazara da gitmesin.
+.env
+.env.local
+.env.*.local

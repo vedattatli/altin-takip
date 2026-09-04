@@ -250,6 +250,8 @@ export class PriceSourceService {
           label: row.displayName,
           market: row.marketId,
           isRealMarketData: isReal,
+          // Yalnız test sağlayıcısı uydurma veridir.
+          isTestData: row.licenseStatus === "DEV_ONLY",
           disclaimer: isReal ? row.attribution : MOCK_PROVIDER_META.disclaimer,
           staleAfterMs: staleAfterMs(),
         },
@@ -430,8 +432,9 @@ export class PriceSourceService {
           market: HYBRID_MARKET_ID,
           // Gerçek piyasa verisidir ama LİSANSLI değildir: kaynakların hiçbiri
           // yeniden gösterim izni beyan etmiyor. Bu ayrım kullanıcıya
-          // sağlayıcı açıklamasında yazılır.
+          // sağlayıcı açıklamasında yazılır — "uydurma veri" denmez.
           isRealMarketData: false,
+          isTestData: false,
           disclaimer: VALUATION_PLAN_DESCRIPTION,
           staleAfterMs: snapshotStaleAfter,
           memberProviders,

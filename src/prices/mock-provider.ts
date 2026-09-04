@@ -15,6 +15,8 @@ export const MOCK_PROVIDER_META: PriceProviderMeta = {
   label: "Test Verisi",
   market: "TEST",
   isRealMarketData: false,
+  // Bu veri UYDURULMUŞTUR; arayüz uyarıyı bu alana göre gösterir.
+  isTestData: true,
   disclaimer:
     "Bu fiyatlar test amaçlı üretilmiş örnek verilerdir. Gerçek piyasa fiyatı değildir, alım satım kararı için kullanılmamalıdır.",
   staleAfterMs: 5 * 60 * 1000,

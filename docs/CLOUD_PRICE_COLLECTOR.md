@@ -1,7 +1,18 @@
 # Bulut fiyat toplayıcısı (GitHub Actions)
 
-Kayseri fiyatları **GitHub Actions üzerinde zamanlanmış, tek seferlik** bir
-Playwright göreviyle toplanır. Sürekli çalışan bir worker **yoktur**.
+Fiyatlar **GitHub Actions üzerinde zamanlanmış, tek seferlik** bir görevle
+toplanır. Sürekli çalışan bir worker **yoktur**.
+
+Tek koşum **iki ayrı yol** izler ve bunlar birbirini engellemez:
+
+| Yol | Kaynaklar | Tarayıcı gerekir mi? |
+| --- | --- | --- |
+| HTTP | Kapalıçarşı (Anlık Altın), Türkiye geneli (Trunçgil) | **Hayır** — düz sunucu isteği |
+| Ekran | Sarraf TV Kayseri | **Evet** — bayi fiyatı yalnız DOM'da hesaplanıyor |
+
+HTTP yolunda runner yalnızca uygulamanın zamanlanmış ucunu **tetikler**;
+sağlayıcıları uygulamanın kendisi okur. Böylece runner'a Supabase erişimi
+verilmez.
 
 ## Neden bu mimari
 
@@ -19,6 +30,7 @@ parçası kişisel bir makineye bağlı değildir.
 
 ```
 GitHub Actions (Ubuntu runner)
+  → POST /api/cron/price-ingestion  (Kapalıçarşı + Türkiye geneli, tarayıcısız)
   → Chromium açılır
   → Sarraf TV Kayseri ekranı yüklenir
   → açılış ağ yanıtı beklenir (yön kanıtı)
@@ -33,11 +45,23 @@ GitHub Actions (Ubuntu runner)
 | --- | --- |
 | Program | `17 * * * *` — saatte bir, 17. dakika |
 | Neden 17. dakika | Tam saatteki runner yoğunluğundan kaçınmak için |
-| Ortalama koşum | ~59 saniye |
-| Faturalanan | Koşum başına 1 dakika (GitHub yukarı yuvarlar) |
-| Aylık tahmini | ~720 dakika |
 | Ücretsiz kota | 2000 dakika/ay (private repo) |
-| Durum | **Kota içinde** |
+
+### Neden 30 dakikada bir değil
+
+GitHub Actions **iş (job) başına** dakikayı **yukarı yuvarlayarak** faturalar.
+Koşum 70 saniye sürse bile 2 dakika yazılır.
+
+| Sıklık | Günlük koşum | Faturalanan/gün | Aylık | Kota (2000) |
+| --- | --- | --- | --- | --- |
+| Saatte bir | 24 | ~48 dk | ~1440 dk | **%72 — kota içinde** |
+| 30 dakikada bir | 48 | ~96 dk | ~2880 dk | %144 — **kotayı aşar** |
+
+Bu yüzden program **saatte bir**dir ve arayüzde de saatte bir olarak yazar;
+"anlık" veya "saniyelik" iddiası **yoktur**.
+
+İki kaynağı ayrı iş (job) olarak kurmak da aynı sebeple yapılmadı: her iş
+ayrı yuvarlanır ve saatlik programda ~2160 dakikaya çıkardı.
 
 GitHub zamanlanmış koşumları yoğun anlarda **geciktirebilir**. Bu bir hata
 değildir; bayatlık politikası buna göre ayarlanmıştır.
@@ -68,7 +92,10 @@ gh workflow run sarraf-price-collector.yml --repo vedattatli/altin-takip --ref m
 Yerelde denemek için:
 
 ```bash
-npm run price:sarraf:collect-once
+npm run price:sarraf:collect-once     # ekran kaynağı (Playwright)
+npm run price:ingest:trigger          # HTTP kaynakları (sunucu tarafı alım)
+npm run price:anlik:collect-once      # yalnız okuma denetimi, yazmaz
+npm run price:truncgil:collect-once   # yalnız okuma denetimi, yazmaz
 ```
 
 Gerekli ortam değişkenleri: `APP_BASE_URL`, `SARRAF_SCREEN_URL`,
@@ -91,6 +118,7 @@ sessizce başarı saymak yanlış olur.
 GitHub Actions Secrets içinde durur, koda yazılmaz, loga düşmez:
 
 - `ALTIN_TAKIP_APP_URL`
+- `PRICE_CRON_SECRET` — yalnız zamanlanmış alım ucunu açar
 - `PRICE_SCREEN_WORKER_SECRET`
 - `PRICE_SCREEN_WORKER_ID`
 - `SARRAF_SCREEN_URL`

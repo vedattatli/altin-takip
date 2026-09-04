@@ -40,7 +40,8 @@
     "price:truncgil:collect-once": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/provider-read-check.ts truncgil-turkiye",
     "price:anlik:collect-once": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/provider-read-check.ts anlik-altin-kapalicarsi",
     "price:anlik:compare": "node --import tsx tools/experimental/anlik-altin/compare-probe.ts",
-    "price:ingest:trigger": "node scripts/trigger-price-ingestion.mjs"
+    "price:ingest:trigger": "node scripts/trigger-price-ingestion.mjs",
+    "price:match-verify": "node -r ./scripts/node-server-only-stub.cjs --import tsx scripts/price-match-verify.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
