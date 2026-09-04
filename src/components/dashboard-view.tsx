@@ -34,7 +34,7 @@ import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
 import { PortfolioChart } from "./portfolio-chart";
 import { PriceSourceLine } from "./price-source-line";
-import { Card, DeltaValue, EmptyState, SectionTitle, cx, moneySizeClass } from "./ui";
+import { Card, DeltaValue, EmptyState, Explain, SectionTitle, cx, moneySizeClass } from "./ui";
 
 const PRICE_UNAVAILABLE = PRICE_UNAVAILABLE_LABEL;
 
@@ -319,10 +319,21 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
           {portfolio?.name ?? "Portföyüm"}
         </h1>
-        <p className="mt-1 text-sm text-muted">
-          Bozdurma değeri kuyumcunun alış fiyatına, yeniden alım değeri kuyumcunun satış fiyatına
-          göre hesaplanır. Maliyet yöntemi: ürün bazlı hareketli ağırlıklı ortalama.
-        </p>
+        {/*
+          Açıklama SİLİNMEDİ, katlandı. Doğruluk için gerekli ama her açılışta
+          okunması gerekmiyor; isteyen açar.
+        */}
+        <Explain title="Bu sayılar nasıl hesaplanıyor?" className="mt-1.5">
+          <p>
+            <span className="font-medium text-ink">Bozdurma değeri</span> kuyumcunun alış fiyatına,{" "}
+            <span className="font-medium text-ink">yeniden alım değeri</span> kuyumcunun satış
+            fiyatına göre hesaplanır.
+          </p>
+          <p className="mt-1.5">
+            Maliyet yöntemi: ürün bazlı hareketli ağırlıklı ortalama. Gümüş ve döviz portföy
+            değerine girer, has altın gramına girmez.
+          </p>
+        </Explain>
       </div>
 
       {isClosed ? (
@@ -346,7 +357,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         <StatCard
           label={isSimple ? `Portföy değeri${partialSuffix}` : `Tahmini bozdurma değeri${partialSuffix}`}
           value={valuation(summary.totalLiquidationValue)}
-          hint={coverageText ?? "Bugün bozdurursanız yaklaşık elinize geçecek tutar"}
+          hint={coverageText ?? "Bugün bozdurursanız yaklaşık"}
           emphasis
           testId="stat-liquidation"
         />
@@ -354,14 +365,14 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           <StatCard
             label={`Yeniden alım değeri${partialSuffix}`}
             value={valuation(summary.totalReplacementValue)}
-            hint={coverageText ?? "Aynı miktarı bugün almanın yaklaşık maliyeti"}
+            hint={coverageText ?? "Aynısını bugün almanın maliyeti"}
             testId="stat-repurchase"
           />
         )}
         <StatCard
           label={isSimple ? "Toplam maliyet" : "Elde kalan maliyet"}
           value={formatMoney(summary.totalRemainingCostBasis)}
-          hint="Elde kalan altınların maliyet bazı (masraflar dâhil)"
+          hint="Masraflar dâhil"
           testId="stat-cost"
         />
         {isSimple ? (
@@ -448,16 +459,29 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         )}
       </div>
 
+      {/*
+        BU BİR BİLDİRİM DEĞİL, RAKAMIN ETİKETİDİR — bu yüzden kaybolmaz.
+        
+        Kullanıcı "5-10 saniye sonra kapansın" dedi; kapatmadım çünkü kutu bir
+        olayı ("kayıt eklendi") değil, ekranda DURAN kâr/zarar sayısının ne
+        anlama geldiğini anlatıyor. Kutu gidip sayı kalsaydı, kullanıcı onu
+        gerçek tarihsel maliyete dayalı bir kâr/zarar sanırdı.
+        
+        Yerine yer kaplaması küçültüldü: koca paragraf yerine tek satır
+        rozet + isteyen açar. Uyarı hâlâ orada, ama ekranı işgal etmiyor.
+      */}
       {summary.hasEstimatedOrBaseline ? (
-        <div
-          className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]"
-          data-testid="pnl-label-notice"
+        <Explain
+          title={`${PNL_LABELS.SINCE_TRACKING_START} — neden?`}
+          className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3 py-2"
+          testId="pnl-label-notice"
         >
-          <span className="font-semibold">{PNL_LABELS.SINCE_TRACKING_START}:</span>{" "}
-          {summary.holdingHasEstimatedOrBaseline
-            ? "portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
-            : "elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
-        </div>
+          <span>
+            {summary.holdingHasEstimatedOrBaseline
+              ? "Portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
+              : "Elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
+          </span>
+        </Explain>
       ) : null}
 
       {noPrices ? (

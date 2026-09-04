@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { PriceSourcesView } from "@/components/price-sources-view";
+import { PriceTabs } from "@/components/price-tabs";
 import { getPriceSourceService, requireUsableUser } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Fiyat kaynağı" };
@@ -16,11 +17,14 @@ export default async function PriceSourcePage() {
     service.compareSources(actor),
   ]);
   return (
-    <PriceSourcesView
-      initialOptions={options}
-      initialActive={active.source}
-      initialEvents={events}
-      initialCompare={compare}
-    />
+    <div className="space-y-5">
+      <PriceTabs />
+      <PriceSourcesView
+        initialOptions={options}
+        initialActive={active.source}
+        initialEvents={events}
+        initialCompare={compare}
+      />
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { KayseriPricesView } from "@/components/kayseri-prices-view";
+import { PriceTabs } from "@/components/price-tabs";
 import { getPriceSourceService, requireUsableUser } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Kayseri fiyatları" };
@@ -16,5 +17,10 @@ export const dynamic = "force-dynamic";
 export default async function KayseriPricesPage() {
   const actor = await requireUsableUser();
   const snapshot = await getPriceSourceService().kayseriScreenRows(actor);
-  return <KayseriPricesView snapshot={snapshot} />;
+  return (
+    <div className="space-y-5">
+      <PriceTabs />
+      <KayseriPricesView snapshot={snapshot} />
+    </div>
+  );
 }

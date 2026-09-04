@@ -56,8 +56,14 @@ function buildNavItems(role: SessionUser["role"] | null): NavItem[] {
   const items: NavItem[] = [
     { href: "/panel", label: "Panel", icon: ICONS.panel },
     { href: "/islemler", label: "İşlemler", icon: ICONS.transactions },
-    { href: "/fiyat-kaynagi", label: "Fiyat", icon: ICONS.priceSource },
-    { href: "/kayseri-fiyatlari", label: "Kayseri", icon: ICONS.kayseri },
+    /*
+     * "Fiyat" ve "Kayseri" TEK girişte birleşti.
+     *
+     * İkisi de fiyat ekranıydı ve gezinmede yan yana durunca hangisinin ne
+     * olduğu anlaşılmıyordu. Kayseri ekranı artık fiyat sayfasının bir
+     * sekmesidir; adres (/kayseri-fiyatlari) korunur, eski bağlantılar çalışır.
+     */
+    { href: "/fiyat-kaynagi", label: "Fiyatlar", icon: ICONS.priceSource },
     { href: "/ayarlar", label: "Ayarlar", icon: ICONS.settings },
   ];
   if (role === "admin") {

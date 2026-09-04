@@ -125,7 +125,17 @@ test.describe("görünüm modu", () => {
     expect(ledger.data?.[0]?.totalPaid).toBe("10000");
   });
 
-  test("altı ürünlü sade liste; elde olmayan ürünler görünmez", async ({ page }) => {
+  /*
+   * Liste artık kataloğun TAMAMINI içerir.
+   *
+   * Eskiden yalnızca altı ürün ve kullanıcının elinde olanlar listeleniyordu;
+   * sonucu şuydu: elinde olmayan bir ürünü satın alamıyordun. Sadeleştirme
+   * ürün eklemeyi engellememelidir.
+   *
+   * Sadelik korunuyor: altı ürün HÂLÂ en üstte ve ilk sıralarda; gerisi
+   * "Tüm altın türleri" başlığı altında.
+   */
+  test("altı ürün en üstte; kataloğun tamamı seçilebilir", async ({ page }) => {
     const username = scopedUsername("altiurun");
     await signIn(page, username);
 
@@ -134,7 +144,8 @@ test.describe("görünüm modu", () => {
     const select = page.getByLabel("Altın türü");
     const labels = await select.locator("option").allTextContents();
 
-    expect(labels).toEqual([
+    // İlk altı sıra değişmedi: sık kullanılanlar önce gelir.
+    expect(labels.slice(0, 6)).toEqual([
       "Gram Altın",
       "Çeyrek Altın",
       "Yarım Altın",
@@ -142,10 +153,12 @@ test.describe("görünüm modu", () => {
       "Ata Altın",
       "Gremse Altın",
     ]);
-    // Gizlenen ürünler varsayılan listede YOKTUR.
-    expect(labels.join("|")).not.toContain("Reşat");
-    expect(labels.join("|")).not.toContain("18 Ayar");
-    expect(labels.join("|")).not.toContain("Külçe");
+
+    // Geri kalan katalog da ULAŞILABİLİR olmalı.
+    const joined = labels.join("|");
+    for (const expected of ["Reşat", "18 Ayar", "Külçe", "22 Ayar", "Gümüş", "Dolar", "Euro"]) {
+      expect(joined, expected).toContain(expected);
+    }
   });
 
   test("elde gizli üründen kayıt varsa listede ve 'Diğer varlıklar'da görünür", async ({ page }) => {

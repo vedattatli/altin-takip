@@ -217,3 +217,39 @@ export function moneySizeClass(text: string, emphasis = false): string {
   if (length >= 13) return emphasis ? "text-xl sm:text-2xl" : "text-lg sm:text-xl";
   return emphasis ? "text-2xl sm:text-3xl" : "text-xl sm:text-2xl";
 }
+
+/**
+ * AÇILIR AÇIKLAMA — "gerektiğinde göster".
+ *
+ * Bu uygulama bilerek çok şey açıklar: hangi fiyat nereden geliyor, maliyet
+ * nasıl hesaplanıyor, bir ürün neden fiyatsız. Bu metinler DOĞRULUK için
+ * gereklidir ve silinmez.
+ *
+ * Ama hepsini aynı anda göstermek ekranı yoruyor. Çözüm metni atmak değil,
+ * KATLAMAK: varsayılan olarak tek satırlık bir başlık görünür, isteyen açar.
+ *
+ * `<details>` kullanılır çünkü JavaScript olmadan da çalışır, klavyeyle
+ * açılır ve ekran okuyucular doğru anons eder.
+ */
+export function Explain({
+  title,
+  children,
+  className,
+  testId,
+}: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+  /**
+   * Test kancası KÖK öğeye konur, gövdeye değil: kapalı bir `<details>`
+   * içindeki metin "görünmez" sayılır ve testler yanlışlıkla düşerdi.
+   */
+  testId?: string;
+}) {
+  return (
+    <details className={cx("explain", className)} data-testid={testId}>
+      <summary className="explain-summary">{title}</summary>
+      <div className="explain-body">{children}</div>
+    </details>
+  );
+}

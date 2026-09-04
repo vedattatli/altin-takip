@@ -11,16 +11,24 @@
   /* Koyu tema varsayılandır ve sistem ayarından bağımsız olarak uygulanır. */
   color-scheme: dark;
 
-  --canvas: #0d1014;
-  --surface: #161a20;
-  --surface-2: #1b1f27;
-  --surface-3: #222732;
-  --line: #272d37;
-  --line-strong: #3a414e;
+  /*
+   * ALTIN TEMASI — sıcak nötr.
+   *
+   * Yüzeyler saf griden çıkarılıp sarıya doğru bir tık çevrildi (mavi kanal
+   * kısıldı). Fark küçüktür ve bilerek küçüktür: ekran "altın rengi" olmaz,
+   * altın rengi YALNIZCA vurgu için ayrılır. Sayıların okunabilirliği bozulsun
+   * diye değil, arayüz soğuk görünmesin diye yapıldı.
+   */
+  --canvas: #0f0e0b;
+  --surface: #191712;
+  --surface-2: #1f1c16;
+  --surface-3: #2a251c;
+  --line: #2e2a21;
+  --line-strong: #443d2f;
 
-  --text: #e9ebee;
-  --text-muted: #a4abb6;
-  --text-subtle: #79808d;
+  --text: #f0ece4;
+  --text-muted: #b0a894;
+  --text-subtle: #857d6e;
 
   --accent: #e0b84e;
   --accent-hover: #eec969;
@@ -90,6 +98,58 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/*
+ * AÇILIR AÇIKLAMA
+ *
+ * Metin silinmez, KATLANIR: başlık tek satır durur, isteyen açar. Ok işareti
+ * yön değiştirerek durumu gösterir; renk tek bilgi taşıyıcı değildir.
+ */
+.explain > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  padding: 0.125rem 0;
+  border-radius: var(--radius-sm);
+}
+
+.explain > summary::-webkit-details-marker {
+  display: none;
+}
+
+.explain > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 120ms ease;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.explain[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.explain > summary:hover {
+  color: var(--text-muted);
+}
+
+.explain > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.explain-body {
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.625rem;
 }
 
 /* Rakamlar sütun hâlinde hizalansın diye tablo rakamları. */
