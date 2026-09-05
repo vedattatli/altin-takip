@@ -10,6 +10,7 @@ import {
   type PnlLabelKind,
 } from "@/domain/accounting";
 import {
+  formatDateTime,
   formatGrams,
   formatMoney,
   formatPercent,
@@ -470,6 +471,20 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           alınamadı; yukarıdaki toplamlar bu ürünleri içermiyor (bu ürünlerin maliyeti{" "}
           {formatMoney(summary.unpricedCostBasis)}).
         </div>
+      ) : null}
+
+      {/*
+        PİYASA KAPALIYKEN: son bilinen fiyat kullanıldı, yaşı YAZILIR.
+
+        Bu bir hata bildirimi değil, tarih bildirimidir; bu yüzden uyarı rengi
+        yok. Ama kapatılamaz: sayının hangi ana ait olduğunu söyler, gizlenirse
+        kullanıcı cumartesi gördüğü rakamı o anın fiyatı sanar.
+      */}
+      {isOpen && summary.stalePositionCount > 0 && summary.oldestStaleQuoteAt ? (
+        <p className="text-xs text-muted" data-testid="stale-valuation">
+          Piyasa kapalı; {summary.stalePositionCount} ürün için son bilinen fiyat kullanıldı
+          ({formatDateTime(summary.oldestStaleQuoteAt)} itibarıyla).
+        </p>
       ) : null}
 
       {/*

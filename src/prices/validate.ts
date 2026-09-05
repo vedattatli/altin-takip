@@ -36,7 +36,16 @@ export type QuoteRejectionReason =
   | "fetched_before_provider";
 
 export type QuoteValidation =
-  | { ok: true; quote: PriceQuote }
+  | {
+      ok: true;
+      quote: PriceQuote;
+      /** Kaynağın kendi tazelik eşiği aşıldı mı? Aşıldıysa yaş EKRANDA yazılır. */
+      stale: boolean;
+      /** Fiyatın ait olduğu an (sağlayıcının kendi damgası). */
+      asOf: string;
+      /** Fiyatın yaşı (ms). */
+      ageMs: number;
+    }
   | { ok: false; reason: QuoteRejectionReason; message: string };
 
 const QUOTE_REJECTION_MESSAGES: Record<QuoteRejectionReason, string> = {
@@ -88,11 +97,44 @@ function reject(reason: QuoteRejectionReason): QuoteValidation {
   return { ok: false, reason, message: QUOTE_REJECTION_MESSAGES[reason] };
 }
 
+/**
+ * PİYASA KAPALIYKEN SON BİLİNEN FİYAT GEÇERLİDİR.
+ *
+ * Kapalıçarşı gibi kaynaklar yalnızca piyasa açıkken yeni fiyat yayımlar.
+ * Cumartesi öğleden sonra kaynağın damgası donar; katı tazelik kuralı bunu
+ * "fiyat yok" sayar ve kataloğun yarısı her akşam ve bütün hafta sonu boşalır.
+ * Oysa piyasa kapalıyken son işlem fiyatı ZATEN geçerli fiyattır.
+ *
+ * Bu yüzden tazelik iki kademelidir:
+ *   - eşiğin içinde        → taze (stale = false)
+ *   - eşik ile bu sınır arası → SON BİLİNEN fiyat (stale = true), yaşı
+ *                              kullanıcıya her yerde yazılır
+ *   - bu sınırın ötesi     → fiyat sayılmaz; kaynak gerçekten susmuştur
+ *
+ * Dört gün, uzun bir hafta sonunu (Cuma kapanış → Pazartesi açılış) ve araya
+ * giren bir tatil gününü kapsar. Daha uzunu, bozulmuş bir kaynağı çalışıyor
+ * gibi gösterirdi.
+ */
+export const LAST_KNOWN_MAX_AGE_MS = 4 * 24 * 60 * 60_000;
+
+export interface QuoteValidationOptions {
+  /**
+   * Kaynağın tazelik eşiğini aşmış fiyat da kabul edilsin mi?
+   *
+   * GÖSTERİM ve DEĞERLEME için true (son bilinen fiyat geçerlidir).
+   * KALICI KAYIT yazan yollarda (MARKET_BASELINE açılış bakiyesi) false:
+   * deftere yazılan bir maliyet, piyasanın kapalı olduğu bir anın fiyatıyla
+   * sabitlenmemelidir.
+   */
+  allowStale?: boolean;
+}
+
 export function validateUsableQuote(
   snapshot: PriceSnapshot | null | undefined,
   quote: PriceQuote | null | undefined,
   productId: string,
   now: number,
+  options: QuoteValidationOptions = {},
 ): QuoteValidation {
   if (!snapshot || snapshot.status === "unavailable") return reject("snapshot_unavailable");
   if (!quote) return reject("missing");
@@ -144,17 +186,20 @@ export function validateUsableQuote(
    * denetlenir: hiçbir kaynak güncellenmiyorsa görüntü tümüyle bayattır.
    */
   const staleAfter = member?.staleAfterMs ?? snapshot.provider.staleAfterMs;
-  if (now - providerTs > staleAfter || now - quoteFetched > staleAfter) {
-    return reject("stale");
-  }
-  if (now - snapshotFetched > snapshot.provider.staleAfterMs) {
-    return reject("stale");
+  // Fiyatın yaşı, iki damganın ESKİSİNE göre ölçülür; taze görünmesin diye
+  // yenisi seçilmez.
+  const ageMs = Math.max(now - providerTs, now - quoteFetched, now - snapshotFetched);
+  const stale = now - providerTs > staleAfter || now - quoteFetched > staleAfter || now - snapshotFetched > snapshot.provider.staleAfterMs;
+  if (stale) {
+    if (options.allowStale !== true) return reject("stale");
+    // Son bilinen fiyatın da bir sınırı vardır: bunun ötesi kaynak arızasıdır.
+    if (ageMs > LAST_KNOWN_MAX_AGE_MS) return reject("stale");
   }
   if (quoteFetched < providerTs - SNAPSHOT_FUTURE_TOLERANCE_MS) return reject("fetched_before_provider");
-  return { ok: true, quote };
+  return { ok: true, quote, stale, asOf: quote.providerTimestamp, ageMs };
 }
 
-/** Kısa yol: kullanılabilir quote ya da null. */
+/** Kısa yol: TAZE quote ya da null. Kalıcı kayıt yazan yollar bunu kullanır. */
 export function usableQuoteOrNull(
   snapshot: PriceSnapshot | null | undefined,
   productId: string,
@@ -162,4 +207,30 @@ export function usableQuoteOrNull(
 ): PriceQuote | null {
   const result = validateUsableQuote(snapshot, snapshot?.quotes[productId], productId, now);
   return result.ok ? result.quote : null;
+}
+
+export interface LastKnownQuote {
+  quote: PriceQuote;
+  /** true ise fiyat bayattır ve yaşı kullanıcıya YAZILMALIDIR. */
+  stale: boolean;
+  asOf: string;
+  ageMs: number;
+}
+
+/**
+ * Gösterim ve değerleme için SON BİLİNEN fiyat.
+ *
+ * Taze fiyat varsa onu, yoksa `LAST_KNOWN_MAX_AGE_MS` içindeki son fiyatı
+ * döner. Bayat dönen her fiyatın yaşı arayüzde gösterilmek ZORUNDADIR;
+ * "güncel" denmez.
+ */
+export function lastKnownQuote(
+  snapshot: PriceSnapshot | null | undefined,
+  productId: string,
+  now: number,
+): LastKnownQuote | null {
+  const result = validateUsableQuote(snapshot, snapshot?.quotes[productId], productId, now, {
+    allowStale: true,
+  });
+  return result.ok ? { quote: result.quote, stale: result.stale, asOf: result.asOf, ageMs: result.ageMs } : null;
 }

@@ -2,9 +2,9 @@
 
 import { GOLD_PRODUCTS } from "@/domain/catalog";
 import type { ProductCategory } from "@/domain/types";
-import { formatMoney } from "@/lib/format";
+import { formatDateTime, formatMoney } from "@/lib/format";
 import type { PriceSnapshot } from "@/prices/types";
-import { usableQuoteOrNull } from "@/prices/validate";
+import { lastKnownQuote } from "@/prices/validate";
 import { sourceBadgeFor } from "@/prices/valuation-plan";
 import { useClientClock } from "./price-source-line";
 import { Card, SectionTitle } from "./ui";
@@ -46,17 +46,29 @@ function Row({
   buy,
   sell,
   source,
+  asOf,
 }: {
   name: string;
   buy: string | null;
   sell: string | null;
   source: string | null;
+  /** Fiyat bayatsa ait olduğu an; tazeyse null. */
+  asOf: string | null;
 }) {
   return (
     <tr className="border-t border-line" data-testid="price-row">
       <td className="py-2 pr-2">
         <span className="text-sm font-medium text-ink">{name}</span>
         {source ? <span className="mt-0.5 block text-[11px] text-subtle">{source}</span> : null}
+        {/*
+          Piyasa kapalıyken kaynak yeni fiyat yayımlamaz. Son bilinen fiyat
+          gösterilir ama "güncel" DENMEZ: hangi ana ait olduğu satırda yazar.
+        */}
+        {asOf ? (
+          <span className="mt-0.5 block text-[11px] text-subtle" data-testid="price-as-of">
+            {formatDateTime(asOf)} itibarıyla
+          </span>
+        ) : null}
       </td>
       <td className="tabular py-2 pr-2 text-right text-sm text-ink">
         {buy === null ? <span className="text-subtle">—</span> : formatMoney(buy)}
@@ -94,14 +106,16 @@ export function PriceListView({
     ...group,
     products: GOLD_PRODUCTS.filter((product) => group.categories.includes(product.category)).map(
       (product) => {
-        const quote = usableQuoteOrNull(snapshot, product.id, now);
+        const found = lastKnownQuote(snapshot, product.id, now);
         const member = snapshot?.provider.memberProviders?.[product.id];
         return {
           id: product.id,
           name: product.name,
-          buy: quote?.liquidationPrice ?? null,
-          sell: quote?.replacementPrice ?? null,
+          buy: found?.quote.liquidationPrice ?? null,
+          sell: found?.quote.replacementPrice ?? null,
           source: sourceBadgeFor(member?.provider)?.label ?? null,
+          // Piyasa kapalıyken son bilinen fiyat gösterilir; yaşı satırda yazar.
+          asOf: found?.stale === true ? found.asOf : null,
         };
       },
     ),
@@ -114,14 +128,16 @@ export function PriceListView({
       title: "Diğer",
       categories: [],
       products: ungrouped.map((product) => {
-        const quote = usableQuoteOrNull(snapshot, product.id, now);
+        const found = lastKnownQuote(snapshot, product.id, now);
         const member = snapshot?.provider.memberProviders?.[product.id];
         return {
           id: product.id,
           name: product.name,
-          buy: quote?.liquidationPrice ?? null,
-          sell: quote?.replacementPrice ?? null,
+          buy: found?.quote.liquidationPrice ?? null,
+          sell: found?.quote.replacementPrice ?? null,
           source: sourceBadgeFor(member?.provider)?.label ?? null,
+          // Piyasa kapalıyken son bilinen fiyat gösterilir; yaşı satırda yazar.
+          asOf: found?.stale === true ? found.asOf : null,
         };
       }),
     });
@@ -156,6 +172,7 @@ export function PriceListView({
                     buy={product.buy}
                     sell={product.sell}
                     source={product.source}
+                    asOf={product.asOf}
                   />
                 ))}
               </tbody>

@@ -355,6 +355,13 @@ export interface AccountingSummary {
   totalPnl: string;
   totalUnrealizedPnlPercent: string | null;
   hasMissingPrices: boolean;
+  /**
+   * Kaç ürün SON BİLİNEN (bayat) fiyatla değerlendi. Piyasa kapalıyken normaldir.
+   * Sıfırdan büyükse arayüz fiyatların yaşını YAZMAK ZORUNDADIR.
+   */
+  stalePositionCount: number;
+  /** Bayat fiyatla değerlenen ürünlerin en eskisinin ait olduğu an (ISO). */
+  oldestStaleQuoteAt: string | null;
   /** Fiyatı olmayan açık pozisyonların maliyet toplamı. */
   unpricedCostBasis: string;
   valuationCoverage: ValuationCoverage;

@@ -247,10 +247,26 @@ export const PNL_LABELS: Record<PnlLabelKind, string> = {
 export const PARTIAL_VALUATION_LABEL = "Kısmi değerleme";
 export const PRICE_UNAVAILABLE_LABEL = "Fiyat verisi kullanılamıyor";
 
-/** Kullanılabilir quote: MERKEZİ doğrulama (src/prices/validate.ts). Aksi hâlde null. */
-function usableQuote(snapshot: PriceSnapshot | null, productId: string, now: number): PriceQuote | null {
-  const result = validateUsableQuote(snapshot, snapshot?.quotes[productId], productId, now);
-  return result.ok ? result.quote : null;
+/**
+ * Değerlemede kullanılacak fiyat: MERKEZİ doğrulama (src/prices/validate.ts).
+ *
+ * SON BİLİNEN FİYAT KABUL EDİLİR. Piyasa kapalıyken (akşam, hafta sonu) kaynak
+ * yeni fiyat yayımlamaz; son işlem fiyatı o an ZATEN geçerli fiyattır. Katı
+ * tazelik kuralı bunu "fiyat yok" sayınca portföy değeri her hafta sonu
+ * hesaplanamıyordu.
+ *
+ * Karşılığı: bayat bir fiyat kullanıldıysa `stale` işaretlenir ve YAŞI arayüzde
+ * yazılır ("… itibarıyla"). Bayat fiyat hiçbir yerde "güncel" diye sunulmaz.
+ */
+function usableQuote(
+  snapshot: PriceSnapshot | null,
+  productId: string,
+  now: number,
+): { quote: PriceQuote; stale: boolean; asOf: string } | null {
+  const result = validateUsableQuote(snapshot, snapshot?.quotes[productId], productId, now, {
+    allowStale: true,
+  });
+  return result.ok ? { quote: result.quote, stale: result.stale, asOf: result.asOf } : null;
 }
 
 /** Sağlayıcı META durumu (kaynağa ulaşıldı mı, meta bayat mı). Değerleme kararı için valuationStatus kullanılır. */
@@ -280,6 +296,8 @@ export const EMPTY_SUMMARY: AccountingSummary = {
   totalPnl: "0",
   totalUnrealizedPnlPercent: null,
   hasMissingPrices: false,
+  stalePositionCount: 0,
+  oldestStaleQuoteAt: null,
   unpricedCostBasis: "0",
   valuationCoverage: "none",
   pricedPositionCount: 0,
@@ -328,6 +346,10 @@ export function valuePositions(
   let pricedCount = 0;
   let unpricedCount = 0;
   let holdingFlag = false;
+  // Bayat (son bilinen) fiyatla değerlenen ürün sayısı ve bunların EN ESKİSİ.
+  // Arayüz bu ikisiyle "… itibarıyla" ibaresini yazar.
+  let staleCount = 0;
+  let oldestStaleAt: string | null = null;
   let realizedFlag = false;
   let positionRows = 0;
   let activeEntries = 0;
@@ -339,7 +361,8 @@ export function valuePositions(
     const quantity = dec(position.quantity);
     const cost = dec(position.remainingCostBasis);
     const isOpen = quantity.greaterThan(0);
-    const quote = isOpen ? usableQuote(snapshot, position.productId, now) : null;
+    const priced = isOpen ? usableQuote(snapshot, position.productId, now) : null;
+    const quote = priced?.quote ?? null;
     const costQuality = costQualityOf(position.holdingCostOrigins, position.quantity);
 
     totalRealized = totalRealized.plus(dec(position.realizedPnl));
@@ -363,6 +386,10 @@ export function valuePositions(
         totalLiquidation = totalLiquidation.plus(liquidationValue);
         totalReplacement = totalReplacement.plus(replacementValue);
         pricedCount += 1;
+        if (priced?.stale === true) {
+          staleCount += 1;
+          if (oldestStaleAt === null || priced.asOf < oldestStaleAt) oldestStaleAt = priced.asOf;
+        }
         percent = cost.greaterThan(0)
           ? toDecimalString(unrealized.div(cost).times(100).toDecimalPlaces(2))
           : null;
@@ -430,6 +457,8 @@ export function valuePositions(
       ? toDecimalString(totalUnrealized.div(pricedCost).times(100).toDecimalPlaces(2))
       : null,
     hasMissingPrices: unpricedCount > 0,
+    stalePositionCount: staleCount,
+    oldestStaleQuoteAt: oldestStaleAt,
     unpricedCostBasis: toDecimalString(unpricedCost),
     valuationCoverage: coverage,
     pricedPositionCount: pricedCount,

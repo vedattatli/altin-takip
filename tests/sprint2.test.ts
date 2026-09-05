@@ -196,14 +196,19 @@ describe("2. değerleme durumu ve 3. portföy durumu", () => {
     expect(summary.portfolioState).toBe("OPEN");
     expect(summary.totalRemainingCostBasis).toBe("50000");
     expect(summary.pricedPositionCount).toBe(0);
-    // Bayat meta → hiçbir quote kullanılabilir değil → none
+    /*
+     * Bayat meta → fiyat KULLANILIR (piyasa kapalıyken son bilinen fiyat
+     * geçerlidir) ama bayat olarak işaretlenir ve yaşı arayüze verilir.
+     * Değerleme yine de yapılır; "none" yalnızca gerçekten fiyat yokken olur.
+     */
     const stale = buildAccountingSummary(
       [openGram],
       snapshotWith({ "gram-altin": { liquidation: "5000", replacement: "5100" } }, { fetchedAt: new Date(NOW - 10 * MINUTE).toISOString() }),
       NOW,
     );
-    expect(stale.valuationStatus).toBe("none");
+    expect(stale.valuationStatus).toBe("full");
     expect(stale.priceStatus).toBe("stale");
+    expect(stale.stalePositionCount).toBe(1);
   });
 
   it("CLOSED: geçmiş işlem var, açık pozisyon yok; gerçekleşmiş K/Z korunur; fiyat yokluğu gizlemez", () => {

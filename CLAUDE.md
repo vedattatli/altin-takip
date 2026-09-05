@@ -223,7 +223,16 @@ Arayüz yönlendirmesine tek başına güvenme.
 - **Her mutation `clientRequestId` kabul etsin;** aynı içerik replay, farklı içerik 409.
 - Kullanıcının gerçek işlem fiyatı esastır; piyasa fiyatı maliyeti değiştirmez.
   `MARKET_BASELINE` fiyatını yalnızca sunucu sağlayıcısından al; istemci fiyatını yok say.
-- Fiyat yok/bayat/geçersizse değerlemeyi hesaplanmış gibi gösterme; başka üründen tahmin yapma.
+- **Bayat fiyat KULLANILIR ama "güncel" DENMEZ.** Kaynaklar yalnızca piyasa açıkken yayımlar;
+  akşamları ve hafta sonu damga donar. Katı tazelik kuralı kataloğun yarısını boşaltıyordu.
+  Tazelik iki kademelidir (`validateUsableQuote` + `allowStale`): eşiğin içinde taze, eşik ile
+  `LAST_KNOWN_MAX_AGE_MS` (4 gün) arası SON BİLİNEN fiyat, ötesi fiyat sayılmaz. Bayat fiyat
+  kullanıldıysa `stalePositionCount` / `oldestStaleQuoteAt` ile arayüze bildirilir ve yaşı
+  EKRANDA yazılır ("… itibarıyla"). Yaşı yazmadan bayat fiyat gösterme.
+- **Kalıcı kayıt yazan yollar TAZE fiyat ister.** MARKET_BASELINE açılış bakiyesi
+  (`baselineSnapshotFor`, `local-ledger`) `usableQuoteOrNull` kullanır: deftere yazılan bir
+  maliyet, piyasanın kapalı olduğu bir anın fiyatıyla sabitlenmez.
+- Fiyat yoksa veya geçersizse değerlemeyi hesaplanmış gibi gösterme; başka üründen tahmin yapma.
 - "Hayat boyu toplam kâr", "kesin kâr", "vergiye esas kâr" ifadelerini kullanma.
 - Motoru değiştirirsen `tests/accounting.test.ts`, pgTAP muhasebe bölümü ve
   `0010_accounting_rpc.sql` (`ledger_replay_product`) birlikte güncellenmeli;

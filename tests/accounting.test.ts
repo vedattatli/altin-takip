@@ -332,14 +332,39 @@ describe("değerleme — fiyat durumu", () => {
     expect(summary.totalRemainingCostBasis).toBe("50000");
   });
 
-  it("bayat fiyatla değerleme hesaplanmış gibi gösterilmez", () => {
+  /*
+   * PİYASA KAPALIYKEN SON BİLİNEN FİYAT KULLANILIR — AMA "GÜNCEL" DENMEZ.
+   *
+   * Kaynak yalnızca piyasa açıkken yayımlar; cumartesi damga donar. Eski kural
+   * bunu "fiyat yok" sayıyor ve portföy değeri her hafta sonu hesaplanamıyordu.
+   * Yeni kural: fiyat kullanılır, ama BAYAT işaretlenir ve yaşı arayüze verilir.
+   */
+  it("bayat fiyat değerlemeye girer ama bayat olarak işaretlenir", () => {
     const stale = snapshotWith(
       { "gram-altin": { liquidation: "5100", replacement: "5200" } },
       { fetchedAt: new Date(NOW - 60 * 60 * 1000).toISOString() },
     );
     const summary = buildAccountingSummary(entries, stale, NOW);
     expect(summary.priceStatus).toBe("stale");
+    // Değer hesaplandı; sessizce kaybolmadı.
+    expect(summary.holdings[0]!.liquidationValue).not.toBeNull();
+    // Ve kullanıcıya söylenecek olan işaret yerinde.
+    expect(summary.stalePositionCount).toBe(1);
+    expect(summary.oldestStaleQuoteAt).not.toBeNull();
+  });
+
+  /*
+   * SON BİLİNEN FİYATIN DA SINIRI VAR. Dört günü aşan bir fiyat, kapalı bir
+   * piyasa değil susmuş bir kaynak demektir; o zaman gerçekten fiyat yoktur.
+   */
+  it("çok eski fiyat son bilinen fiyat SAYILMAZ", () => {
+    const ancient = snapshotWith(
+      { "gram-altin": { liquidation: "5100", replacement: "5200" } },
+      { fetchedAt: new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString() },
+    );
+    const summary = buildAccountingSummary(entries, ancient, NOW);
     expect(summary.holdings[0]!.liquidationValue).toBeNull();
+    expect(summary.stalePositionCount).toBe(0);
   });
 
   it("başka ürünün fiyatından sessiz tahmin yapılmaz", () => {
