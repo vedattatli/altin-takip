@@ -10,7 +10,6 @@ import {
 } from "@/auth/types";
 import { isReservedUsername, validateUsername } from "@/auth/username";
 import { approvalAppliesToCurrentMapping } from "@/prices/providers/sarraf-tv-screen-mapping";
-import { PLAN_PROVIDER_CODES } from "@/prices/valuation-plan";
 import type { AdminActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
 import { badRequest, conflict, notFound } from "@/server/auth/errors";

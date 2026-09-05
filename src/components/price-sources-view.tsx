@@ -5,7 +5,6 @@ import { useState } from "react";
 import { requireProduct } from "@/domain/catalog";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import {
-  displayProductName,
   PRIMARY_DISPLAY_GROUPS,
   plannedProviderFor,
   SHARED_CATEGORY_NOTE,
@@ -233,7 +232,7 @@ export function PriceSourcesView({
                   return (
                     <tr key={productId} className="border-b border-line last:border-b-0">
                       <td className="px-3 py-2 text-ink">
-                        {displayProductName(productId, requireProduct(productId).name, { distinguish: true })}
+                        {requireProduct(productId).name}
                         {planned.has(productId) ? null : (
                           <span className="block text-subtle">değerlemede kullanılmıyor</span>
                         )}

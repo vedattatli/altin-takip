@@ -444,6 +444,26 @@ karar kondu: yöneticinin `enabled` bayrağı.
 - Erişilebilirlik: yeterli kontrast, klavye ile kullanılabilirlik, `aria-*` etiketleri,
   görünür odak halkası. Rengi tek bilgi taşıyıcı yapma.
 - Ürün kataloğu yalnızca `src/domain/catalog.ts` içinde tanımlanır; bileşenlere dağıtılmaz.
+- **Ürün adını BİRLEŞTİRME.** Her ekran katalog adını gösterir: "Yeni Çeyrek" ve "Eski Çeyrek"
+  ayrı satırlardır. Bir zamanlar ikisi "Çeyrek Altın" diye gösteriliyordu; kullanıcı hangisini
+  eklediğini panelde göremiyor, seçim listesiyle panel farklı adlar yazıyordu. Ad üreten
+  yardımcı (`displayProductName`) KALDIRILDI, geri ekleme. `PRIMARY_DISPLAY_GROUPS` yalnızca
+  panelin "Varlıklarım / Diğer varlıklar" ayrımı içindir.
+- **Varlık seçimi TEK açılır listedir**, üç başlıkla: Altınlar → Döviz → Gümüş
+  (`SELECT_GROUPS`, ledger-forms.tsx). "Sık kullanılanlar" gibi ikinci bir bölüm EKLEME; aynı
+  ürün ailesi iki yerde görünüyor ve hangisinin ne olduğu belirsiz kalıyordu. Fiyat sayfasındaki
+  başlık sırası (`GROUPS`, price-list-view.tsx) bununla AYNI kalmalıdır.
+- **Seçenek satırındaki fiyat işlem yönüne uyar.** Alış formunda `replacementPrice` (bugün
+  almanın maliyeti), satış ve "mevcut altınımı ekle" formlarında `liquidationPrice` (bugün
+  bozdurma karşılığı). Tek bir yönü her yerde göstermek, kullanıcıya ödemeyeceği bir rakamı
+  referans gösterirdi.
+- **Grafikte aralık, KIRILIM ADIMIDIR; "son şu kadar süre" değil.** 15m/1H/4H/1D/1W seçimi,
+  borsa arayüzlerindeki mum adımıyla aynı anlama gelir: seri baştan itibaren o adımla kovalanır
+  ve her kovanın KAPANIŞI (kovadaki son gözlem) bir nokta olur. Geriye bakış süresi
+  `aralık × MAX_POINTS` ile türetilir; ayrı bir "şu kadar gün" tablosu yazma.
+- **Boş kovayı doldurma.** Bir kovaya hiç gözlem düşmediyse nokta ÜRETİLMEZ ve çizgide boşluk
+  kalır; kaç kovanın boş olduğu (`emptyIntervals`) kullanıcıya yazılır. Veri ~5-10 dakikada bir
+  toplandığı için 1m/1s gibi aralık SUNMA — olmayan bir çözünürlüğü varmış gibi gösterir.
 
 ## Test kuralları
 

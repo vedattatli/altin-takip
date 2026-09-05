@@ -138,9 +138,15 @@ export const SHARED_CATEGORY_NOTE =
 /**
  * GÖRÜNÜM GRUPLARI
  *
- * Katalogda `yeni-ceyrek` ve `eski-ceyrek` ayrı kayıtlardır ve öyle kalır —
- * yıkıcı bir birleştirme migration'ı YAPILMAZ. Kullanıcı arayüzünde ise tek
- * bir "Çeyrek Altın" adı görünür.
+ * Katalogda `yeni-ceyrek` ve `eski-ceyrek` ayrı kayıtlardır ve öyle kalır.
+ *
+ * DİKKAT: bu gruplar artık ÜRÜN ADI ÜRETMEZ. Eskiden "Yeni Çeyrek" arayüzde
+ * "Çeyrek Altın" diye gösteriliyordu; kullanıcı hangisini eklediğini
+ * göremiyordu ve seçim listesiyle panel farklı adlar yazıyordu. Her ekran
+ * artık KATALOG ADINI gösterir.
+ *
+ * Grupların kalan tek işi: panelde "Varlıklarım" ile "Diğer varlıklar"
+ * ayrımı (`isPrimaryProduct`) ve kaynak planı özet tablosu.
  */
 export interface DisplayGroup {
   id: string;
@@ -187,33 +193,8 @@ export const PRIMARY_PRODUCT_IDS: readonly string[] = PRIMARY_DISPLAY_GROUPS.fla
   (group) => group.memberProductIds,
 );
 
-export function displayGroupOf(productId: string): DisplayGroup | null {
-  return GROUP_BY_MEMBER.get(productId) ?? null;
-}
-
 export function isPrimaryProduct(productId: string): boolean {
   return GROUP_BY_MEMBER.has(productId);
-}
-
-/**
- * Arayüzde gösterilecek ürün adı.
- *
- * Grup üyeleri grup adıyla gösterilir ("Yeni Çeyrek" → "Çeyrek Altın").
- * `distinguishMembers` verildiğinde, aynı gruptan birden çok ürün elde varsa
- * satırların ayırt edilebilmesi için katalog adı parantez içinde eklenir —
- * kayıtlar birbirine karışmasın diye.
- */
-export function displayProductName(
-  productId: string,
-  catalogName: string,
-  options: { distinguish?: boolean } = {},
-): string {
-  const group = GROUP_BY_MEMBER.get(productId);
-  if (!group) return catalogName;
-  if (options.distinguish === true && group.memberProductIds.length > 1) {
-    return `${group.label} (${catalogName})`;
-  }
-  return group.label;
 }
 
 /** Bir ürünün planlanan kaynağı; planda yoksa null (fiyatsız kalır). */

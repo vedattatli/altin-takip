@@ -104,7 +104,7 @@ test.describe("yönetim paneli", () => {
     // Deterministik başlangıç: kullanıcının önceki kayıtları temizlenir.
     await browserApi(userPage, "DELETE", "/api/transactions");
     await gotoReady(userPage, "/islemler");
-    await addPurchase(userPage, { product: "Gram Altın", quantity: "8", unitPrice: "5000" });
+    await addPurchase(userPage, { product: "gram-altin", quantity: "8", unitPrice: "5000" });
     await userContext.close();
 
     await signInAsAdmin(page);

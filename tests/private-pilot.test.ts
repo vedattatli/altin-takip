@@ -14,7 +14,6 @@ import { evaluateQuote, type QuoteRejectionCode } from "@/prices/quality";
 import { PLAN_PROVIDER_CODES } from "@/prices/valuation-plan";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { PriceIngestionService } from "@/server/prices/ingestion-service";
-import { AdminService } from "@/server/admin/admin-service";
 import { PriceSourceService } from "@/server/prices/price-source-service";
 import { ScreenWorkerService, SCREEN_PROVIDER_CODE, leaseTokenOf } from "@/server/prices/screen-worker-service";
 import type { ScreenWorkerPayload } from "@/server/prices/types";
@@ -25,7 +24,7 @@ import {
   verifyWorkerSignature,
 } from "@/server/security/worker-signature";
 import { signRequest } from "../services/sarraf-screen-worker/src/signing";
-import { adminActor, userActor } from "./actors";
+import { userActor } from "./actors";
 
 /**
  * SPRINT 3.2 — SARRAF TV KAYSERİ ÖZEL PİLOTU

@@ -241,8 +241,10 @@ export async function addPurchase(
   options: { product?: string; quantity: string; unitPrice: string; workmanship?: string; fees?: string },
 ) {
   await page.getByTestId("add-buy").click();
+  // `product` KATALOG KİMLİĞİDİR, etiket değil: seçenek metni artık güncel
+  // fiyatı da taşıyor ve piyasa her oynadığında etiket eşleşmesi kırılırdı.
   if (options.product) {
-    await page.getByLabel("Varlık türü").selectOption({ label: options.product });
+    await page.getByLabel("Varlık türü").selectOption(options.product);
   }
   await page.getByLabel(/^Miktar/).fill(options.quantity);
   await page.getByLabel(/^Birim alış fiyatı/).fill(options.unitPrice);
@@ -259,7 +261,7 @@ export async function addSale(
 ) {
   await page.getByTestId("add-sell").click();
   if (options.product) {
-    await page.getByLabel("Varlık türü").selectOption({ label: options.product });
+    await page.getByLabel("Varlık türü").selectOption(options.product);
   }
   await page.getByLabel(/^Miktar/).fill(options.quantity);
   await page.getByLabel(/^Birim satış fiyatı/).fill(options.unitPrice);

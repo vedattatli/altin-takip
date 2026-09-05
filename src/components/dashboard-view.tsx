@@ -21,7 +21,6 @@ import {
   formatSignedMoney,
 } from "@/lib/format";
 import {
-  displayProductName,
   isPrimaryProduct,
   plannedProviderFor,
   SHARED_CATEGORY_NOTE,
@@ -105,13 +104,10 @@ function SourceBadge({ productId, quoteProvider }: { productId: string; quotePro
 
 function HoldingRow({
   holding,
-  distinguish,
   sharedFrom,
   simple,
 }: {
   holding: HoldingView;
-  /** Aynı görünüm grubundan birden çok kayıt varsa satırlar ayırt edilir. */
-  distinguish: boolean;
   /** Fiyat ortak kategori fiyatından alındıysa kaynak ürünün kimliği. */
   sharedFrom: string | null;
   /** Basit modda muhasebe ayrıntıları gizlenir; hesaplar değişmez. */
@@ -119,7 +115,10 @@ function HoldingRow({
 }) {
   const { product, position, quote } = holding;
   const priced = holding.priceAvailable && holding.liquidationValue !== null;
-  const name = displayProductName(product.id, product.name, { distinguish });
+  // Katalog adı olduğu gibi yazılır. "Yeni Çeyrek" ile "Eski Çeyrek" AYRI
+  // ürünlerdir; ikisini "Çeyrek Altın" diye birleştirmek, kullanıcının hangisini
+  // eklediğini ekranda gizlerdi. Seçim listesi de aynı adı gösterir.
+  const name = product.name;
 
   return (
     <li className="border-b border-line px-4 py-3 last:border-b-0" data-testid="holding-row">
@@ -294,22 +293,6 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   const openHoldings = summary.holdings.filter((holding) => dec(holding.position.quantity).greaterThan(0));
   const primaryHoldings = openHoldings.filter((holding) => isPrimaryProduct(holding.product.id));
   const otherHoldings = openHoldings.filter((holding) => !isPrimaryProduct(holding.product.id));
-
-  /*
-   * Aynı görünüm grubundan (örn. Yeni Çeyrek + Eski Çeyrek) birden çok kayıt
-   * varsa satırlar aynı adı taşırdı. Bu durumda katalog adı parantez içinde
-   * eklenerek kayıtların birbirine karışması engellenir.
-   */
-  const groupCounts = new Map<string, boolean>();
-  for (const holding of openHoldings) {
-    const label = displayProductName(holding.product.id, holding.product.name);
-    const clash = openHoldings.some(
-      (other) =>
-        other.product.id !== holding.product.id &&
-        displayProductName(other.product.id, other.product.name) === label,
-    );
-    groupCounts.set(holding.product.id, clash);
-  }
 
   /** Fiyat ortak kategori fiyatından mı geldi? Plan bunu anlık görüntüde beyan eder. */
   const sharedFrom = (productId: string): string | null =>
@@ -561,7 +544,6 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
                 <HoldingRow
                   key={holding.product.id}
                   holding={holding}
-                  distinguish={groupCounts.get(holding.product.id) === true}
                   sharedFrom={sharedFrom(holding.product.id)}
                   simple={isSimple}
                 />
@@ -589,7 +571,6 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
                 <HoldingRow
                   key={holding.product.id}
                   holding={holding}
-                  distinguish={groupCounts.get(holding.product.id) === true}
                   sharedFrom={sharedFrom(holding.product.id)}
                   simple={isSimple}
                 />

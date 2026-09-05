@@ -21,11 +21,11 @@ import {
   type SellCommand,
 } from "@/domain/accounting";
 import { getProduct, GOLD_PRODUCTS } from "@/domain/catalog";
-import type { GoldProduct } from "@/domain/types";
+import type { GoldProduct, ProductCategory } from "@/domain/types";
 import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
 import { usableQuoteOrNull } from "@/prices/validate";
-import { displayProductName, PRIMARY_DISPLAY_GROUPS } from "@/prices/valuation-plan";
+import { usePortfolio } from "@/state/portfolio-store";
 import { marketLabel, useClientClock } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
@@ -45,52 +45,95 @@ function firstErrorText(errors: CommandErrors): string | null {
 }
 
 /**
- * ALTIN TÜRÜ SEÇİMİ — KATALOĞUN TAMAMI
+ * VARLIK SEÇİMİ — TEK LİSTE, BAŞLIKLARA AYRILMIŞ, FİYATLI
  *
- * Liste iki bölümdür:
- *  1. En sık kullanılan ALTI ürün üstte, tek tıkla ulaşılsın diye.
- *  2. "Tüm varlıklar" altında katalogdaki DİĞER BÜTÜN ürünler (gümüş ve döviz dâhil;
- *     bu yüzden başlık artık "altın türü" değil).
+ * Katalogdaki HER ürün tek bir açılır listede, üç başlık altında görünür:
+ * Altınlar → Döviz → Gümüş. Ürünler KATALOG ADIYLA yazılır: "Yeni Çeyrek" ve
+ * "Eski Çeyrek" ayrı satırlardır, birleştirilip "Çeyrek Altın" denmez —
+ * kullanıcı hangisini eklediğini seçim anında bilmelidir.
  *
- * Önceden yalnızca altı ürün ve kullanıcının ELİNDE OLANLAR listeleniyordu.
- * Sonucu şuydu: elinde olmayan bir ürünü satın alamıyordun — listede
- * bulunmadığı için kayıt açılamıyordu. Sadeleştirme, ürün eklemeyi
- * engellememelidir.
+ * NEDEN "SIK KULLANILAN ALTI ÜRÜN" BÖLÜMÜ KALDIRILDI: liste iki bölüme
+ * ayrılınca aynı ürün ailesi iki yerde görünüyordu (üstte "Çeyrek Altın",
+ * altta "Yeni Çeyrek"/"Eski Çeyrek") ve hangisinin ne olduğu belirsizdi.
+ * Tek liste + başlık, hem daha kısa hem daha kesin.
  *
- * Grup üyeleri (yeni/eski çeyrek gibi) ayrı ayrı görünür ve katalog adı
- * parantezde yazılır; aksi hâlde iki farklı ürün aynı satır gibi okunurdu.
+ * FİYAT SATIRIN İÇİNDE, AMA İŞLEM YÖNÜNE GÖRE. Alış formunda YENİDEN ALIM
+ * (kuyumcunun satış) fiyatı yazar — alırken ödeyeceğiniz taraf odur. Satış ve
+ * "mevcut altınımı ekle" formlarında BOZDURMA (kuyumcunun alış) fiyatı yazar.
+ * İki yönü karıştırmak, kullanıcıya ödemeyeceği bir rakamı referans gösterirdi.
+ *
+ * Fiyatı olmayan ürün GİZLENMEZ, "fiyat yok" yazılır — seçilebilir olduğu hâlde
+ * neden değerlenemeyeceğini baştan bilir.
  */
+const SELECT_GROUPS: readonly { title: string; categories: readonly ProductCategory[] }[] = [
+  { title: "Altınlar", categories: ["gram", "kulce", "ayarli", "ziynet"] },
+  { title: "Döviz", categories: ["doviz"] },
+  { title: "Gümüş", categories: ["gumus"] },
+];
+
+/** Başlıklarda adı geçmeyen bir kategori eklenirse ürünleri burada görünür. */
+const SELECT_GROUPED_CATEGORIES = new Set(SELECT_GROUPS.flatMap((group) => group.categories));
+
 function ProductSelect({
   id,
   value,
   onChange,
   error,
   disabled,
+  priceKind,
 }: {
   id: string;
   value: string;
   onChange: (productId: string) => void;
   error?: string;
   disabled?: boolean;
+  /** Hangi yönün fiyatı yazılacak: alışta "yeniden alım", satışta "bozdurma". */
+  priceKind: "liquidation" | "replacement";
 }) {
-  const options = useMemo(() => {
-    const primary = PRIMARY_DISPLAY_GROUPS.map((group) => ({
-      id: group.primaryProductId,
-      label: group.label,
-    }));
-    const primaryIds = new Set(primary.map((option) => option.id));
+  const { summary } = usePortfolio();
+  const snapshot = summary.snapshot;
+  const clock = useClientClock(30_000);
+  // Saat gelmeden anlık görüntünün kendi zamanı kullanılır; hidrasyon bozulmasın.
+  const fallback = Date.parse(snapshot?.fetchedAt ?? "");
+  const now = clock ?? (Number.isFinite(fallback) ? fallback : 0);
 
-    // Katalogdaki kalan HER ürün (gümüş ve döviz dâhil); üstteki altı ürün tekrar edilmez.
-    const others = GOLD_PRODUCTS.filter((product) => !primaryIds.has(product.id)).map((product) => ({
-      id: product.id,
-      label: displayProductName(product.id, product.name, { distinguish: true }),
-    }));
+  const groups = useMemo(() => {
+    const label = (product: GoldProduct): string => {
+      const quote = usableQuoteOrNull(snapshot, product.id, now);
+      if (!quote) return `${product.name} — fiyat yok`;
+      const price = priceKind === "replacement" ? quote.replacementPrice : quote.liquidationPrice;
+      // `<option>` düz metindir; fiyat ada iliştirilir.
+      return `${product.name} — ${formatMoney(price)}`;
+    };
 
-    return { primary, others };
-  }, []);
+    const listed = SELECT_GROUPS.map((group) => ({
+      title: group.title,
+      products: GOLD_PRODUCTS.filter((product) => group.categories.includes(product.category)).map(
+        (product) => ({ id: product.id, label: label(product) }),
+      ),
+    })).filter((group) => group.products.length > 0);
+
+    const rest = GOLD_PRODUCTS.filter((product) => !SELECT_GROUPED_CATEGORIES.has(product.category));
+    if (rest.length > 0) {
+      listed.push({
+        title: "Diğer",
+        products: rest.map((product) => ({ id: product.id, label: label(product) })),
+      });
+    }
+    return listed;
+  }, [snapshot, now, priceKind]);
 
   return (
-    <Field label="Varlık türü" htmlFor={id} error={error}>
+    <Field
+      label="Varlık türü"
+      htmlFor={id}
+      error={error}
+      hint={
+        priceKind === "replacement"
+          ? "Yanındaki fiyat, bugün almanın yaklaşık maliyetidir (kuyumcunun satış fiyatı)."
+          : "Yanındaki fiyat, bugün bozdurursanız alacağınız yaklaşık tutardır (kuyumcunun alış fiyatı)."
+      }
+    >
       <select
         id={id}
         className="control"
@@ -99,20 +142,15 @@ function ProductSelect({
         aria-invalid={Boolean(error)}
         disabled={disabled}
       >
-        {options.primary.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-        {options.others.length > 0 ? (
-          <optgroup label="Tüm varlıklar">
-            {options.others.map((option) => (
+        {groups.map((group) => (
+          <optgroup key={group.title} label={group.title}>
+            {group.products.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
               </option>
             ))}
           </optgroup>
-        ) : null}
+        ))}
       </select>
     </Field>
   );
@@ -443,6 +481,7 @@ export function BuyForm({
 
       <form className="mt-4 space-y-4" onSubmit={handleSubmit} noValidate>
         <ProductSelect
+          priceKind="replacement"
           id={`${formId}-product`}
           value={state.productId}
           onChange={(value) => update("productId", value)}
@@ -716,6 +755,7 @@ export function SellForm({
 
       <form className="mt-4 space-y-4" onSubmit={handleSubmit} noValidate>
         <ProductSelect
+          priceKind="liquidation"
           id={`${formId}-product`}
           value={state.productId}
           onChange={(value) => update("productId", value)}
@@ -1033,6 +1073,7 @@ export function OpeningBalanceForm({
         {step === 1 ? (
           <>
             <ProductSelect
+              priceKind="liquidation"
               id={`${formId}-product`}
               value={state.productId}
               onChange={(value) => update("productId", value)}
@@ -1156,7 +1197,7 @@ export function OpeningBalanceForm({
           <>
             <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3 text-sm">
               <p className="font-semibold text-ink">
-                {displayProductName(product.id, product.name, { distinguish: true })} ·{" "}
+                {product.name} ·{" "}
                 {formatQuantity(state.quantity, product.id)}
               </p>
               <p className="mt-0.5 text-xs text-muted">{COST_METHOD_LABELS[state.costMethod].title}</p>

@@ -126,39 +126,48 @@ test.describe("görünüm modu", () => {
   });
 
   /*
-   * Liste artık kataloğun TAMAMINI içerir.
+   * TEK LİSTE, ÜÇ BAŞLIK, KATALOG ADLARI, FİYATLI.
    *
-   * Eskiden yalnızca altı ürün ve kullanıcının elinde olanlar listeleniyordu;
-   * sonucu şuydu: elinde olmayan bir ürünü satın alamıyordun. Sadeleştirme
-   * ürün eklemeyi engellememelidir.
-   *
-   * Sadelik korunuyor: altı ürün HÂLÂ en üstte ve ilk sıralarda; gerisi
-   * "Tüm varlıklar" başlığı altında.
+   * "Sık kullanılan altı ürün" bölümü kaldırıldı: aynı ürün ailesi iki yerde
+   * görünüyordu (üstte "Çeyrek Altın", altta "Yeni Çeyrek") ve hangisinin ne
+   * olduğu belirsizdi. Artık her ürün katalog adıyla, ait olduğu başlık
+   * altında, güncel bozdurma fiyatıyla birlikte tek listede.
    */
-  test("altı ürün en üstte; kataloğun tamamı seçilebilir", async ({ page }) => {
-    const username = scopedUsername("altiurun");
+  test("varlık listesi Altınlar / Döviz / Gümüş başlıkları altında ve fiyatlı", async ({ page }) => {
+    const username = scopedUsername("varlikliste");
     await signIn(page, username);
 
     await gotoReady(page, "/islemler");
     await page.getByTestId("add-buy").click();
     const select = page.getByLabel("Varlık türü");
+
+    // Başlıklar ve SIRALARI.
+    const groups = await select.locator("optgroup").evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("label")),
+    );
+    expect(groups).toEqual(["Altınlar", "Döviz", "Gümüş"]);
+
+    // Ziynetin yeni/eskisi AYRI satırlardır; birleştirilmez.
     const labels = await select.locator("option").allTextContents();
-
-    // İlk altı sıra değişmedi: sık kullanılanlar önce gelir.
-    expect(labels.slice(0, 6)).toEqual([
-      "Gram Altın",
-      "Çeyrek Altın",
-      "Yarım Altın",
-      "Tam Altın",
-      "Ata Altın",
-      "Gremse Altın",
-    ]);
-
-    // Geri kalan katalog da ULAŞILABİLİR olmalı.
     const joined = labels.join("|");
-    for (const expected of ["Reşat", "18 Ayar", "Külçe", "22 Ayar", "Gümüş", "Dolar", "Euro"]) {
+    for (const expected of ["Yeni Çeyrek", "Eski Çeyrek", "24 Ayar Külçe", "22 Ayar Altın", "Gram Altın"]) {
       expect(joined, expected).toContain(expected);
     }
+
+    // Döviz ve gümüş kendi başlıkları altında.
+    const fx = await select.locator('optgroup[label="Döviz"] option').allTextContents();
+    expect(fx.join("|")).toContain("Amerikan Doları");
+    expect(fx.join("|")).toContain("Euro");
+    const silver = await select.locator('optgroup[label="Gümüş"] option').allTextContents();
+    expect(silver.join("|")).toContain("Gram Gümüş");
+
+    // Her satır fiyat bilgisi taşır: ya güncel fiyat ya da "fiyat yok".
+    for (const label of labels) {
+      expect(label.includes(" ₺") || label.endsWith("fiyat yok"), label).toBe(true);
+    }
+
+    // Katalogda ne varsa listede de var; hiçbir ürün gizlenmiyor.
+    expect(labels.length).toBe(25);
   });
 
   test("elde gizli üründen kayıt varsa listede ve 'Diğer varlıklar'da görünür", async ({ page }) => {

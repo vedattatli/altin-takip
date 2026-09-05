@@ -10,7 +10,6 @@ import {
 } from "@/domain/accounting";
 import { requireProduct } from "@/domain/catalog";
 import { formatDateTime, formatMoney, formatOccurred, formatQuantity } from "@/lib/format";
-import { displayProductName } from "@/prices/valuation-plan";
 import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
 import { BuyForm, OpeningBalanceForm, SellForm } from "./ledger-forms";
@@ -107,7 +106,7 @@ function LedgerRow({
             {!isActive ? <span className="badge">{STATUS_LABELS[entry.status]}</span> : null}
             {origin ? <span className="badge">{origin}</span> : null}
             <p className="truncate text-sm font-semibold text-ink">
-              {displayProductName(product.id, product.name, { distinguish: true })}
+              {product.name}
             </p>
           </div>
           <p className="tabular mt-1 text-xs text-muted" data-testid="ledger-row-summary">
@@ -284,9 +283,7 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
         <Card className="border-negative-soft space-y-3 p-4">
           <p className="text-sm font-semibold text-ink">İşlem iptal edilsin mi?</p>
           <p className="text-sm text-muted">
-            {displayProductName(pendingVoid.productId, requireProduct(pendingVoid.productId).name, {
-              distinguish: true,
-            })}{" "}
+            {requireProduct(pendingVoid.productId).name}{" "}
             ·{" "}
             {formatQuantity(pendingVoid.quantity, pendingVoid.productId)} ·{" "}
             {formatOccurred(pendingVoid.occurredAt, pendingVoid.occurredTime)}.

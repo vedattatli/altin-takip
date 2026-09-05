@@ -10,8 +10,10 @@ import { buyCommand } from "./helpers";
 /**
  * PORTFÖY DEĞERİ GRAFİĞİ — SERİ ÜRETİMİ
  *
- * Grafiğin tek işi GERÇEKTE ÖLÇÜLMÜŞ fiyatları çizmektir. Bu testler uydurma
- * çözünürlük üretilmediğini ve geçmişin çarpıtılmadığını sabitler.
+ * Aralık, "son şu kadar süre" DEĞİL, grafiğin KIRILIM adımıdır (borsa
+ * arayüzlerindeki 15m / 1H / 4H / 1D / 1W ile aynı anlam). Bu testler hem
+ * kovalamanın doğru çalıştığını hem de uydurma çözünürlük üretilmediğini
+ * sabitler.
  */
 
 let backend: LocalAuthBackend;
@@ -57,7 +59,7 @@ beforeEach(async () => {
 
 describe("portföy değeri serisi", () => {
   it("fiyat geçmişi yoksa boş döner; sıfır çizgisi UYDURULMAZ", async () => {
-    const series = await history.series(userActor(user), "24h");
+    const series = await history.series(userActor(user), "1h");
     expect(series.empty).toBe(true);
     expect(series.points).toEqual([]);
   });
@@ -79,7 +81,7 @@ describe("portföy değeri serisi", () => {
     writeHistory(backend, "2026-03-10T11:00:00.000Z", "yeni-ceyrek", "11000");
 
     // Önce: aralıkta işlem yok, fark yalnızca fiyat hareketidir.
-    const before = await history.series(userActor(user), "24h");
+    const before = await history.series(userActor(user), "1h");
     expect(before.ledgerChangesInRange).toBe(0);
 
     // Sonra: iki gözlem ARASINDA alım yapılır. Fiyat aynı kalsa da değer artar.
@@ -94,13 +96,20 @@ describe("portföy değeri serisi", () => {
       }),
     );
 
-    const after = await history.series(userActor(user), "24h");
+    const after = await history.series(userActor(user), "1h");
     expect(after.ledgerChangesInRange).toBe(1);
     // Değer 11.000 → 55.000: sıçrama fiyattan değil, eklenen altından geliyor.
     expect(after.points.map((point) => point.liquidationValue)).toEqual(["11000.00", "55000.00"]);
   });
 
-  it("nokta sayısı gözlem sayısı kadardır; ara noktalar üretilmez", async () => {
+  /*
+   * ARALIK = KIRILIM ADIMI.
+   *
+   * Aynı gözlem kümesi, seçilen adıma göre farklı sayıda noktaya iner. Kovanın
+   * değeri o kovaya düşen SON gözlemdir (mum kapanışı); daha eski gözlemler
+   * çizilmez ama sayılır.
+   */
+  it("gözlemler seçilen adıma göre kovalanır; kova değeri son gözlemdir", async () => {
     await portfolio.appendTransaction(
       userActor(user),
       buyCommand({ productId: "yeni-ceyrek", occurredAt: "2026-03-01", quantity: "2", unitPrice: "10000" }),
@@ -109,12 +118,44 @@ describe("portföy değeri serisi", () => {
     writeHistory(backend, "2026-03-10T10:10:00.000Z", "yeni-ceyrek", "11100");
     writeHistory(backend, "2026-03-10T10:20:00.000Z", "yeni-ceyrek", "11050");
 
-    const series = await history.series(userActor(user), "24h");
-    expect(series.points).toHaveLength(3);
-    // 2 adet × fiyat — türetme, yuvarlama, düzleştirme yok.
-    expect(series.points.map((point) => point.liquidationValue)).toEqual(["22000.00", "22200.00", "22100.00"]);
-    // Gözlemler 10 dakika arayla: kullanıcıya bildirilen sıklık da bu olmalı.
-    expect(series.medianStepMs).toBe(600_000);
+    // 15 dakikalık: 10:00 ve 10:10 aynı kovada (kapanış 11100), 10:20 ayrı kovada.
+    const quarter = await history.series(userActor(user), "15m");
+    expect(quarter.points).toHaveLength(2);
+    expect(quarter.points.map((point) => point.liquidationValue)).toEqual(["22200.00", "22100.00"]);
+    expect(quarter.points.map((point) => point.observations)).toEqual([2, 1]);
+    // Nokta, kovanın BAŞLANGICIYLA etiketlenir; değer ise gerçek gözlem anından.
+    expect(quarter.points[0]?.at).toBe("2026-03-10T10:00:00.000Z");
+    expect(quarter.points[0]?.observedAt).toBe("2026-03-10T10:10:00.000Z");
+
+    // Saatlik: üçü de tek kovada, kapanış 11050.
+    const hourly = await history.series(userActor(user), "1h");
+    expect(hourly.points).toHaveLength(1);
+    expect(hourly.points[0]?.liquidationValue).toBe("22100.00");
+    expect(hourly.points[0]?.observations).toBe(3);
+
+    // Bildirilen sıklık HAM gözlemlerden ölçülür, kovalardan değil.
+    expect(hourly.medianStepMs).toBe(600_000);
+  });
+
+  /*
+   * BOŞ KOVA DOLDURULMAZ.
+   *
+   * Toplayıcı gecikince bir kovaya hiç gözlem düşmez. O kovayı bir öncekinin
+   * değeriyle doldurmak, olmayan bir ölçümü varmış gibi göstermek olurdu.
+   * Çizgide boşluk kalır ve kaç kovanın boş olduğu bildirilir.
+   */
+  it("gözlem düşmeyen kova doldurulmaz, sayılır", async () => {
+    await portfolio.appendTransaction(
+      userActor(user),
+      buyCommand({ productId: "yeni-ceyrek", occurredAt: "2026-03-01", quantity: "1", unitPrice: "10000" }),
+    );
+    writeHistory(backend, "2026-03-10T10:00:00.000Z", "yeni-ceyrek", "11000");
+    // Araya 10:15 ve 10:30 kovaları giriyor ama gözlem yok.
+    writeHistory(backend, "2026-03-10T10:45:00.000Z", "yeni-ceyrek", "11500");
+
+    const series = await history.series(userActor(user), "15m");
+    expect(series.points).toHaveLength(2);
+    expect(series.emptyIntervals).toBe(2);
   });
 
   /*
@@ -136,7 +177,7 @@ describe("portföy değeri serisi", () => {
       }),
     );
 
-    const series = await history.series(userActor(user), "24h");
+    const series = await history.series(userActor(user), "1h");
     expect(series.points).toHaveLength(2);
     // İlk noktada elde altın YOKTU.
     expect(series.points[0]?.liquidationValue).toBe("0.00");
@@ -155,7 +196,7 @@ describe("portföy değeri serisi", () => {
     // Yalnızca çeyreğin fiyatı var.
     writeHistory(backend, "2026-03-10T10:00:00.000Z", "yeni-ceyrek", "11000");
 
-    const series = await history.series(userActor(user), "24h");
+    const series = await history.series(userActor(user), "1h");
     expect(series.points).toHaveLength(1);
     // Gremse SIFIR sayılmadı, toplamın dışında bırakıldı.
     expect(series.points[0]?.liquidationValue).toBe("11000.00");
@@ -178,7 +219,7 @@ describe("portföy değeri serisi", () => {
     writeHistory(backend, "2026-03-10T08:00:00.000Z", "yeni-ceyrek", "11000");
     writeHistory(backend, "2026-03-10T11:59:00.000Z", "gremse-altin", "100000");
 
-    const series = await history.series(userActor(user), "24h");
+    const series = await history.series(userActor(user), "1h");
     const last = series.points[series.points.length - 1];
     // Son noktada çeyreğin fiyatı artık kullanılamaz: sabit çizgi olarak uzatılmaz.
     expect(last?.missingProducts).toBe(1);
@@ -198,21 +239,32 @@ describe("portföy değeri serisi", () => {
     // 4 saat sonraki gözlem: çeyreğin fiyatı taşınamaz, başka ürün de yok.
     writeHistory(backend, "2026-03-10T11:59:00.000Z", "yeni-yarim", "22000");
 
-    const series = await history.series(userActor(user), "24h");
+    const series = await history.series(userActor(user), "1h");
     expect(series.points).toHaveLength(1);
     expect(series.points[0]?.at).toBe("2026-03-10T08:00:00.000Z");
   });
 
-  it("aralık dışındaki gözlemler seriye girmez", async () => {
+  /*
+   * GERİYE BAKIŞ ARALIKTAN TÜRETİLİR: aralık × en fazla nokta. Borsa arayüzü de
+   * ekranda sabit sayıda mum tutar; ayrı bir "şu kadar gün" tablosu uydurulmaz.
+   * 15 dakikalık adımda ~5 gün, günlük adımda ~500 gün geriye gidilir.
+   */
+  it("geriye bakış aralıktan türetilir; adım büyüdükçe geçmiş açılır", async () => {
     await portfolio.appendTransaction(
       userActor(user),
       buyCommand({ productId: "yeni-ceyrek", occurredAt: "2026-03-01", quantity: "1", unitPrice: "10000" }),
     );
-    writeHistory(backend, "2026-03-09T12:00:00.000Z", "yeni-ceyrek", "10000");
+    // Altı gün önce: 15 dakikalık pencerenin (~5 gün) DIŞINDA.
+    writeHistory(backend, "2026-03-04T12:00:00.000Z", "yeni-ceyrek", "10000");
     writeHistory(backend, "2026-03-10T11:30:00.000Z", "yeni-ceyrek", "11000");
 
-    const series = await history.series(userActor(user), "1h");
-    expect(series.points).toHaveLength(1);
-    expect(series.points[0]?.liquidationValue).toBe("11000.00");
+    const quarter = await history.series(userActor(user), "15m");
+    expect(quarter.points).toHaveLength(1);
+    expect(quarter.points[0]?.liquidationValue).toBe("11000.00");
+
+    // Günlük adımda pencere ~500 güne çıkar; eski gözlem de görünür.
+    const daily = await history.series(userActor(user), "1d");
+    expect(daily.points).toHaveLength(2);
+    expect(daily.points.map((point) => point.liquidationValue)).toEqual(["10000.00", "11000.00"]);
   });
 });

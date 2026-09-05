@@ -9,12 +9,12 @@ import type { AuthBackend } from "@/server/auth/backend";
 import type { PriceHistoryRow } from "@/server/prices/types";
 
 /**
- * PORTFÖY DEĞERİ ZAMAN SERİSİ
+ * PORTFÖY DEĞERİ ZAMAN SERİSİ — SABİT ARALIKLI (MUM MANTIĞI)
  *
- * Grafik VERİ UYDURMAZ. Nokta sıklığı, fiyatın gerçekte toplandığı sıklıktır;
- * noktaların arası doldurulmaz, düzleştirilmez, interpolasyon yapılmaz. Fiyat
- * 10 dakikada bir geliyorsa grafik 10 dakikada bir kırılır — kripto grafiği
- * gibi akmaz ve akıyormuş gibi de gösterilmez.
+ * Seçilen aralık, "son şu kadar süre" DEĞİLDİR; grafiğin KIRILIM adımıdır.
+ * Borsa arayüzlerindeki 15m / 1H / 4H / 1D / 1W ile aynı anlam: 1H seçilince
+ * grafik en baştan itibaren saatlik kovalara bölünür ve her kovanın KAPANIŞ
+ * değeri tek bir nokta olur. Noktalar sonra birleştirilerek çizgi çizilir.
  *
  * KURALLAR
  *  1. Her noktada pozisyon, O ANA KADARKİ deftere göre yeniden oynatılır.
@@ -30,43 +30,88 @@ import type { PriceHistoryRow } from "@/server/prices/types";
  *     (`ledgerChangesInRange`). Portföy değerindeki sıçrama o zaman fiyat
  *     hareketi DEĞİL, para giriş/çıkışıdır; grafiğin altındaki değişim rakamı
  *     "kâr" gibi okunamaz.
+ *
+ * BOŞ KOVA UYDURULMAZ
+ * Fiyat ~5-10 dakikada bir toplanıyor. 15 dakikalık kovaların çoğunda gözlem
+ * vardır, ama toplayıcı gecikirse bir kova BOŞ kalabilir. Boş kova için nokta
+ * ÜRETİLMEZ; çizgide boşluk kalır ve kaç kovanın boş olduğu (`emptyIntervals`)
+ * arayüze bildirilir. Boş kovayı bir öncekinin değeriyle doldurmak, olmayan bir
+ * ölçümü varmış gibi göstermek olurdu.
+ *
+ * KOVA KAPANIŞI = KOVADAKİ SON GÖZLEM
+ * Değer, kovanın nominal bitiş saatinde değil, o kovaya düşen SON gözlemin
+ * anında hesaplanır. Nominal bitişi kullanmak, gözlemi 12:03'te olan bir kovayı
+ * 12:15 fiyatıymış gibi etiketlerdi.
  */
 
 /** Bir fiyat en fazla bu kadar süre "hâlâ geçerli" sayılıp ileri taşınır. */
 const MAX_CARRY_FORWARD_MS = 3 * 60 * 60_000;
 
-/** Grafikte tek seferde döndürülen en fazla nokta sayısı. */
+/**
+ * Grafikte tek seferde döndürülen en fazla nokta sayısı.
+ *
+ * Geriye bakış süresi bundan TÜRETİLİR: `aralık × MAX_POINTS`. Yani 1H'de
+ * ~20 gün, 1D'de ~500 gün görünür. Borsa arayüzleri de ekranda sabit sayıda
+ * mum tutar; sabit bir "şu kadar gün" tablosu uydurmaya gerek yok.
+ */
 const MAX_POINTS = 500;
 
-export type HistoryRange = "1h" | "24h" | "7d" | "30d";
+/**
+ * Kova sınırları Türkiye saatine göre hizalanır (UTC+3, yıl boyu sabit).
+ * Aksi hâlde "1 günlük" kova gece 03:00'te kapanır ve günlük grafik kullanıcının
+ * takvim gününe denk gelmezdi.
+ */
+const TR_OFFSET_MS = 3 * 60 * 60_000;
 
-const RANGE_MS: Readonly<Record<HistoryRange, number>> = {
+export type HistoryInterval = "15m" | "1h" | "4h" | "1d" | "1w";
+
+/**
+ * ARALIK LİSTESİ NEDEN 15 DAKİKADAN BAŞLIYOR
+ *
+ * Fiyat ücretsiz bulut görevinden ~5-10 dakikada bir geliyor. 1m veya 1s
+ * aralığı sunmak, olmayan bir çözünürlüğü varmış gibi göstermek olurdu:
+ * kovaların çoğu boş çıkar, grafik delik deşik olur. 15 dakika, verinin
+ * gerçekten desteklediği en küçük adımdır.
+ */
+const INTERVAL_MS: Readonly<Record<HistoryInterval, number>> = {
+  "15m": 15 * 60_000,
   "1h": 60 * 60_000,
-  "24h": 24 * 60 * 60_000,
-  "7d": 7 * 24 * 60 * 60_000,
-  "30d": 30 * 24 * 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
 };
 
-export function isHistoryRange(value: unknown): value is HistoryRange {
-  return typeof value === "string" && value in RANGE_MS;
+export function isHistoryInterval(value: unknown): value is HistoryInterval {
+  return typeof value === "string" && value in INTERVAL_MS;
+}
+
+/** Bir anın ait olduğu kovanın başlangıcı (Türkiye saatine hizalı). */
+function bucketStart(at: number, intervalMs: number): number {
+  return Math.floor((at + TR_OFFSET_MS) / intervalMs) * intervalMs - TR_OFFSET_MS;
 }
 
 export interface HistoryPoint {
-  /** Gözlem anı (ISO). Kaynağın kendi fiyat saati değil; bkz. OBSERVED politikası. */
+  /** Kovanın BAŞLANGICI (ISO). X ekseni bunu kullanır. */
   at: string;
+  /** Değerin hesaplandığı gerçek gözlem anı (kovadaki son gözlem). */
+  observedAt: string;
   /** Bozdurma değeri (ondalık dize). */
   liquidationValue: string;
   /** Bu noktada fiyatı bulunan ürün sayısı. */
   pricedProducts: number;
   /** Elde olup fiyatı bulunamayan ürün sayısı. 0 değilse nokta kısmidir. */
   missingProducts: number;
+  /** Bu kovaya düşen gözlem sayısı. */
+  observations: number;
 }
 
 export interface PortfolioHistory {
-  range: HistoryRange;
+  interval: HistoryInterval;
   points: HistoryPoint[];
-  /** Ardışık iki nokta arasındaki ORTANCA süre (ms). Kullanıcıya "veri sıklığı". */
+  /** Ardışık iki GÖZLEM arasındaki ortanca süre (ms). Verinin gerçek sıklığı. */
   medianStepMs: number | null;
+  /** Çizilen aralıkta hiç gözlem düşmeyen kova sayısı (çizgideki boşluklar). */
+  emptyIntervals: number;
   /** Hiç fiyat geçmişi yoksa true: grafik yerine açıklama gösterilir. */
   empty: boolean;
   /**
@@ -141,10 +186,11 @@ export class PortfolioHistoryService {
    * katmanında çağrılır (tests/authorization-matrix.test.ts bunu denetler).
    * Böylece hiçbir uç gövdeden/sorgudan hedef kullanıcı alamaz.
    */
-  async series(actor: UserActor, range: HistoryRange): Promise<PortfolioHistory> {
+  async series(actor: UserActor, interval: HistoryInterval): Promise<PortfolioHistory> {
     const scope = ownScope(actor);
     const now = this.now();
-    const since = new Date(now - RANGE_MS[range]).toISOString();
+    const intervalMs = INTERVAL_MS[interval];
+    const since = new Date(now - intervalMs * MAX_POINTS).toISOString();
 
     const [entries, rows] = await Promise.all([
       this.backend.listLedger(scope),
@@ -153,20 +199,45 @@ export class PortfolioHistoryService {
 
     const timelines = buildTimelines(rows);
     if (timelines.size === 0) {
-      return { range, points: [], medianStepMs: null, empty: true, ledgerChangesInRange: 0 };
+      return {
+        interval,
+        points: [],
+        medianStepMs: null,
+        emptyIntervals: 0,
+        empty: true,
+        ledgerChangesInRange: 0,
+      };
     }
 
-    // Nokta zamanları: gerçekte gözlem yapılan anlar. Eşit aralığa ZORLANMAZ.
+    // Gerçek gözlem anları. Kovalar bunlardan türetilir; zaman ÜRETİLMEZ.
     const stamps = new Set<number>();
     for (const timeline of timelines.values()) {
       for (const point of timeline.points) stamps.add(point.at);
     }
-    const ordered = [...stamps].sort((a, b) => a - b);
-    // Sınır aşılırsa eşit aralıkla seyreltilir; EN YENİ nokta her zaman kalır.
-    const sampled = thin(ordered, MAX_POINTS);
+    const observed = [...stamps].sort((a, b) => a - b);
+
+    /*
+     * KOVALAMA: her gözlem ait olduğu kovaya düşer, kovanın DEĞERİ o kovadaki
+     * SON gözlemden gelir. Aynı kovadaki daha eski gözlemler çizilmez — mum
+     * kapanışı gibi. Kaç gözlem düştüğü sayılır ki kullanıcı seçtiği aralığın
+     * veriden daha ince olup olmadığını görebilsin.
+     */
+    const buckets = new Map<number, { last: number; count: number }>();
+    for (const at of observed) {
+      const start = bucketStart(at, intervalMs);
+      const existing = buckets.get(start);
+      if (existing) {
+        existing.last = at;
+        existing.count += 1;
+      } else {
+        buckets.set(start, { last: at, count: 1 });
+      }
+    }
+    const ordered = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
 
     const points: HistoryPoint[] = [];
-    for (const at of sampled) {
+    for (const [start, bucket] of ordered) {
+      const at = bucket.last;
       const upTo = entriesUpTo(entries, at);
       const positions = replayLedger(upTo);
 
@@ -190,17 +261,32 @@ export class PortfolioHistoryService {
       if (priced === 0 && missing > 0) continue;
 
       points.push({
-        at: new Date(at).toISOString(),
+        at: new Date(start).toISOString(),
+        observedAt: new Date(at).toISOString(),
         liquidationValue: total.toFixed(2),
         pricedProducts: priced,
         missingProducts: missing,
+        observations: bucket.count,
       });
+    }
+
+    /*
+     * ÇİZGİDEKİ BOŞLUKLAR: ilk ve son nokta arasında KAÇ kova olması
+     * gerekiyordu ile kaç nokta çizildiği arasındaki fark. Kullanıcı "15
+     * dakikalık seçtim ama çizgi kopuk" dediğinde cevabı burada.
+     */
+    let emptyIntervals = 0;
+    if (points.length >= 2) {
+      const first = Date.parse(points[0]!.at);
+      const last = Date.parse(points[points.length - 1]!.at);
+      const expected = Math.round((last - first) / intervalMs) + 1;
+      emptyIntervals = Math.max(0, expected - points.length);
     }
 
     // Yalnızca ÇİZİLEN pencere sayılır: grafikte görünmeyen bir işlem çizgiyi
     // de kırmaz, dolayısıyla uyarı gerektirmez.
-    const from = points.length > 0 ? Date.parse(points[0]!.at) : 0;
-    const to = points.length > 0 ? Date.parse(points[points.length - 1]!.at) : 0;
+    const from = points.length > 0 ? Date.parse(points[0]!.observedAt) : 0;
+    const to = points.length > 0 ? Date.parse(points[points.length - 1]!.observedAt) : 0;
     const ledgerChangesInRange =
       points.length < 2
         ? 0
@@ -211,9 +297,11 @@ export class PortfolioHistoryService {
           }).length;
 
     return {
-      range,
+      interval,
       points,
-      medianStepMs: medianStep(points.map((point) => Date.parse(point.at))),
+      // Verinin GERÇEK sıklığı ham gözlemlerden ölçülür, kovalardan değil.
+      medianStepMs: medianStep(observed),
+      emptyIntervals,
       empty: points.length === 0,
       ledgerChangesInRange,
     };
@@ -226,18 +314,6 @@ function entriesUpTo(entries: readonly LedgerEntry[], at: number): LedgerEntry[]
     const instant = Date.parse(entry.occurredAtInstant);
     return Number.isFinite(instant) && instant <= at;
   });
-}
-
-/** Eşit aralıkla seyreltir; ilk ve SON nokta korunur. */
-function thin(values: readonly number[], max: number): number[] {
-  if (values.length <= max) return [...values];
-  const step = (values.length - 1) / (max - 1);
-  const out: number[] = [];
-  for (let index = 0; index < max; index += 1) {
-    out.push(values[Math.round(index * step)]!);
-  }
-  // Yuvarlama yüzünden tekrar eden değer kalabilir.
-  return [...new Set(out)];
 }
 
 function medianStep(times: readonly number[]): number | null {

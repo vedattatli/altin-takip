@@ -23,10 +23,15 @@ import { Card, SectionTitle } from "./ui";
  * o ürünün var olmadığını düşündürürdü; oysa bilinmeyen şey yalnızca fiyat.
  */
 
+/*
+ * Başlık sırası ve adları, "Varlık türü" açılır listesiyle AYNIDIR
+ * (`SELECT_GROUPS`, ledger-forms.tsx). İki ekranda farklı sıra veya farklı ad
+ * kullanmak, aynı katalogu iki ayrı şeymiş gibi gösterirdi.
+ */
 const GROUPS: readonly { id: string; title: string; categories: readonly ProductCategory[] }[] = [
-  { id: "altin", title: "Altın", categories: ["gram", "kulce", "ziynet", "ayarli"] },
+  { id: "altin", title: "Altınlar", categories: ["gram", "kulce", "ayarli", "ziynet"] },
+  { id: "doviz", title: "Döviz", categories: ["doviz"] },
   { id: "gumus", title: "Gümüş", categories: ["gumus"] },
-  { id: "para", title: "Para", categories: ["doviz"] },
 ];
 
 /**

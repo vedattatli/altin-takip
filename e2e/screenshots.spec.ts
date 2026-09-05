@@ -25,10 +25,10 @@ test("panel ekran görüntüsü", async ({ page }, testInfo) => {
   await gotoReady(page, "/islemler");
   // Varsayılan listedeki altı üründen dördü: ekran görüntüsü gerçek akışı
   // yansıtsın diye gizlenmiş ürün kullanılmaz.
-  await addPurchase(page, { product: "Gram Altın", quantity: "24,5", unitPrice: "5180" });
-  await addPurchase(page, { product: "Tam Altın", quantity: "6", unitPrice: "38400" });
-  await addPurchase(page, { product: "Ata Altın", quantity: "4", unitPrice: "39750" });
-  await addPurchase(page, { product: "Çeyrek Altın", quantity: "12", unitPrice: "8950" });
+  await addPurchase(page, { product: "gram-altin", quantity: "24,5", unitPrice: "5180" });
+  await addPurchase(page, { product: "yeni-tam", quantity: "6", unitPrice: "38400" });
+  await addPurchase(page, { product: "ata-altin", quantity: "4", unitPrice: "39750" });
+  await addPurchase(page, { product: "yeni-ceyrek", quantity: "12", unitPrice: "8950" });
 
   await gotoReady(page, "/panel");
   await expect(page.getByTestId("holdings-list")).toBeVisible();

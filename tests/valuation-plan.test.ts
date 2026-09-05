@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { GOLD_PRODUCTS } from "@/domain/catalog";
 import type { PriceQuote, PriceSnapshot } from "@/prices/types";
 import { validateUsableQuote } from "@/prices/validate";
 import {
-  displayProductName,
   HYBRID_MARKET_ID,
   HYBRID_PROVIDER_ID,
   isPrimaryProduct,
@@ -208,23 +209,44 @@ describe("2. kaynak karıştırma imkânsızdır", () => {
 });
 
 describe("3. görünüm grupları", () => {
-  it("yeni ve eski ziynet tek adla gösterilir", () => {
-    expect(displayProductName("yeni-ceyrek", "Yeni Çeyrek")).toBe("Çeyrek Altın");
-    expect(displayProductName("eski-ceyrek", "Eski Çeyrek")).toBe("Çeyrek Altın");
-    expect(displayProductName("yeni-tam", "Yeni Tam")).toBe("Tam Altın");
+  /*
+   * ÜRÜN ADI ARTIK BİRLEŞTİRİLMİYOR.
+   *
+   * "Yeni Çeyrek" bir zamanlar arayüzde "Çeyrek Altın" diye gösteriliyordu.
+   * Sonuç: kullanıcı hangisini eklediğini panelde göremiyor, seçim listesi ile
+   * panel farklı adlar yazıyordu. Her ekran artık katalog adını gösterir;
+   * grupların kalan tek işi panelin "Varlıklarım / Diğer varlıklar" ayrımıdır.
+   */
+  it("ürün adı üreten bir yardımcı YOKTUR", () => {
+    const source = readFileSync(join(process.cwd(), "src", "prices", "valuation-plan.ts"), "utf8");
+    expect(source).not.toMatch(/displayProductName/);
+    // Ekranlar katalog adını doğrudan okur.
+    for (const file of ["dashboard-view.tsx", "transactions-view.tsx", "ledger-forms.tsx"]) {
+      const view = readFileSync(join(process.cwd(), "src", "components", file), "utf8");
+      expect(view, file).not.toMatch(/displayProductName/);
+    }
   });
 
-  it("aynı gruptan iki kayıt varsa satırlar ayırt edilebilir", () => {
-    expect(displayProductName("eski-ceyrek", "Eski Çeyrek", { distinguish: true })).toBe(
-      "Çeyrek Altın (Eski Çeyrek)",
-    );
-    // Tek üyeli grupta parantez EKLENMEZ.
-    expect(displayProductName("gram-altin", "Gram Altın", { distinguish: true })).toBe("Gram Altın");
-  });
-
-  it("grup dışı ürün katalog adıyla görünür", () => {
+  it("grup üyeliği yalnızca panel ayrımı içindir", () => {
+    expect(isPrimaryProduct("yeni-ceyrek")).toBe(true);
+    expect(isPrimaryProduct("eski-ceyrek")).toBe(true);
     expect(isPrimaryProduct("has-altin")).toBe(false);
-    expect(displayProductName("has-altin", "Has Altın")).toBe("Has Altın");
+  });
+
+  /*
+   * İki ekran aynı katalogu gösterir: "Varlık türü" açılır listesi ve fiyat
+   * sayfası. Başlık sırası veya adı ayrışırsa kullanıcı aynı ürünü iki farklı
+   * yerde farklı bir grupta arar.
+   */
+  it("seçim listesi ile fiyat sayfası aynı başlık sırasını kullanır", () => {
+    const titles = (file: string, constName: string): string[] => {
+      const source = readFileSync(join(process.cwd(), "src", "components", file), "utf8");
+      const block = source.slice(source.indexOf(`const ${constName}`), source.indexOf("];", source.indexOf(`const ${constName}`)));
+      return [...block.matchAll(/title: "([^"]+)"/g)].map((match) => match[1]!);
+    };
+    const expected = ["Altınlar", "Döviz", "Gümüş"];
+    expect(titles("ledger-forms.tsx", "SELECT_GROUPS")).toEqual(expected);
+    expect(titles("price-list-view.tsx", "GROUPS")).toEqual(expected);
   });
 
   it("varsayılan listede tam olarak altı ad vardır", () => {

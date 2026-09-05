@@ -56,7 +56,7 @@ test.describe("portföy akışı", () => {
     await page.getByRole("link", { name: "İşlemler" }).first().click();
     await page.waitForURL("**/islemler");
 
-    await addPurchase(page, { product: "Gram Altın", quantity: "10", unitPrice: "5000" });
+    await addPurchase(page, { product: "gram-altin", quantity: "10", unitPrice: "5000" });
     await expect(page.getByTestId("transaction-list").getByRole("listitem")).toHaveCount(1);
     await expect(page.getByText("Alış eklendi.")).toBeVisible();
 
@@ -87,9 +87,9 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
     await gotoReady(page, "/islemler");
 
-    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "3500" });
-    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "4200" });
-    await addPurchase(page, { product: "Gram Altın", quantity: "5", unitPrice: "3700" });
+    await addPurchase(page, { product: "gram-altin", quantity: "5", unitPrice: "3500" });
+    await addPurchase(page, { product: "gram-altin", quantity: "5", unitPrice: "4200" });
+    await addPurchase(page, { product: "gram-altin", quantity: "5", unitPrice: "3700" });
 
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/57\.000,00/);
@@ -103,8 +103,8 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
     await gotoReady(page, "/islemler");
 
-    await addPurchase(page, { product: "Gram Altın", quantity: "15", unitPrice: "3800" });
-    await addSale(page, { product: "Gram Altın", quantity: "4", unitPrice: "4200" });
+    await addPurchase(page, { product: "gram-altin", quantity: "15", unitPrice: "3800" });
+    await addSale(page, { product: "gram-altin", quantity: "4", unitPrice: "4200" });
     await expect(page.getByText("Satış eklendi.")).toBeVisible();
     await expect(page.getByTestId("transaction-list")).toContainText("Satış");
 
@@ -121,7 +121,7 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
     await gotoReady(page, "/islemler");
 
-    await addPurchase(page, { product: "Gram Altın", quantity: "10", unitPrice: "5000", workmanship: "500", fees: "100" });
+    await addPurchase(page, { product: "gram-altin", quantity: "10", unitPrice: "5000", workmanship: "500", fees: "100" });
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/50\.600,00/);
     await expect(page.getByTestId("holdings-list")).toContainText("5.060,00");
@@ -134,7 +134,7 @@ test.describe("portföy akışı", () => {
     await gotoReady(page, "/islemler");
 
     await page.getByTestId("add-opening").click();
-    await page.getByLabel("Varlık türü").selectOption({ label: "Gram Altın" });
+    await page.getByLabel("Varlık türü").selectOption("gram-altin");
     await page.getByLabel(/^Miktar/).fill("100");
     await page.getByTestId("opening-next").click();
 
@@ -170,7 +170,7 @@ test.describe("portföy akışı", () => {
     await gotoReady(page, "/islemler");
 
     await page.getByTestId("add-opening").click();
-    await page.getByLabel("Varlık türü").selectOption({ label: "Çeyrek Altın" });
+    await page.getByLabel("Varlık türü").selectOption("yeni-ceyrek");
     await page.getByLabel(/^Miktar/).fill("14");
     await page.getByTestId("opening-next").click();
     await page.getByTestId("cost-method-ACTUAL").click();
@@ -211,7 +211,7 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Gram Altın", quantity: "4", unitPrice: "5000" });
+    await addPurchase(page, { product: "gram-altin", quantity: "4", unitPrice: "5000" });
 
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/20\.000,00/);
@@ -240,7 +240,7 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Gram Altın", quantity: "2", unitPrice: "5000" });
+    await addPurchase(page, { product: "gram-altin", quantity: "2", unitPrice: "5000" });
 
     await page.getByRole("button", { name: "Düzelt" }).first().click();
     await page.getByLabel(/^Miktar/).fill("6");
@@ -275,8 +275,8 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Gram Altın", quantity: "3", unitPrice: "5000" });
-    await addSale(page, { product: "Gram Altın", quantity: "10", unitPrice: "5500" });
+    await addPurchase(page, { product: "gram-altin", quantity: "3", unitPrice: "5000" });
+    await addSale(page, { product: "gram-altin", quantity: "10", unitPrice: "5500" });
 
     await expect(page.getByText(/Satış miktarı elinizdeki miktarı aşamaz/)).toBeVisible();
   });
@@ -288,7 +288,7 @@ test.describe("portföy akışı", () => {
 
     await gotoReady(page, "/islemler");
     await page.getByTestId("add-buy").click();
-    await page.getByLabel("Varlık türü").selectOption({ label: "Çeyrek Altın" });
+    await page.getByLabel("Varlık türü").selectOption("yeni-ceyrek");
     await page.getByLabel(/^Miktar/).fill("1,5");
     await page.getByLabel(/^Birim alış fiyatı/).fill("9000");
     await page.getByTestId("submit-buy").click();
@@ -446,7 +446,7 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, username);
 
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Tam Altın", quantity: "3", unitPrice: "38500" });
+    await addPurchase(page, { product: "yeni-tam", quantity: "3", unitPrice: "38500" });
 
     for (const path of ["/panel", "/islemler", "/islemler?ekle=mevcut", "/islemler?ekle=satis", "/ayarlar"]) {
       await gotoReady(page, path);
@@ -463,7 +463,7 @@ test.describe("portföy akışı", () => {
 
     await loginAsUser(page, first);
     await gotoReady(page, "/islemler");
-    await addPurchase(page, { product: "Gram Altın", quantity: "7", unitPrice: "5000" });
+    await addPurchase(page, { product: "gram-altin", quantity: "7", unitPrice: "5000" });
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/35\.000,00/);
 
