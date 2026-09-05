@@ -1,6 +1,7 @@
 import { numberFromEnv } from "@/lib/env";
 import "server-only";
 
+import { devOnlyProviderBlocked } from "@/prices/dev-gate";
 import { MOCK_PROVIDER_META } from "@/prices/mock-provider";
 import {
   SCREEN_OBSERVATION_FRESH_MS,
@@ -341,12 +342,12 @@ export class PriceSourceService {
    *   - Planlanan sağlayıcı veri vermiyorsa ürün fiyatsız kalır; başka
    *     sağlayıcının fiyatı o ürüne YAZILMAZ.
    *   - Alış ve satış hep aynı kaydın iki alanıdır; karıştırılamaz.
-   *   - Kullanıcının izni olmayan kaynak plana girmez.
+   *   - Yöneticinin kapattığı kaynak plana girmez.
    *
-   * Kullanıcının hiçbir plan kaynağına izni yoksa null döner ve klasik
-   * tek-sağlayıcılı yol kullanılır.
+   * Plan hiç fiyat üretemezse null döner ve klasik tek-sağlayıcılı yol
+   * kullanılır.
    */
-  private async hybridSnapshotForScope(scope: DataScope, now: number): Promise<ActiveSnapshotResult | null> {
+  private async hybridSnapshotForScope(now: number): Promise<ActiveSnapshotResult | null> {
     const allowedCodes: string[] = [...PLAN_PROVIDER_CODES];
     const rows = await this.backend.comparePriceQuotes(allowedCodes);
     const byProvider = new Map(rows.map((row) => [row.providerCode, row]));
@@ -355,30 +356,59 @@ export class PriceSourceService {
     const memberProviders: Record<string, PriceSourceMember> = {};
     const usedProviders = new Set<string>();
     let newest: number | null = null;
+    let usableCount = 0;
+    let anyStale = false;
 
     for (const productId of Object.keys(VALUATION_SOURCE_PLAN)) {
       const providerCode = plannedProviderFor(productId);
       if (providerCode === null) continue;
       if (!allowedCodes.includes(providerCode)) continue;
       const row = byProvider.get(providerCode);
-      if (!row) continue;
+      /*
+       * Yöneticinin kapattığı kaynak plana GİRMEZ.
+       *
+       * Yazma yolu `enabled` bayrağını zorluyordu ama okuma yolunda karşılığı
+       * yoktu: kapatılan kaynağın son yazdığı satırlar kendi bayatlık eşiği
+       * dolana kadar (90 dk) fiyat vermeye devam ediyordu. Yöneticinin tek
+       * kapatma düğmesi böylece hiçbir şey yapmamış oluyordu.
+       */
+      if (!row || !row.enabled) continue;
+
+      const memberStaleAfterMs = PLAN_STALE_AFTER_MS[providerCode] ?? staleAfterMs();
+      /*
+       * Bir kayıt, kendi kaynağının eşiğine göre HÂLÂ kullanılabilir mi?
+       * `validateUsableQuote` ile aynı ölçüdür; burada yalnızca hangi kaydın
+       * seçileceğine ve kaç ürünün gerçekten fiyatlandığına karar verir.
+       */
+      const usable = (quote: { status: string; fetchedAt: string } | undefined): boolean => {
+        if (!quote || quote.status !== "ok") return false;
+        const parsedAt = Date.parse(quote.fetchedAt);
+        return Number.isFinite(parsedAt) && now - parsedAt <= memberStaleAfterMs;
+      };
 
       // Ürünün kendi kaydı; yoksa ORTAK KATEGORİ fiyatı (aynı sağlayıcıdan).
       const own = row.quotes.find((quote) => quote.canonicalProductId === productId);
       const sharedFromId = SHARED_CATEGORY_QUOTE[productId];
       const shared =
-        own === undefined && sharedFromId !== undefined && plannedProviderFor(sharedFromId) === providerCode
+        sharedFromId !== undefined && plannedProviderFor(sharedFromId) === providerCode
           ? row.quotes.find((quote) => quote.canonicalProductId === sharedFromId)
           : undefined;
-      const source = own ?? shared;
+      /*
+       * BAYAT "KENDİ" KAYDI, TAZE ORTAK KATEGORİ FİYATINI GÖLGELEMEZ.
+       *
+       * `current_price_quotes` satırları hiç silinmez: ürün kaynaktan düşse
+       * bile son yazılan satır orada kalır. Yalnızca `own ?? shared` deseydik
+       * bir kez okunmuş "eski çeyrek" satırı, taze kategori fiyatı dururken
+       * ürünü sonsuza dek fiyatsız gösterirdi.
+       */
+      const source = usable(own) ? own : usable(shared) ? shared : (own ?? shared);
       if (!source) continue;
 
-      const memberStaleAfterMs = PLAN_STALE_AFTER_MS[providerCode] ?? staleAfterMs();
       memberProviders[productId] = {
         provider: providerCode,
         market: row.marketId,
         staleAfterMs: memberStaleAfterMs,
-        ...(own === undefined && shared !== undefined ? { sharedFrom: sharedFromId } : {}),
+        ...(shared !== undefined && source === shared ? { sharedFrom: sharedFromId } : {}),
       };
       quotes[productId] = {
         productId,
@@ -392,9 +422,20 @@ export class PriceSourceService {
         status: source.status === "ok" ? "ok" : "stale",
       };
       usedProviders.add(providerCode);
+      if (usable(source)) usableCount += 1;
 
+      /*
+       * BAYATLIK KAYNAK BAZINDA ÖLÇÜLÜR.
+       *
+       * `newest` üç kaynağın EN YENİ kaydıdır; tek başına durum işareti
+       * olamaz. Tek sağlıklı kaynak, ölmüş bir kaynağın taşıdığı ürünler
+       * "Fiyat yok" olurken bütün planı "Güncel" gösteriyordu.
+       */
       const parsed = Date.parse(source.fetchedAt);
-      if (Number.isFinite(parsed)) newest = newest === null ? parsed : Math.max(newest, parsed);
+      if (Number.isFinite(parsed)) {
+        newest = newest === null ? parsed : Math.max(newest, parsed);
+        if (now - parsed > memberStaleAfterMs) anyStale = true;
+      }
     }
 
     const productCount = Object.keys(quotes).length;
@@ -430,11 +471,10 @@ export class PriceSourceService {
         },
         quotes,
         fetchedAt,
-        status: productCount === 0 ? "unavailable" : "ok",
-        error:
-          productCount === 0
-            ? "Planlanan fiyat kaynaklarından kullanılabilir fiyat alınamadı. Başka bir kaynağın fiyatı gösterilmez."
-            : null,
+        // Fiyatsız plan yukarıda null döndüğü için buraya yalnızca en az bir
+        // kayıt varken gelinir.
+        status: "ok",
+        error: null,
       },
       source: {
         providerCode: HYBRID_PROVIDER_ID,
@@ -446,13 +486,10 @@ export class PriceSourceService {
         upstreamSourceLabel: null,
         isRealMarketData: false,
         lastQuoteAt: newest === null ? null : new Date(newest).toISOString(),
-        status:
-          productCount === 0
-            ? "unavailable"
-            : newest !== null && now - newest > snapshotStaleAfter
-              ? "stale"
-              : "ok",
-        coverage: productCount,
+        // Plan kaynaklarından biri bile kendi eşiğini aştıysa durum "bayat"tır.
+        status: anyStale ? "stale" : "ok",
+        // Kaydı olan ürün değil, GERÇEKTEN kullanılabilir fiyatı olan ürün.
+        coverage: usableCount,
         // Plan kullanıcı tarafından değiştirilmez; teknik kaynak seçimi yoktur.
         userSelectable: false,
         planProviderCodes: [...usedProviders],
@@ -478,7 +515,7 @@ export class PriceSourceService {
     const planApplies =
       providerCode === null || (PLAN_PROVIDER_CODES as readonly string[]).includes(providerCode);
     if (planApplies) {
-      const hybrid = await this.hybridSnapshotForScope(scope, now);
+      const hybrid = await this.hybridSnapshotForScope(now);
       if (hybrid) return hybrid;
     }
     if (!providerCode) {
@@ -502,7 +539,9 @@ export class PriceSourceService {
     }
 
     const row = await this.backend.currentPriceQuotes(providerCode);
-    if (!row) {
+    // Kapatılmış kaynak fiyat vermez: yazma yolundaki `enabled` kuralının
+    // okuma yolundaki karşılığı.
+    if (!row || !row.enabled) {
       return {
         snapshot: null,
         source: {
@@ -566,29 +605,6 @@ export class PriceSourceService {
         actor.profile.id,
         "user",
         typeof reason === "string" ? reason.slice(0, 200) : "Kullanıcı seçimi",
-      );
-      return { changed: result.changed, providerCode: result.providerCode };
-    } catch (error) {
-      if (error instanceof ProviderNotSelectableError) throw conflict(error.message);
-      throw error;
-    }
-  }
-
-  /** Yönetici bir kullanıcının kaynağını değiştirir (denetim kaydı üretir). */
-  async selectSourceForUser(
-    admin: AdminActor,
-    scopeUserId: string,
-    providerCode: string,
-    reason: string,
-  ): Promise<{ changed: boolean; providerCode: string }> {
-    await this.ensureCatalog();
-    try {
-      const result = await this.backend.setPricePreference(
-        adminScope(admin, scopeUserId),
-        providerCode,
-        admin.profile.id,
-        "admin",
-        reason.slice(0, 200),
       );
       return { changed: result.changed, providerCode: result.providerCode };
     } catch (error) {
@@ -690,7 +706,8 @@ export class PriceSourceService {
        * devre dışıydı, üretimde Kapalıçarşı kaynağı bu yüzden kapalı kaldı ve
        * gram altın fiyatsız göründü.
        *
-       * Kural sunucudakiyle (`setPriceProviderFlags`) aynıdır.
+       * Lisans kuralı sunucudakiyle (`setPriceProviderFlags`) aynıdır; ek
+       * olarak test verisi sağlayıcısı üretim ortamında etkinleştirilemez.
        */
       canEnable: boolean;
       blockedReason: string | null;
@@ -711,7 +728,10 @@ export class PriceSourceService {
         selectable: view?.selectable ?? false,
         canEnable:
           ACTIVATABLE_LICENSE_STATUS.includes(row.licenseStatus) &&
-          !(row.licenseStatus === "LICENSED" && !row.redistributionAllowed),
+          !(row.licenseStatus === "LICENSED" && !row.redistributionAllowed) &&
+          // Test verisi sağlayıcısı üretimde açılamaz: düğme "etkinleştirildi"
+          // deyip katalog eşitlemesinde sessizce geri alınıyordu.
+          !(row.licenseStatus === "DEV_ONLY" && devOnlyProviderBlocked()),
         blockedReason: view?.blockedReason ?? null,
         missingConfig: view?.missingConfig ?? [],
         advertisedCapabilities: view?.advertisedCapabilities ?? [],

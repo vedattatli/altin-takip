@@ -43,10 +43,9 @@ test.describe("görünüm modu", () => {
     await expect(page.getByTestId("stat-unrealized")).toHaveCount(0);
     await expect(page.getByTestId("stat-realized")).toHaveCount(0);
     await expect(page.getByTestId("stat-total-pnl")).toHaveCount(0);
-    await expect(page.getByTestId("active-price-source")).toHaveCount(0);
 
     // "Gerçekleşmemiş" kelimesi basit modda geçmez; sadece "Kâr/Zarar" yazar.
-    await expect(page.locator("body")).not.toContainText("Gerçekleşmemiş K/Z");
+    await expect(page.locator("body")).not.toContainText("Gerçekleşmemiş kâr/zarar");
     await expect(page.locator("body")).toContainText("Kâr/Zarar");
 
     await expectNoHorizontalOverflow(page);
@@ -60,14 +59,14 @@ test.describe("görünüm modu", () => {
     await expect(page.getByTestId("add-buy")).toBeVisible();
     await expect(page.getByTestId("add-opening")).toBeVisible();
     await expect(page.getByTestId("add-sell")).toHaveCount(0);
-    // Basit modda birincil düğme sade adıyla görünür.
-    await expect(page.getByTestId("add-buy")).toContainText("Altın Ekle");
+    // Basit modda birincil düğme gündelik diliyle yazılır; "alış" jargonu geçmez.
+    await expect(page.getByTestId("add-buy")).toContainText("Yeni aldığım altını ekle");
 
     // Tek tıkla detaylı moda geçilir.
     await page.getByTestId("view-mode-toggle").click();
     await expect(page.getByTestId("view-mode-toggle")).toHaveAttribute("data-mode", "detayli");
     await expect(page.getByTestId("add-sell")).toBeVisible();
-    await expect(page.getByTestId("add-buy")).toContainText("Yeni Alış Ekle");
+    await expect(page.getByTestId("add-buy")).toContainText("Yeni alış ekle");
   });
 
   test("mod tercihi sayfa değişince ve yenilenince korunur", async ({ page }) => {

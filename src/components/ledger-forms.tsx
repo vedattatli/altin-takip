@@ -22,10 +22,11 @@ import {
 } from "@/domain/accounting";
 import { getProduct, GOLD_PRODUCTS } from "@/domain/catalog";
 import type { GoldProduct, ProductCategory } from "@/domain/types";
-import { formatDateTime, formatMoney, formatQuantity } from "@/lib/format";
+import { formatMoney, formatQuantity } from "@/lib/format";
 import type { PriceQuote } from "@/prices/types";
 import { usableQuoteOrNull } from "@/prices/validate";
 import { usePortfolio } from "@/state/portfolio-store";
+import { useViewMode } from "@/state/view-mode";
 import { marketLabel, useClientClock } from "./price-source-line";
 import { Alert, Card, Field, cx } from "./ui";
 
@@ -40,14 +41,10 @@ import { Alert, Card, Field, cx } from "./ui";
 
 type PriceMode = "UNIT_PRICE" | "TOTAL_AMOUNT";
 
-function firstErrorText(errors: CommandErrors): string | null {
-  return Object.values(errors).find(Boolean) ?? null;
-}
-
 /**
  * VARLIK SEÇİMİ — TEK LİSTE, BAŞLIKLARA AYRILMIŞ, FİYATLI
  *
- * Katalogdaki HER ürün tek bir açılır listede, üç başlık altında görünür:
+ * Ürünler tek bir açılır listede, üç başlık altında görünür:
  * Altınlar → Döviz → Gümüş. Ürünler KATALOG ADIYLA yazılır: "Yeni Çeyrek" ve
  * "Eski Çeyrek" ayrı satırlardır, birleştirilip "Çeyrek Altın" denmez —
  * kullanıcı hangisini eklediğini seçim anında bilmelidir.
@@ -64,6 +61,11 @@ function firstErrorText(errors: CommandErrors): string | null {
  *
  * Fiyatı olmayan ürün GİZLENMEZ, "fiyat yok" yazılır — seçilebilir olduğu hâlde
  * neden değerlenemeyeceğini baştan bilir.
+ *
+ * SATIŞTA LİSTE KISALIR: `productIds` verilirse yalnızca o ürünler yazılır.
+ * Satılacak bir şeyin listede olması için elde bulunması gerekir; olmayan ürünü
+ * seçtirip gönderimde reddetmek kullanıcıyı boşuna dolaştırıyordu. Aşırı satış
+ * denetimi yerinde durur (hem bu formda hem sunucuda).
  */
 const SELECT_GROUPS: readonly { title: string; categories: readonly ProductCategory[] }[] = [
   { title: "Altınlar", categories: ["gram", "kulce", "ayarli", "ziynet"] },
@@ -79,14 +81,15 @@ function ProductSelect({
   value,
   onChange,
   error,
-  disabled,
+  productIds,
   priceKind,
 }: {
   id: string;
   value: string;
   onChange: (productId: string) => void;
   error?: string;
-  disabled?: boolean;
+  /** Verilirse liste bu ürünlerle sınırlanır; boş gelirse katalogun tamamı yazılır. */
+  productIds?: readonly string[];
   /** Hangi yönün fiyatı yazılacak: alışta "yeniden alım", satışta "bozdurma". */
   priceKind: "liquidation" | "replacement";
 }) {
@@ -98,6 +101,11 @@ function ProductSelect({
   const now = clock ?? (Number.isFinite(fallback) ? fallback : 0);
 
   const groups = useMemo(() => {
+    // Boş liste geldiğinde katalogun tamamına dönülür: seçeneksiz bir açılır
+    // liste kullanıcıya hiçbir şey söylemez.
+    const allowed = productIds && productIds.length > 0 ? new Set(productIds) : null;
+    const catalog = allowed ? GOLD_PRODUCTS.filter((product) => allowed.has(product.id)) : GOLD_PRODUCTS;
+
     const label = (product: GoldProduct): string => {
       const quote = usableQuoteOrNull(snapshot, product.id, now);
       if (!quote) return `${product.name} — fiyat yok`;
@@ -108,12 +116,12 @@ function ProductSelect({
 
     const listed = SELECT_GROUPS.map((group) => ({
       title: group.title,
-      products: GOLD_PRODUCTS.filter((product) => group.categories.includes(product.category)).map(
+      products: catalog.filter((product) => group.categories.includes(product.category)).map(
         (product) => ({ id: product.id, label: label(product) }),
       ),
     })).filter((group) => group.products.length > 0);
 
-    const rest = GOLD_PRODUCTS.filter((product) => !SELECT_GROUPED_CATEGORIES.has(product.category));
+    const rest = catalog.filter((product) => !SELECT_GROUPED_CATEGORIES.has(product.category));
     if (rest.length > 0) {
       listed.push({
         title: "Diğer",
@@ -121,7 +129,7 @@ function ProductSelect({
       });
     }
     return listed;
-  }, [snapshot, now, priceKind]);
+  }, [snapshot, now, priceKind, productIds]);
 
   return (
     <Field
@@ -130,8 +138,8 @@ function ProductSelect({
       error={error}
       hint={
         priceKind === "replacement"
-          ? "Yanındaki fiyat, bugün almanın yaklaşık maliyetidir (kuyumcunun satış fiyatı)."
-          : "Yanındaki fiyat, bugün bozdurursanız alacağınız yaklaşık tutardır (kuyumcunun alış fiyatı)."
+          ? "Listedeki fiyat, bugün alsanız ödeyeceğiniz fiyattır."
+          : "Listedeki fiyat, bugün bozdursanız alacağınız fiyattır."
       }
     >
       <select
@@ -140,7 +148,6 @@ function ProductSelect({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={Boolean(error)}
-        disabled={disabled}
       >
         {groups.map((group) => (
           <optgroup key={group.title} label={group.title}>
@@ -249,12 +256,12 @@ function QuantityField({
       label={`Miktar (${unit})`}
       htmlFor={id}
       error={error}
-      hint={
-        hint ??
-        (integer
-          ? "Bu ürün adet ile takip edilir; pozitif tam sayı girin."
-          : `En fazla ${String(scale)} ondalık basamak girebilirsiniz.`)
-      }
+      /*
+       * İpucu YALNIZCA dışarıdan gelirse yazılır. Beklenen biçimi yer tutucu
+       * gösteriyor; ondalık sınırı aşılırsa ayrıştırıcı alanın altında hata
+       * veriyor. Bilgi kaybolmuyor, ihtiyaç anına erteleniyor.
+       */
+      hint={hint}
     >
       <DecimalInput
         id={id}
@@ -268,7 +275,11 @@ function QuantityField({
   );
 }
 
-/** Tarih zorunlu, saat isteğe bağlı (aynı gün birden fazla işlemde gerçek sırayı belirler). */
+/**
+ * Tarih zorunlu, saat isteğe bağlı (aynı gün birden fazla işlemde gerçek sırayı
+ * belirler). Saat alanı yalnızca DETAYLI modda görünür: saati girilmeyen kayıt
+ * günün başlangıcı sayılır ve sıralama yine deterministiktir.
+ */
 function DateTimeFields({
   formId,
   date,
@@ -284,8 +295,9 @@ function DateTimeFields({
   onTime: (value: string) => void;
   errors: CommandErrors;
 }) {
+  const { isSimple } = useViewMode();
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-2">
+    <div className={cx("grid gap-2", isSimple ? "grid-cols-1" : "grid-cols-[1fr_auto]")}>
       <Field label="İşlem tarihi" htmlFor={`${formId}-date`} error={errors.occurredAt}>
         <input
           id={`${formId}-date`}
@@ -297,17 +309,19 @@ function DateTimeFields({
           aria-invalid={Boolean(errors.occurredAt)}
         />
       </Field>
-      <Field label="Saat" htmlFor={`${formId}-time`} error={errors.occurredTime} hint="İsteğe bağlı">
-        <input
-          id={`${formId}-time`}
-          type="time"
-          className="control tabular min-h-11 w-28"
-          value={time}
-          onChange={(event) => onTime(event.target.value)}
-          aria-invalid={Boolean(errors.occurredTime)}
-          data-testid="occurred-time"
-        />
-      </Field>
+      {isSimple ? null : (
+        <Field label="Saat (isteğe bağlı)" htmlFor={`${formId}-time`} error={errors.occurredTime}>
+          <input
+            id={`${formId}-time`}
+            type="time"
+            className="control tabular min-h-11 w-28"
+            value={time}
+            onChange={(event) => onTime(event.target.value)}
+            aria-invalid={Boolean(errors.occurredTime)}
+            data-testid="occurred-time"
+          />
+        </Field>
+      )}
     </div>
   );
 }
@@ -422,6 +436,7 @@ export function BuyForm({
   onCancel: () => void;
 }) {
   const formId = useId();
+  const { isSimple } = useViewMode();
   const [clientRequestId] = useState(() => createClientRequestId());
   const [state, setState] = useState<BuyState>(() => buyInitial(editing));
   const [errors, setErrors] = useState<CommandErrors>({});
@@ -439,8 +454,14 @@ export function BuyForm({
     pricingInputMode: state.mode,
     unitPrice: state.mode === "UNIT_PRICE" ? state.unitPrice : undefined,
     totalPaid: state.mode === "TOTAL_AMOUNT" ? state.totalPaid : undefined,
-    workmanship: state.workmanship || undefined,
-    fees: state.fees || undefined,
+    /*
+     * Masraf alanları yalnızca UNIT_PRICE modunda ekrandadır ve yalnızca orada
+     * gönderilir: toplam tutar modunda ödenen tutar zaten masrafları içerir,
+     * ekranda görünmeyen bir masraf değeri hem hiçbir toplamı değiştirmez hem
+     * de "Masraflar toplam ödenen tutarı aşamaz." hatasıyla kaydı engelleyebilirdi.
+     */
+    workmanship: state.mode === "UNIT_PRICE" ? state.workmanship || undefined : undefined,
+    fees: state.mode === "UNIT_PRICE" ? state.fees || undefined : undefined,
     note: state.note.trim(),
     clientRequestId,
     }),
@@ -473,11 +494,11 @@ export function BuyForm({
 
   return (
     <Card className="p-4 sm:p-5">
-      <h2 className="text-base font-semibold text-ink">{editing ? "Alışı düzelt" : "Yeni alış ekle"}</h2>
-      <p className="mt-1 text-sm text-muted">
-        Gerçekten ödediğiniz tutarı girin; piyasa fiyatı yalnızca öneridir ve maliyetinizi değiştirmez.
-        {editing ? " Düzeltme eski kaydı iptal edip yerine yeni kayıt oluşturur." : ""}
-      </p>
+      {/* Basit modda başlık, formu açan düğmenin ("Altın Ekle") sözcüğünü tekrarlar. */}
+      <h2 className="text-base font-semibold text-ink">
+        {editing ? "Alışı düzelt" : isSimple ? "Altın ekle" : "Yeni alış ekle"}
+      </h2>
+      <p className="mt-1 text-sm text-muted">Kuyumcuya ödediğiniz tutarı girin.</p>
 
       <form className="mt-4 space-y-4" onSubmit={handleSubmit} noValidate>
         <ProductSelect
@@ -507,11 +528,11 @@ export function BuyForm({
         </div>
 
         <ModeToggle
-          label="Fiyat giriş yöntemi"
+          label="Tutarı nasıl gireceksiniz?"
           value={state.mode}
           options={[
-            { value: "UNIT_PRICE", label: "Birim fiyat + masraflar" },
-            { value: "TOTAL_AMOUNT", label: "Toplam ödenen tutar" },
+            { value: "UNIT_PRICE", label: "Birim fiyat" },
+            { value: "TOTAL_AMOUNT", label: "Ödediğiniz toplam" },
           ]}
           onChange={(value) => update("mode", value)}
         />
@@ -521,7 +542,7 @@ export function BuyForm({
             label="Birim alış fiyatı (TL)"
             htmlFor={`${formId}-unit-price`}
             error={errors.unitPrice}
-            hint="Masraflar hariç, gerçekten ödediğiniz birim fiyat. Ondalık için virgül kullanın (5.400,00 veya 5400)."
+            hint="Masraflar hariç, birim başına ödediğiniz fiyat."
           >
             <DecimalInput
               id={`${formId}-unit-price`}
@@ -533,10 +554,10 @@ export function BuyForm({
           </Field>
         ) : (
           <Field
-            label="Toplam ödenen tutar (TL, bütün masraflar dâhil)"
+            label="Ödediğiniz toplam (TL)"
             htmlFor={`${formId}-total-paid`}
             error={errors.totalPaid}
-            hint="Kuyumcuya gerçekten ödediğiniz toplam. İşçilik ve komisyon bu tutarın İÇİNDEDİR; ikinci kez eklenmez."
+            hint="İşçilik ve komisyon bu tutarın içindedir."
           >
             <DecimalInput
               id={`${formId}-total-paid`}
@@ -548,42 +569,40 @@ export function BuyForm({
           </Field>
         )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field
-            label="İşçilik (TL)"
-            htmlFor={`${formId}-workmanship`}
-            error={errors.workmanship}
-            hint={
-              state.mode === "UNIT_PRICE"
-                ? "İsteğe bağlı. Maliyete eklenir."
-                : "İsteğe bağlı. Yalnızca bilgi amaçlı ayrıştırma; toplam tutarın içindedir."
-            }
-          >
-            <DecimalInput
-              id={`${formId}-workmanship`}
-              value={state.workmanship}
-              onChange={(value) => update("workmanship", value)}
-              placeholder="0"
+        {state.mode === "UNIT_PRICE" ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label="İşçilik (TL)"
+              htmlFor={`${formId}-workmanship`}
               error={errors.workmanship}
-            />
-          </Field>
-          <Field
-            label="Komisyon / diğer masraf (TL)"
-            htmlFor={`${formId}-fees`}
-            error={errors.fees}
-            hint={state.mode === "UNIT_PRICE" ? "İsteğe bağlı. Maliyete eklenir." : "İsteğe bağlı. Toplam tutarın içindedir."}
-          >
-            <DecimalInput
-              id={`${formId}-fees`}
-              value={state.fees}
-              onChange={(value) => update("fees", value)}
-              placeholder="0"
+              hint="Maliyete eklenir."
+            >
+              <DecimalInput
+                id={`${formId}-workmanship`}
+                value={state.workmanship}
+                onChange={(value) => update("workmanship", value)}
+                placeholder="0"
+                error={errors.workmanship}
+              />
+            </Field>
+            <Field
+              label="Komisyon / diğer masraf (TL)"
+              htmlFor={`${formId}-fees`}
               error={errors.fees}
-            />
-          </Field>
-        </div>
+              hint="Maliyete eklenir."
+            >
+              <DecimalInput
+                id={`${formId}-fees`}
+                value={state.fees}
+                onChange={(value) => update("fees", value)}
+                placeholder="0"
+                error={errors.fees}
+              />
+            </Field>
+          </div>
+        ) : null}
 
-        <Field label="Not" htmlFor={`${formId}-note`} error={errors.note} hint="İsteğe bağlı.">
+        <Field label="Not" htmlFor={`${formId}-note`} error={errors.note}>
           <textarea
             id={`${formId}-note`}
             className="control resize-y"
@@ -596,12 +615,12 @@ export function BuyForm({
         </Field>
 
         {preview?.totalPaid ? (
-          <PreviewBox label="Toplam edinim maliyeti" value={formatMoney(preview.totalPaid)}>
+          <PreviewBox label="Ödediğiniz toplam" value={formatMoney(preview.totalPaid)}>
+            {/* Girilen fiyat ile masraflı birim maliyet AYRI kalır; toplam tutar modunda girilen fiyat yoktur ve uydurulmaz. */}
             <p className="mt-1 text-xs text-muted" data-testid="buy-preview-prices">
               {preview.quotedAcquisitionUnitPrice
-                ? `Girilen birim fiyat: ${formatMoney(preview.quotedAcquisitionUnitPrice)} · `
-                : ""}
-              Masraflar dâhil efektif birim maliyet: {formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}
+                ? `Girdiğiniz birim fiyat: ${formatMoney(preview.quotedAcquisitionUnitPrice)} · masraflarla birim maliyet: ${formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}`
+                : `Masraflarla birim maliyet: ${formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}`}
             </p>
           </PreviewBox>
         ) : null}
@@ -679,7 +698,10 @@ export function SellForm({
 }) {
   const formId = useId();
   const [clientRequestId] = useState(() => createClientRequestId());
-  const openHoldings = summary.holdings.filter((holding) => dec(holding.position.quantity).greaterThan(0));
+  const openHoldings = useMemo(
+    () => summary.holdings.filter((holding) => dec(holding.position.quantity).greaterThan(0)),
+    [summary.holdings],
+  );
   const [state, setState] = useState<SellState>(() =>
     sellInitial(editing, openHoldings[0]?.product.id ?? "gram-altin"),
   );
@@ -696,6 +718,14 @@ export function SellForm({
       ? toDecimalString(dec(available ?? "0").plus(dec(editing.quantity)))
       : (available ?? "0");
 
+  /* Satılacak bir şeyin listede olması için elde bulunması gerekir; düzeltmede
+   * düzeltilen kaydın ürünü pozisyon kapanmış olsa da listede kalır. */
+  const sellableProductIds = useMemo(() => {
+    const ids = openHoldings.map((holding) => holding.product.id);
+    if (editing && !ids.includes(editing.productId)) ids.push(editing.productId);
+    return ids;
+  }, [openHoldings, editing]);
+
   const command = useMemo<SellCommand>(
     () => ({
     kind: "SELL",
@@ -706,7 +736,9 @@ export function SellForm({
     pricingInputMode: state.mode,
     unitPrice: state.mode === "UNIT_PRICE" ? state.unitPrice : undefined,
     netProceeds: state.mode === "TOTAL_AMOUNT" ? state.netProceeds : undefined,
-    fees: state.fees || undefined,
+    /* Masraf alanı yalnızca birim fiyat modunda ekrandadır: elinize geçen tutar
+     * zaten masraf düşülmüş hâlidir, görünmeyen bir masraf oraya karışmamalı. */
+    fees: state.mode === "UNIT_PRICE" ? state.fees || undefined : undefined,
     note: state.note.trim(),
     clientRequestId,
     }),
@@ -732,7 +764,7 @@ export function SellForm({
         quantity:
           dec(availableForSale).isZero()
             ? `Elinizde satılabilir ${product?.name ?? "ürün"} bulunmuyor.`
-            : `Satış miktarı elinizdeki miktarı aşamaz. Mevcut: ${formatQuantity(availableForSale, state.productId)}.`,
+            : `Elinizdeki miktardan fazlasını satamazsınız (${formatQuantity(availableForSale, state.productId)}).`,
       });
       return;
     }
@@ -749,9 +781,6 @@ export function SellForm({
   return (
     <Card className="p-4 sm:p-5">
       <h2 className="text-base font-semibold text-ink">{editing ? "Satışı düzelt" : "Satış ekle"}</h2>
-      <p className="mt-1 text-sm text-muted">
-        Satış, kalan ürünlerin ortalama maliyetini değiştirmez; gerçekleşmiş kâr/zarar ayrı gösterilir.
-      </p>
 
       <form className="mt-4 space-y-4" onSubmit={handleSubmit} noValidate>
         <ProductSelect
@@ -760,6 +789,7 @@ export function SellForm({
           value={state.productId}
           onChange={(value) => update("productId", value)}
           error={errors.productId}
+          productIds={sellableProductIds}
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -769,7 +799,14 @@ export function SellForm({
             value={state.quantity}
             onChange={(value) => update("quantity", value)}
             error={errors.quantity}
-            hint={`Elinizde ${formatQuantity(availableForSale, state.productId)} var.`}
+            /*
+             * "BUGÜN" sözcüğü taşıyıcıdır: bu sayı GÜNCEL pozisyondur, seçilen
+             * işlem tarihindeki değil. Geçmiş tarihli bir satışta motor defteri
+             * kronolojik oynatır ve o gün elde daha az varsa reddeder; vaat
+             * edilen miktarın hangi güne ait olduğu yazılmazsa kullanıcı
+             * sunucudan gelen daha küçük sayıyı çelişki sanır.
+             */
+            hint={`Bugün elinizde ${formatQuantity(availableForSale, state.productId)} var.`}
           />
           <DateTimeFields
             formId={formId}
@@ -782,11 +819,11 @@ export function SellForm({
         </div>
 
         <ModeToggle
-          label="Tutar girişi"
+          label="Tutarı nasıl gireceksiniz?"
           value={state.mode}
           options={[
-            { value: "UNIT_PRICE", label: "Birim satış fiyatı" },
-            { value: "TOTAL_AMOUNT", label: "Net tahsil edilen tutar" },
+            { value: "UNIT_PRICE", label: "Birim fiyat" },
+            { value: "TOTAL_AMOUNT", label: "Elinize geçen" },
           ]}
           onChange={(value) => update("mode", value)}
         />
@@ -796,7 +833,7 @@ export function SellForm({
             label="Birim satış fiyatı (TL)"
             htmlFor={`${formId}-unit-price`}
             error={errors.unitPrice}
-            hint="Masraflar düşülmeden önceki brüt birim fiyat."
+            hint="Masraflar düşülmeden önceki birim fiyat."
           >
             <DecimalInput
               id={`${formId}-unit-price`}
@@ -807,12 +844,7 @@ export function SellForm({
             />
           </Field>
         ) : (
-          <Field
-            label="Net tahsil edilen tutar (TL)"
-            htmlFor={`${formId}-net`}
-            error={errors.netProceeds}
-            hint="Masraflar düşüldükten sonra elinize geçen gerçek tutar."
-          >
+          <Field label="Elinize geçen tutar (TL)" htmlFor={`${formId}-net`} error={errors.netProceeds}>
             <DecimalInput
               id={`${formId}-net`}
               value={state.netProceeds}
@@ -823,22 +855,24 @@ export function SellForm({
           </Field>
         )}
 
-        <Field
-          label="Satış masrafı (TL)"
-          htmlFor={`${formId}-fees`}
-          error={errors.fees}
-          hint={state.mode === "UNIT_PRICE" ? "İsteğe bağlı. Gelirden düşülür." : "İsteğe bağlı. Bilgi amaçlı; net tutar zaten masraf düşülmüş hâlidir."}
-        >
-          <DecimalInput
-            id={`${formId}-fees`}
-            value={state.fees}
-            onChange={(value) => update("fees", value)}
-            placeholder="0"
+        {state.mode === "UNIT_PRICE" ? (
+          <Field
+            label="Satış masrafı (TL)"
+            htmlFor={`${formId}-fees`}
             error={errors.fees}
-          />
-        </Field>
+            hint="Gelirden düşülür."
+          >
+            <DecimalInput
+              id={`${formId}-fees`}
+              value={state.fees}
+              onChange={(value) => update("fees", value)}
+              placeholder="0"
+              error={errors.fees}
+            />
+          </Field>
+        ) : null}
 
-        <Field label="Not" htmlFor={`${formId}-note`} error={errors.note} hint="İsteğe bağlı.">
+        <Field label="Not" htmlFor={`${formId}-note`} error={errors.note}>
           <textarea
             id={`${formId}-note`}
             className="control resize-y"
@@ -850,12 +884,12 @@ export function SellForm({
         </Field>
 
         {preview?.netProceeds ? (
-          <PreviewBox label="Net satış geliri" value={formatMoney(preview.netProceeds)}>
+          <PreviewBox label="Elinize geçen" value={formatMoney(preview.netProceeds)}>
+            {/* Girilen fiyat ile masraf sonrası birim AYRI kalır; ikisi tek sayıya indirilmez. */}
             <p className="mt-1 text-xs text-muted" data-testid="sell-preview-prices">
               {preview.quotedDisposalUnitPrice
-                ? `Girilen brüt birim fiyat: ${formatMoney(preview.quotedDisposalUnitPrice)} · `
-                : ""}
-              Net birim tahsilat: {formatMoney(preview.effectiveNetUnitProceeds ?? "0")}
+                ? `Girdiğiniz birim fiyat: ${formatMoney(preview.quotedDisposalUnitPrice)} · masraflar sonrası birim: ${formatMoney(preview.effectiveNetUnitProceeds ?? "0")}`
+                : `Masraflar sonrası birim: ${formatMoney(preview.effectiveNetUnitProceeds ?? "0")}`}
             </p>
           </PreviewBox>
         ) : null}
@@ -885,56 +919,64 @@ interface OpeningState {
   note: string;
 }
 
-const COST_METHOD_LABELS: Record<OpeningCostMethod, { title: string; description: string }> = {
+const COST_METHOD_LABELS: Record<OpeningCostMethod, { title: string; description?: string }> = {
   MARKET_BASELINE: {
-    title: "Bugünden itibaren takip et (önerilen)",
-    description:
-      "Maliyetinizi bilmiyorsanız: bugünkü bozdurma fiyatı başlangıç değeri olur; kâr/zarar bu andan itibaren hesaplanır.",
+    title: "Kaça aldığımı bilmiyorum (önerilen)",
+    description: "Kâr/zarar bugünden itibaren hesaplanır.",
   },
   ACTUAL: {
-    title: "Gerçek maliyetimi biliyorum",
-    description: "Ortalama birim maliyet veya toplam maliyet girin; diğeri hesaplanır.",
+    // Açıklama yok: seçenek tıklandığı anda altında maliyet alanları açılıyor.
+    title: "Kaça aldığımı biliyorum",
   },
   ESTIMATED: {
-    title: "Yaklaşık maliyetimi biliyorum",
-    description: "Tahmini ortalama veya toplam maliyet girin. Pozisyon \"Tahmini maliyet\" olarak etiketlenir.",
+    title: "Yaklaşık hatırlıyorum",
+    // Rozet panoda ve listede görünecek; nereden geldiği burada söylenir.
+    description: "Listede \"Tahmini maliyet\" olarak işaretlenir.",
   },
 };
 
-function BaselineQuotePanel({ quote, quantity, product }: { quote: PriceQuote; quantity: string; product: GoldProduct }) {
+function BaselineQuotePanel({
+  quote,
+  quantity,
+  product,
+  isTestData,
+}: {
+  quote: PriceQuote;
+  /** KANONİK (noktalı) miktar dizesi — ham form metni decimal.js'i fırlatır. */
+  quantity: string;
+  product: GoldProduct;
+  /** Uydurma veri uyarısı: lisanssız olmak ile gerçek olmamak ayrı şeylerdir. */
+  isTestData: boolean;
+}) {
   const initialValue = toDecimalString(dec(quantity || "0").times(dec(quote.liquidationPrice)));
   return (
     <div className="space-y-3 rounded-[var(--radius-sm)] border border-line bg-surface-2 p-3.5" data-testid="baseline-confirm">
-      <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2">
+      <dl className="grid grid-cols-1 gap-y-2 text-sm">
         <div>
-          <dt className="text-xs text-subtle">Bozdurma fiyatı (kuyumcu alış)</dt>
+          <dt className="text-xs text-subtle">Bugünkü bozdurma fiyatı</dt>
           <dd className="tabular font-semibold text-ink">{formatMoney(quote.liquidationPrice)} / {product.unit}</dd>
         </div>
         <div>
-          <dt className="text-xs text-subtle">Yeniden alım fiyatı (kuyumcu satış)</dt>
-          <dd className="tabular font-semibold text-ink">{formatMoney(quote.replacementPrice)} / {product.unit}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-subtle">Sağlayıcı · piyasa</dt>
+          <dt className="text-xs text-subtle">Fiyat kaynağı</dt>
           <dd className="text-ink">
-            {quote.provider} · {marketLabel(quote.market)}{" "}
-            <span className="badge badge-notice">Test verisi</span>
+            {marketLabel(quote.market)}
+            {/*
+              Bu ekranda PriceSourceLine yoktur; kaydedilecek başlangıç değerinin
+              uydurma veriden gelip gelmediğini söyleyen tek yer burasıdır.
+              Metin price-source-line.tsx ile birebir aynıdır.
+            */}
+            {isTestData ? <span className="badge badge-notice ml-1">Gerçek piyasa verisi değil</span> : null}
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-subtle">Fiyat zamanı</dt>
-          <dd className="text-ink">{formatDateTime(quote.providerTimestamp)}</dd>
-        </div>
-        <div className="sm:col-span-2">
-          <dt className="text-xs text-subtle">Başlangıç değeri (miktar × bozdurma fiyatı)</dt>
+          <dt className="text-xs text-subtle">Başlangıç değeri</dt>
           <dd className="tabular text-lg font-semibold text-ink" data-testid="baseline-initial-value">
             {formatMoney(initialValue)}
           </dd>
         </div>
       </dl>
       <p className="rounded-[var(--radius-sm)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--notice)]">
-        Bu değer gerçek tarihsel alış maliyetiniz değildir. Kâr/zarar bu takip başlangıcından itibaren
-        hesaplanacaktır. Kaydettiğiniz anda sunucunun aldığı fiyat esas alınır ve sonradan değişmez.
+        Bu tutar gerçek alış maliyetiniz değildir; kâr/zarar bugünden itibaren hesaplanır.
       </p>
     </div>
   );
@@ -951,7 +993,12 @@ export function OpeningBalanceForm({
 }) {
   const formId = useId();
   const [clientRequestId] = useState(() => createClientRequestId());
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  /*
+   * İKİ ADIM: 1) ürün + miktar + maliyet yöntemi, 2) onay.
+   * Eskiden maliyet yöntemi tek başına bir adımdı; varsayılan seçenekle gelen
+   * kullanıcı orada hiçbir şey yazmadan "Devam" diyordu — bir tıklık boş adım.
+   */
+  const [step, setStep] = useState<1 | 2>(1);
   const [state, setState] = useState<OpeningState>({
     productId: "gram-altin",
     quantity: "",
@@ -983,8 +1030,9 @@ export function OpeningBalanceForm({
    * hemen açılırdı. Sunucu her hâlükârda gönderimde yeniden doğrular.
    */
   const clock = useClientClock(30_000);
-  const evaluatedAt = clock ?? Date.parse(summary.snapshot?.fetchedAt ?? "") ?? 0;
-  const quote = usableQuoteOrNull(summary.snapshot, state.productId, Number.isFinite(evaluatedAt) ? evaluatedAt : 0);
+  const parsedFetched = Date.parse(summary.snapshot?.fetchedAt ?? "");
+  const evaluatedAt = clock ?? (Number.isFinite(parsedFetched) ? parsedFetched : 0);
+  const quote = usableQuoteOrNull(summary.snapshot, state.productId, evaluatedAt);
   const baselineAvailable = quote !== null;
 
   const command = useMemo<OpeningBalanceCommand>(
@@ -1002,29 +1050,43 @@ export function OpeningBalanceForm({
   );
   const preview = useMemo(() => previewAmounts(command), [command]);
 
-  function update<K extends keyof OpeningState>(key: K, value: OpeningState[K]) {
-    setState((current) => ({ ...current, [key]: value }));
-    setErrors({});
-  }
-
-  function validateStep1(): boolean {
+  /*
+   * KANONİK MİKTAR — ham form metni ("10,5") biçimlendiriciye ve decimal.js'e
+   * ASLA verilmez: decimal.js virgüllü dizede hata fırlatır ve onay adımı
+   * çökerdi. Ayrıştırıcının ürettiği noktalı dize kullanılır. Not alanı burada
+   * boşlanır: uzun bir not yüzünden miktarın "geçersiz" sayılması yanlış olur.
+   */
+  const canonicalQuantity = useMemo(() => {
     const probe = parseLedgerCommand({
       ...command,
       costMethod: "ACTUAL",
       costInputMode: "TOTAL_COST",
       costAmount: "1",
+      note: "",
     });
-    if (!probe.ok && (probe.errors.productId || probe.errors.quantity)) {
-      setErrors({ productId: probe.errors.productId, quantity: probe.errors.quantity });
-      return false;
-    }
-    return true;
+    return probe.ok ? probe.request.quantity : null;
+  }, [command]);
+
+  function update<K extends keyof OpeningState>(key: K, value: OpeningState[K]) {
+    setState((current) => ({ ...current, [key]: value }));
+    setErrors({});
   }
 
-  function validateStep2(): boolean {
+  /** Adım 1'in tamamı: ürün, miktar ve seçilen maliyet yöntemi bir arada doğrulanır. */
+  function validateStep1(): boolean {
     if (state.costMethod === "MARKET_BASELINE") {
+      const probe = parseLedgerCommand({
+        ...command,
+        costMethod: "ACTUAL",
+        costInputMode: "TOTAL_COST",
+        costAmount: "1",
+      });
+      if (!probe.ok && (probe.errors.productId || probe.errors.quantity)) {
+        setErrors({ productId: probe.errors.productId, quantity: probe.errors.quantity });
+        return false;
+      }
       if (!baselineAvailable) {
-        setErrors({ form: "Güncel fiyat verisi kullanılamıyor; bu seçenek şu anda kullanılamaz." });
+        setErrors({ form: "Şu anda fiyat alınamıyor; bu seçeneği kullanamazsınız." });
         return false;
       }
       return true;
@@ -1040,7 +1102,7 @@ export function OpeningBalanceForm({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitError(null);
-    if (!validateStep2()) return;
+    if (!validateStep1()) return;
     setBusy(true);
     try {
       await onSubmit(command);
@@ -1052,6 +1114,12 @@ export function OpeningBalanceForm({
   }
 
   const unit = product?.unit ?? "gram";
+  /*
+   * Onay adımında beklerken fiyat bayatlayabilir (saat 30 saniyede bir ilerler).
+   * O anda panel düşer; nedeni yazılmazsa ekran sessizce boşalır ve kaydet
+   * düğmesi çalışmayacağı hâlde açık görünürdü.
+   */
+  const baselineBlocked = state.costMethod === "MARKET_BASELINE" && !baselineAvailable;
   const derivedOther = (() => {
     if (state.costMethod === "MARKET_BASELINE" || !preview?.totalPaid) return null;
     return state.costInputMode === "AVERAGE_UNIT_COST"
@@ -1063,11 +1131,10 @@ export function OpeningBalanceForm({
     <Card className="p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-ink">Mevcut altınımı ekle</h2>
-        <span className="text-xs text-subtle">Adım {step} / 3</span>
+        <span className="text-xs text-subtle">Adım {step} / 2</span>
       </div>
-      <p className="mt-1 text-sm text-muted">
-        Geçmişten kalan altınlarınızı başlangıç bakiyesi olarak ekleyin. Bu bir alış işlemi değildir.
-      </p>
+      {/* "Yeni alış değil" ayrımı taşıyıcıdır: aynı altın iki yerden girilirse portföy ikiye katlanır. */}
+      <p className="mt-1 text-sm text-muted">Elinizde zaten olan altınları ekleyin (yeni alış değil).</p>
 
       <form className="mt-4 space-y-4" onSubmit={handleSubmit} noValidate>
         {step === 1 ? (
@@ -1086,32 +1153,18 @@ export function OpeningBalanceForm({
               onChange={(value) => update("quantity", value)}
               error={errors.quantity}
             />
-            <p className="text-xs text-subtle">Birim: {unit}. Birim katalogdan gelir, değiştirilemez.</p>
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button type="button" className="btn btn-secondary min-h-11" onClick={onCancel}>
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary min-h-11"
-                data-testid="opening-next"
-                onClick={() => {
-                  if (validateStep1()) setStep(2);
-                }}
-              >
-                Devam
-              </button>
-            </div>
-          </>
-        ) : null}
 
-        {step === 2 ? (
-          <>
             <fieldset>
-              <legend className="field-label">Maliyet yöntemi</legend>
-              <div className="space-y-2" role="radiogroup" aria-label="Maliyet yöntemi">
+              <legend className="field-label">Maliyetini biliyor musunuz?</legend>
+              <div className="space-y-2" role="radiogroup" aria-label="Maliyetini biliyor musunuz?">
                 {(["MARKET_BASELINE", "ACTUAL", "ESTIMATED"] as const).map((method) => {
                   const disabled = method === "MARKET_BASELINE" && !baselineAvailable;
+                  /* Soluk ve tıklanmaz görünen düğmenin nedeni yazılmazsa kullanıcı uygulamayı bozuk sanar. */
+                  const detail = disabled
+                    ? [COST_METHOD_LABELS[method].description, "Şu anda fiyat alınamıyor."]
+                        .filter(Boolean)
+                        .join(" — ")
+                    : COST_METHOD_LABELS[method].description;
                   return (
                     <button
                       key={method}
@@ -1131,10 +1184,9 @@ export function OpeningBalanceForm({
                       <span className={cx("block text-sm font-semibold", state.costMethod === method ? "text-accent" : "text-ink")}>
                         {COST_METHOD_LABELS[method].title}
                       </span>
-                      <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-                        {COST_METHOD_LABELS[method].description}
-                        {disabled ? " (Güncel fiyat verisi kullanılamıyor.)" : ""}
-                      </span>
+                      {detail ? (
+                        <span className="mt-0.5 block text-xs leading-relaxed text-muted">{detail}</span>
+                      ) : null}
                     </button>
                   );
                 })}
@@ -1144,7 +1196,7 @@ export function OpeningBalanceForm({
             {state.costMethod !== "MARKET_BASELINE" ? (
               <>
                 <ModeToggle
-                  label="Maliyet girişi"
+                  label="Maliyeti nasıl gireceksiniz?"
                   value={state.costInputMode}
                   options={[
                     { value: "AVERAGE_UNIT_COST", label: "Ortalama birim maliyet" },
@@ -1160,7 +1212,7 @@ export function OpeningBalanceForm({
                   }
                   htmlFor={`${formId}-cost`}
                   error={errors.costAmount}
-                  hint={derivedOther ?? "Diğer değer otomatik hesaplanır."}
+                  hint={derivedOther ?? undefined}
                 >
                   <DecimalInput
                     id={`${formId}-cost`}
@@ -1175,16 +1227,20 @@ export function OpeningBalanceForm({
 
             {errors.form ? <Alert tone="danger">{errors.form}</Alert> : null}
 
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-              <button type="button" className="btn btn-ghost min-h-11" onClick={() => setStep(1)}>
-                ← Geri
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn btn-secondary min-h-11" onClick={onCancel}>
+                Vazgeç
               </button>
               <button
                 type="button"
                 className="btn btn-primary min-h-11"
                 data-testid="opening-next"
                 onClick={() => {
-                  if (validateStep2()) setStep(3);
+                  // Geçildiğinde önceki denemenin hatası ekranda kalmasın.
+                  if (validateStep1()) {
+                    setErrors({});
+                    setStep(2);
+                  }
                 }}
               >
                 Devam
@@ -1193,18 +1249,27 @@ export function OpeningBalanceForm({
           </>
         ) : null}
 
-        {step === 3 && product ? (
+        {step === 2 && product ? (
           <>
             <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3 text-sm">
               <p className="font-semibold text-ink">
                 {product.name} ·{" "}
-                {formatQuantity(state.quantity, product.id)}
+                {canonicalQuantity ? formatQuantity(canonicalQuantity, product.id) : "—"}
               </p>
               <p className="mt-0.5 text-xs text-muted">{COST_METHOD_LABELS[state.costMethod].title}</p>
             </div>
 
-            {state.costMethod === "MARKET_BASELINE" && quote ? (
-              <BaselineQuotePanel quote={quote} quantity={state.quantity} product={product} />
+            {state.costMethod === "MARKET_BASELINE" ? (
+              quote && canonicalQuantity ? (
+                <BaselineQuotePanel
+                  quote={quote}
+                  quantity={canonicalQuantity}
+                  product={product}
+                  isTestData={summary.snapshot?.provider.isTestData === true}
+                />
+              ) : (
+                <Alert tone="notice">Şu anda fiyat alınamıyor; bu seçeneği kullanamazsınız.</Alert>
+              )
             ) : preview?.totalPaid ? (
               <PreviewBox
                 label={state.costMethod === "ESTIMATED" ? "Tahmini toplam maliyet" : "Toplam maliyet"}
@@ -1212,12 +1277,11 @@ export function OpeningBalanceForm({
               >
                 <p className="mt-1 text-xs text-muted">
                   Ortalama birim maliyet: {formatMoney(preview.effectiveAcquisitionUnitCost ?? "0")}
-                  {state.costMethod === "ESTIMATED" ? " · Tahmini maliyet olarak etiketlenir." : ""}
                 </p>
               </PreviewBox>
             ) : null}
 
-            <Field label="Not" htmlFor={`${formId}-note`} error={errors.note} hint="İsteğe bağlı.">
+            <Field label="Not" htmlFor={`${formId}-note`} error={errors.note}>
               <textarea
                 id={`${formId}-note`}
                 className="control resize-y"
@@ -1232,20 +1296,26 @@ export function OpeningBalanceForm({
             {submitError ? <Alert tone="danger">{submitError}</Alert> : null}
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-              <button type="button" className="btn btn-ghost min-h-11" onClick={() => setStep(2)} disabled={busy}>
+              <button type="button" className="btn btn-ghost min-h-11" onClick={() => setStep(1)} disabled={busy}>
                 ← Geri
               </button>
-              <button type="submit" className="btn btn-primary min-h-11" disabled={busy} data-testid="submit-opening">
-                {busy ? "Kaydediliyor…" : "Mevcut altını kaydet"}
-              </button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <button type="button" className="btn btn-secondary min-h-11" onClick={onCancel} disabled={busy}>
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary min-h-11"
+                  disabled={busy || baselineBlocked}
+                  data-testid="submit-opening"
+                >
+                  {busy ? "Kaydediliyor…" : "Mevcut altını kaydet"}
+                </button>
+              </div>
             </div>
           </>
         ) : null}
       </form>
     </Card>
   );
-}
-
-export function firstError(errors: CommandErrors): string | null {
-  return firstErrorText(errors);
 }

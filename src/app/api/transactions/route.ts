@@ -22,10 +22,3 @@ export const POST = apiRoute(async (request) => {
   const result = await getUserPortfolioService().appendTransaction(actor, body);
   return ok(result, { status: result.replayed ? 200 : 201 });
 });
-
-/** Tüm aktif kayıtları iptal eder (VOID). Hard delete YOKTUR. */
-export const DELETE = apiRoute(async () => {
-  const actor = await requireUsableUser();
-  const voided = await getUserPortfolioService().voidAllTransactions(actor);
-  return ok({ voided });
-});

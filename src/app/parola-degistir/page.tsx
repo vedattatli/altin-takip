@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CsrfMeta } from "@/components/csrf-meta";
 import { BrandMark } from "@/components/ui";
-import { appConfig } from "@/config/app.config";
 import { getSessionContext } from "@/server/auth";
 import { ChangePasswordForm } from "./change-password-form";
 
@@ -26,13 +26,20 @@ export default async function ChangePasswordPage() {
             Parolanızı belirleyin
           </h1>
           <p className="mt-1.5 text-sm text-muted">
-            {appConfig.name} hesabınız: <span className="font-medium text-ink">{user.username}</span>
+            Hesap: <span className="font-medium text-ink">{user.username}</span>
           </p>
         </div>
 
         <div className="card p-5 sm:p-6">
           <ChangePasswordForm forced={user.mustChangePassword} />
         </div>
+
+        {/* Zorunlu değişimde dönülecek bir yer yok; ayarlardan gelen kullanıcı vazgeçebilir. */}
+        {user.mustChangePassword ? null : (
+          <Link href="/ayarlar" className="mt-3 block text-center text-sm text-muted">
+            Vazgeç
+          </Link>
+        )}
       </div>
     </main>
   );

@@ -38,11 +38,15 @@ test.describe("portföy akışı", () => {
     await loginAsUser(page, scopedUsername("fiyatkaynak"));
 
     const strip = page.getByTestId("price-source");
-    await expect(strip).toContainText("Fiyat kaynağı:");
-    await expect(strip.getByText("Test Verisi", { exact: true })).toBeVisible();
+    /*
+     * Şeritten "Fiyat kaynağı:", sağlayıcı adı ("Test Verisi") ve piyasa adı
+     * ("Test Piyasası") KALDIRILDI; bunlar artık /fiyat-kaynagi sayfasında
+     * durur (price-sources.spec.ts). Şeritte kalan iki taşıyıcı bilgi
+     * doğrulanmaya devam eder: fiyatın ne zaman güncellendiği ve verinin
+     * gerçek piyasa verisi olmadığı uyarısı.
+     */
+    await expect(strip).toContainText(/Fiyatlar: .+ güncellendi/);
     await expect(strip.getByText("Gerçek piyasa verisi değil")).toBeVisible();
-    await expect(strip.getByText("Test Piyasası", { exact: true })).toBeVisible();
-    await expect(strip).toContainText("Son fiyat:");
 
     await strip.getByText("Bu fiyatlar hakkında").click();
     await expect(strip.getByText(/Gerçek piyasa fiyatı değildir/)).toBeVisible();
@@ -72,8 +76,14 @@ test.describe("portföy akışı", () => {
     expect(liquidation).toBeLessThan(repurchase);
 
     await expect(page.getByTestId("holdings-list")).toContainText("Gram Altın");
-    await expect(page.getByTestId("cost-quality").first()).toHaveText("Gerçek maliyet");
-    await expect(page.getByText("Maliyet bazlı K/Z").first()).toBeVisible();
+    /*
+     * "Gerçek maliyet" ROZETİ KALDIRILDI: rozet yalnızca dikkat isteyen maliyet
+     * durumlarına (tahmini / takip başlangıcı) basılıyor. Gerçek maliyetin
+     * işareti artık rozetin YOKLUĞUDUR; aynı şeyi bilgilendirme kutusunun
+     * çıkmaması da söyler.
+     */
+    await expect(page.getByTestId("cost-quality")).toHaveCount(0);
+    await expect(page.getByText("Maliyetinize göre").first()).toBeVisible();
     await expect(page.getByTestId("pnl-label-notice")).toHaveCount(0);
 
     await page.reload();
@@ -136,27 +146,28 @@ test.describe("portföy akışı", () => {
     await page.getByTestId("add-opening").click();
     await page.getByLabel("Varlık türü").selectOption("gram-altin");
     await page.getByLabel(/^Miktar/).fill("100");
-    await page.getByTestId("opening-next").click();
-
+    // Sihirbaz 2 adım: maliyet yöntemi ürün/miktar ile AYNI adımda seçilir.
     await expect(page.getByTestId("cost-method-MARKET_BASELINE")).toHaveAttribute("aria-checked", "true");
     await page.getByTestId("opening-next").click();
 
     const confirm = page.getByTestId("baseline-confirm");
-    await expect(confirm).toContainText("Bozdurma fiyatı");
-    await expect(confirm).toContainText("Yeniden alım fiyatı");
-    await expect(confirm).toContainText("mock · Test Piyasası");
-    await expect(confirm).toContainText("Fiyat zamanı");
-    await expect(confirm).toContainText("gerçek tarihsel alış maliyetiniz değildir");
+    await expect(confirm).toContainText("Bugünkü bozdurma fiyatı");
+    // Onay kutusundan "yeniden alım fiyatı" ve "fiyat zamanı" satırları
+    // kaldırıldı; kaydedilen başlangıç değeri bozdurma fiyatından geliyor.
+    await expect(confirm).toContainText("Test Piyasası");
+    await expect(confirm).toContainText("Gerçek piyasa verisi değil");
+    await expect(confirm).toContainText("gerçek alış maliyetiniz değildir");
     const initialValue = parseMoney(await page.getByTestId("baseline-initial-value").textContent());
     expect(initialValue).toBeGreaterThan(0);
 
     await page.getByTestId("submit-opening").click();
     await expect(page.getByText("Mevcut altın eklendi.")).toBeVisible();
     await expect(page.getByTestId("transaction-list")).toContainText("Takip başlangıç değeri");
-    await expect(page.getByTestId("transaction-list")).toContainText("gerçek tarihsel maliyet değildir");
 
     await gotoReady(page, "/panel");
-    await expect(page.getByTestId("pnl-label-notice")).toContainText("Takip başlangıcından itibaren K/Z");
+    await expect(page.getByTestId("pnl-label-notice")).toContainText(
+      "kâr/zarar takibe başladığınız günden beri hesaplanıyor",
+    );
     await expect(page.getByTestId("cost-quality").first()).toHaveText("Takip başlangıç değeri");
     // Aynı fiyat dilimi içinde gerçekleşmemiş K/Z tam sıfırdır (30 sn'lik test fiyatı dilimi).
     const unrealized = parseMoney(await page.getByTestId("stat-unrealized").textContent());
@@ -172,7 +183,7 @@ test.describe("portföy akışı", () => {
     await page.getByTestId("add-opening").click();
     await page.getByLabel("Varlık türü").selectOption("yeni-ceyrek");
     await page.getByLabel(/^Miktar/).fill("14");
-    await page.getByTestId("opening-next").click();
+    // Maliyet yöntemi ve tutarı ilk adımda; ikinci adım yalnızca onaydır.
     await page.getByTestId("cost-method-ACTUAL").click();
     await page.getByRole("radio", { name: "Toplam maliyet", exact: true }).click();
     await page.getByLabel(/oplam maliyet \(TL\)/).fill("154600");
@@ -182,7 +193,9 @@ test.describe("portföy akışı", () => {
 
     await gotoReady(page, "/panel");
     await expect(page.getByTestId("stat-cost")).toHaveText(/154\.600,00/);
-    await expect(page.getByTestId("cost-quality").first()).toHaveText("Gerçek maliyet");
+    // Gerçek maliyette rozet basılmaz ve "takip başlangıcı" uyarısı çıkmaz.
+    await expect(page.getByTestId("cost-quality")).toHaveCount(0);
+    await expect(page.getByTestId("pnl-label-notice")).toHaveCount(0);
   });
 
   test("mevcut altın: tahmini maliyet etiketi kalır", async ({ page }) => {
@@ -193,7 +206,6 @@ test.describe("portföy akışı", () => {
 
     await page.getByTestId("add-opening").click();
     await page.getByLabel(/^Miktar/).fill("3");
-    await page.getByTestId("opening-next").click();
     await page.getByTestId("cost-method-ESTIMATED").click();
     await page.getByLabel(/Tahmini ortalama birim maliyet/).fill("4000");
     await page.getByTestId("opening-next").click();
@@ -278,7 +290,46 @@ test.describe("portföy akışı", () => {
     await addPurchase(page, { product: "gram-altin", quantity: "3", unitPrice: "5000" });
     await addSale(page, { product: "gram-altin", quantity: "10", unitPrice: "5500" });
 
-    await expect(page.getByText(/Satış miktarı elinizdeki miktarı aşamaz/)).toBeVisible();
+    // Aşırı satış formun kendisinde durdurulur; hata miktar alanının altında yazar.
+    await expect(page.getByText(/Elinizdeki miktardan fazlasını satamazsınız/)).toBeVisible();
+  });
+
+  /*
+   * FORM KONTROLÜ GÜVENLİK SINIRI DEĞİLDİR.
+   *
+   * Yukarıdaki test aşırı satışın FORMDA durdurulduğunu doğrular; istek sunucuya
+   * hiç gitmez. Asıl koruma sunucudadır (`assert_no_oversell` / ledger RPC) ve
+   * formu atlayan bir istemci onu aşamamalıdır. Bu test doğrudan uca vurur.
+   */
+  test("aşırı satış sunucuda da reddedilir (formu atlayan istek)", async ({ page }) => {
+    const username = scopedUsername("satisapi");
+    await createReadyUser(username);
+    await loginAsUser(page, username);
+
+    const bought = await browserApi(page, "POST", "/api/transactions", {
+      kind: "BUY",
+      productId: "gram-altin",
+      quantity: "3",
+      occurredAt: "2026-01-10",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5000",
+    });
+    expect(bought.status).toBe(201);
+
+    const oversold = await browserApi(page, "POST", "/api/transactions", {
+      kind: "SELL",
+      productId: "gram-altin",
+      quantity: "10",
+      occurredAt: "2026-01-11",
+      pricingInputMode: "UNIT_PRICE",
+      unitPrice: "5500",
+    });
+    expect(oversold.status).toBeGreaterThanOrEqual(400);
+    expect(oversold.status).toBeLessThan(500);
+
+    // Defter değişmedi: yalnızca alış kaydı duruyor.
+    const ledger = await browserApi<{ kind: string }[]>(page, "GET", "/api/transactions");
+    expect(ledger.data?.filter((entry) => entry.kind === "SELL")).toHaveLength(0);
   });
 
   test("adet ile takip edilen üründe ondalık miktar reddedilir", async ({ page }) => {
@@ -414,7 +465,7 @@ test.describe("portföy akışı", () => {
     await page.getByTestId("submit-buy").click();
     await expect(page.getByTestId("transaction-list")).toBeVisible();
     await expect(page.getByTestId("transaction-list")).toContainText("Birim fiyat ₺5.000,00");
-    await expect(page.getByTestId("transaction-list")).toContainText("Efektif ₺5.060,00");
+    await expect(page.getByTestId("transaction-list")).toContainText("Masraflarla ₺5.060,00");
     await expect(page.getByTestId("transaction-list")).toContainText("14:30");
     await expectNoHorizontalOverflow(page);
 

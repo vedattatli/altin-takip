@@ -23,7 +23,7 @@ async function buy(page: import("@playwright/test").Page, productId: string, qua
 }
 
 test.describe("değerleme kapsamı", () => {
-  test("D. açık pozisyon var, hiç kullanılabilir fiyat yok → 'Fiyat verisi kullanılamıyor'; maliyet ve gerçekleşmiş K/Z görünür", async ({ page }) => {
+  test("D. açık pozisyon var, hiç kullanılabilir fiyat yok → 'Fiyat yok'; maliyet ve gerçekleşmiş K/Z görünür", async ({ page }) => {
     const username = scopedUsername("fiyatyok");
     await createReadyUser(username);
     await loginAsUser(page, username);
@@ -33,10 +33,13 @@ test.describe("değerleme kapsamı", () => {
     const root = page.locator("[data-portfolio-state]");
     await expect(root).toHaveAttribute("data-portfolio-state", "OPEN");
     await expect(root).toHaveAttribute("data-valuation-status", "none");
-    await expect(page.getByTestId("stat-liquidation")).toContainText("Fiyat verisi kullanılamıyor");
-    await expect(page.getByTestId("stat-repurchase")).toContainText("Fiyat verisi kullanılamıyor");
-    await expect(page.getByTestId("stat-unrealized")).toContainText("Fiyat verisi kullanılamıyor");
-    await expect(page.getByTestId("stat-total-pnl")).toContainText("Fiyat verisi kullanılamıyor");
+    // Panel muhasebe dilini değil günlük Türkçeyi basar: motorun
+    // "Fiyat verisi kullanılamıyor" sabiti ekranda "Fiyat yok" olarak görünür.
+    // Sıfır YAZILMAMASI kuralı aynen sınanmaya devam eder.
+    await expect(page.getByTestId("stat-liquidation")).toContainText("Fiyat yok");
+    await expect(page.getByTestId("stat-repurchase")).toContainText("Fiyat yok");
+    await expect(page.getByTestId("stat-unrealized")).toContainText("Fiyat yok");
+    await expect(page.getByTestId("stat-total-pnl")).toContainText("Fiyat yok");
     await expect(page.getByTestId("stat-liquidation")).not.toContainText("0,00");
     await expect(page.getByTestId("stat-cost")).toContainText("80.000,00");
     await expect(page.getByTestId("stat-realized")).toContainText("0,00");
@@ -55,9 +58,9 @@ test.describe("değerleme kapsamı", () => {
     await expect(page.locator("[data-valuation-status]")).toHaveAttribute("data-valuation-status", "partial");
     await expect(page.getByTestId("partial-valuation")).toBeVisible();
     await expect(page.getByText("Tahmini bozdurma değeri (kısmi)")).toBeVisible();
-    await expect(page.getByText("Toplam K/Z (kısmi)")).toBeVisible();
+    await expect(page.getByText("Toplam kâr/zarar (kısmi)")).toBeVisible();
     await expect(page.getByTestId("partial-valuation")).toContainText("40.000,00");
-    await expect(page.getByTestId("stat-liquidation")).not.toContainText("Fiyat verisi kullanılamıyor");
+    await expect(page.getByTestId("stat-liquidation")).not.toContainText("Fiyat yok");
     await expectNoHorizontalOverflow(page);
   });
 
@@ -79,7 +82,12 @@ test.describe("değerleme kapsamı", () => {
     await gotoReady(page, "/panel");
     await expect(page.locator("[data-portfolio-state]")).toHaveAttribute("data-portfolio-state", "CLOSED");
     await expect(page.getByTestId("portfolio-closed")).toBeVisible();
-    await expect(page.getByText("Açık pozisyonunuz bulunmuyor.")).toBeVisible();
+    await expect(page.getByTestId("portfolio-closed")).toContainText(
+      "Elinizde varlık kalmadı; geçmiş kayıtlarınız duruyor.",
+    );
+    // Liste yerinde de "açık pozisyon yok" denmeye devam eder; şeritteki daha
+    // uzun cümleyle karışmasın diye TAM eşleşme aranır.
+    await expect(page.getByText("Elinizde varlık kalmadı", { exact: true })).toBeVisible();
     await expect(page.getByText("Henüz altın eklenmedi")).toHaveCount(0);
     await expect(page.getByTestId("stat-realized")).toContainText("1.000,00");
     await expect(page.getByTestId("stat-total-pnl")).toContainText("1.000,00");

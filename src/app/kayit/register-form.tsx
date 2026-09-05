@@ -3,16 +3,21 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { validatePassword } from "@/auth/password";
+import { validateUsername } from "@/auth/username";
 import { useHydrated } from "@/components/hydration-marker";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { Alert, Field } from "@/components/ui";
 
 /**
- * Kayıt formu — kullanıcı adı, görünen ad, parola, parola tekrarı.
+ * Kayıt formu — kullanıcı adı, parola, parola tekrarı.
  *
  * E-posta, telefon, tek kullanımlık kod veya sihirli bağlantı YOKTUR.
- * Parola tekrarı burada da kontrol edilir ama bu yalnızca KOLAYLIKTIR:
- * gerçek denetim sunucudadır, istemci kontrolü güvenlik önlemi sayılmaz.
+ * Kullanıcı adı, parola politikası ve parola tekrarı burada da kontrol edilir
+ * ama bu yalnızca KOLAYLIKTIR: gerçek denetim sunucudadır, istemci kontrolü
+ * güvenlik önlemi sayılmaz. İstemcide durduruyoruz çünkü kayıt ucunun hız
+ * sınırlayıcısı BAŞARISIZ denemeyi de sayar; yazım hatası kullanıcının kayıt
+ * hakkını yakmasın diye istek gönderilmeden önce uyarıyoruz.
  *
  * Parolayı kullanıcı kendi seçtiği için ilk girişte parola değiştirme
  * istenmez; kayıt başarılıysa doğrudan panele geçilir.
@@ -20,7 +25,6 @@ import { Alert, Field } from "@/components/ui";
 export function RegisterForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,18 +33,43 @@ export function RegisterForm() {
   const [busy, setBusy] = useState(false);
   const hydrated = useHydrated();
 
-  // Anında geri bildirim; gönderimi ENGELLEMEZ, sunucu yine doğrular.
+  // Anında geri bildirim; ayrıca gönderimi de engeller (aşağıdaki düğme).
   const mismatch = passwordConfirm.length > 0 && password !== passwordConfirm;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+
+    // Erken dönüşler finally'ye girmediği için bu kontroller setBusy'den ÖNCE olmalı.
+    const uname = validateUsername(username);
+    if (!uname.ok) {
+      setError(uname.error);
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setError("Parolalar birbiriyle eşleşmiyor.");
+      return;
+    }
+    const policy = validatePassword(password, uname.value);
+    if (!policy.ok) {
+      setError(policy.error);
+      return;
+    }
+
     setBusy(true);
 
     try {
       await apiFetch("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify({ username, displayName, password, passwordConfirm, keepSignedIn }),
+        // Görünen ad ayrı sorulmaz: sunucu 2-80 karakter ister, kullanıcı adı
+        // zaten 3-32 karakter olduğu için bu kural her zaman karşılanır.
+        body: JSON.stringify({
+          username,
+          displayName: username,
+          password,
+          passwordConfirm,
+          keepSignedIn,
+        }),
       });
       router.replace("/panel");
       router.refresh();
@@ -61,7 +90,7 @@ export function RegisterForm() {
     <form className="space-y-4" method="post" onSubmit={handleSubmit} noValidate>
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
-      <Field label="Kullanıcı adı" htmlFor="username" hint="Giriş yaparken bunu kullanacaksınız.">
+      <Field label="Kullanıcı adı" htmlFor="username" hint="Boşluksuz yazın, en az 3 harf olsun.">
         <input
           id="username"
           name="username"
@@ -76,19 +105,7 @@ export function RegisterForm() {
         />
       </Field>
 
-      <Field label="Görünen ad" htmlFor="displayName" hint="Uygulamada size nasıl seslenelim?">
-        <input
-          id="displayName"
-          name="displayName"
-          className="control"
-          autoComplete="name"
-          required
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-        />
-      </Field>
-
-      <Field label="Parola" htmlFor="password">
+      <Field label="Parola" htmlFor="password" hint="En az 10 karakter; harf ve rakam içermeli.">
         <div className="relative">
           <input
             id="password"
@@ -124,23 +141,22 @@ export function RegisterForm() {
         />
       </Field>
 
-      <label className="flex items-start gap-2.5 text-sm text-muted">
+      <label className="flex items-center gap-2.5 text-sm">
         <input
           type="checkbox"
           name="keepSignedIn"
-          className="mt-0.5 h-4 w-4"
+          className="h-4 w-4"
           checked={keepSignedIn}
           onChange={(event) => setKeepSignedIn(event.target.checked)}
         />
-        <span>
-          <span className="font-medium text-ink">Bu cihazda oturumumu açık tut</span>
-          <span className="mt-0.5 block text-xs leading-relaxed text-subtle">
-            İşaretlerseniz siz çıkış yapana kadar oturumunuz açık kalır.
-          </span>
-        </span>
+        <span className="font-medium text-ink">Bu cihazda oturumumu açık tut</span>
       </label>
 
-      <button type="submit" className="btn btn-primary w-full" disabled={busy || !hydrated}>
+      <button
+        type="submit"
+        className="btn btn-primary w-full"
+        disabled={busy || !hydrated || mismatch}
+      >
         {busy ? "Hesap oluşturuluyor…" : "Hesap oluştur"}
       </button>
     </form>

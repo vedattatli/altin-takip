@@ -292,14 +292,20 @@ export class AnlikAltinProvider extends BaseProvider {
      *
      * Sözleşme ayrıca doğrulanır: blok işaretleri tutmazsa o tablo hiç
      * okunmaz, ana tablodan gelen fiyatlar etkilenmez.
+     *
+     * Bloğun KENDİ güncelleme tarihi de zorunludur: tarihsizse bayatlık
+     * denetlenemez, o yüzden tablo hiç okunmaz — ana tabloya uygulanan
+     * "tarih yoksa fail closed" kuralının aynısı. Külçe fiyatsız kalır;
+     * ana tablodan gelen fiyatlar etkilenmez.
      */
     const wholesale = parseAnlikAltinTable(html, ANLIK_ALTIN_WHOLESALE_CONTRACT);
-    const wholesaleRows = tableContractOk(wholesale, ANLIK_ALTIN_WHOLESALE_CONTRACT)
-      ? wholesale.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_WHOLESALE_MAPPING }))
-      : [];
+    const wholesaleRows =
+      tableContractOk(wholesale, ANLIK_ALTIN_WHOLESALE_CONTRACT) && wholesale.updateDate !== null
+        ? wholesale.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_WHOLESALE_MAPPING, table: wholesale }))
+        : [];
 
     for (const entry of [
-      ...table.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_MAPPING })),
+      ...table.rows.map((row) => ({ row, mapping: ANLIK_ALTIN_MAPPING, table })),
       ...wholesaleRows,
     ]) {
       const row = entry.row;
@@ -315,9 +321,18 @@ export class AnlikAltinProvider extends BaseProvider {
       // Satış < alış görünüyorsa sütunlar ters olabilir: DÜZELTİLMEZ, atlanır.
       if (Number(replacement) < Number(liquidation)) continue;
 
-      const rowTime = row.time ?? table.updateTime;
-      if (rowTime === null) continue;
-      const observedAt = toIsoTimestamp(table.updateDate, rowTime, table.updateTime);
+      /*
+       * DAMGA HER ZAMAN SATIRIN KENDİ TABLOSUNDAN GELİR.
+       *
+       * Satırın kendi saati okunamazsa yedek, ait olduğu bloğun saatidir —
+       * ANA tablonunki değil. Aksi halde donmuş bir blok (toptan bloğu sayfada
+       * gizli, class="hide") ana tablonun taze saatiyle damgalanır ve günler
+       * öncesinin külçe fiyatı "Güncel" görünürdü.
+       */
+      const src = entry.table;
+      const rowTime = row.time ?? src.updateTime;
+      if (rowTime === null || src.updateDate === null) continue;
+      const observedAt = toIsoTimestamp(src.updateDate, rowTime, src.updateTime);
       if (observedAt === null) continue;
 
       seen.add(productId);

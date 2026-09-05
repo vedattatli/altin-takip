@@ -2,23 +2,31 @@
 
 import { useState } from "react";
 
+import { getProduct } from "@/domain/catalog";
 import { apiFetch } from "@/lib/api-client";
-import { formatDateTime } from "@/lib/format";
-import { Alert, Card, SectionTitle, cx } from "../ui";
+import { formatDateTime, formatMoney } from "@/lib/format";
+import { sourceBadgeFor } from "@/prices/valuation-plan";
+import { Alert, Card, Explain, SectionTitle, cx } from "../ui";
 
 /**
  * Yönetici — Fiyat Kaynakları.
  *
- * Lisans durumu, kapsam, sağlık ve son alım koşumu tek ekranda görünür.
- * Lisanssız veya yapılandırılmamış kaynak ETKİNLEŞTİRİLEMEZ (sunucu da reddeder).
- * Bu ekranda API anahtarı veya secret GÖSTERİLMEZ; yalnızca eksik değişken ADLARI.
+ * Ekran tek soruyu yanıtlar: fiyat geliyor mu, gelmiyorsa hangi kaynaktan.
+ * En üstte tek satırlık durum özeti, altında yalnızca BAĞLI kaynakların
+ * kartları durur.
+ *
+ * Bağlanmamış kaynaklar (kurulmamış, lisans bekleyen, yalnızca referans)
+ * kapalı bir listeye iner. Bu YALNIZCA arayüz filtresidir; kaynaklar kodda
+ * ve API'de olduğu gibi kalır, etkinleştirme kapısı (`canEnable` + sunucu
+ * kısıtı) yerindedir.
+ *
+ * Bu ekranda API anahtarı, secret veya ortam değişkeni ADI gösterilmez.
  */
 
 export interface AdminProviderRow {
   code: string;
   displayName: string;
   technicalName: string;
-  marketId: string;
   marketDisplayName: string;
   providerType: string;
   enabled: boolean;
@@ -30,8 +38,6 @@ export interface AdminProviderRow {
    */
   canEnable: boolean;
   licenseStatus: string;
-  licenseReference: string | null;
-  redistributionAllowed: boolean;
   capabilities: string[];
   attribution: string;
   referenceUrl: string | null;
@@ -41,43 +47,28 @@ export interface AdminProviderRow {
     status: string;
     lastSuccessAt: string | null;
     lastErrorAt: string | null;
-    coverageCount: number;
-    staleCount: number;
-    quarantinedCount: number;
-    latencyMs: number | null;
-    safeErrorCode: string | null;
   } | null;
   lastRun: {
     status: string;
-    startedAt: string;
-    completedAt: string | null;
     quoteCount: number;
     rejectedCount: number;
-    latencyMs: number | null;
     safeErrorCode: string | null;
   } | null;
-  runtimeLicenseStatus: string;
-  selectable: boolean;
   blockedReason: string | null;
   missingConfig: string[];
   /** Açık global varsayılan kaynak mı? */
   isDefault: boolean;
   /** Sağlayıcının sunduğunu söylediği ama bizde adapter'ı OLMAYAN yetenekler. */
   advertisedCapabilities: string[];
-  requiresPersistentWorker: boolean;
 }
 
 /** Karantina satırı (salt okunur). */
 export interface AdminQuarantineRow {
   providerCode: string;
-  marketId: string;
   canonicalProductId: string;
   rejectionCode: string;
   liquidationPrice: string | null;
   replacementPrice: string | null;
-  currency: string | null;
-  providerTimestamp: string | null;
-  fetchedAt: string | null;
   mappingVersion: string | null;
   createdAt: string;
 }
@@ -102,20 +93,54 @@ const REJECTION_LABELS: Record<string, string> = {
   DUPLICATE_CANONICAL_PRODUCT: "Aynı üründen iki kayıt",
 };
 
+/**
+ * Lisans rozeti metinleri.
+ *
+ * `EXPERIMENTAL_PRIVATE` de burada olmak ZORUNDA: uygulamanın fiyat üreten
+ * kaynaklarının hepsi bu durumdadır ve sözlükte karşılığı yokken ekrana ham
+ * İngilizce sabit basılıyordu. Rozet silinemez — lisanssız kaynak arayüzde
+ * lisanssız etiketlenir.
+ */
 const LICENSE_LABELS: Record<string, string> = {
   LICENSED: "Lisanslı",
   LICENSE_REQUIRED: "Lisans bekleniyor",
   NOT_CONFIGURED: "Yapılandırılmadı",
   DEV_ONLY: "Yalnızca geliştirme",
+  EXPERIMENTAL_PRIVATE: "Lisanssız",
 };
 
-const HEALTH_LABELS: Record<string, string> = {
-  ok: "Çalışıyor",
-  degraded: "Kısmi",
-  unavailable: "Ulaşılamıyor",
-  not_configured: "Yapılandırılmadı",
-  license_required: "Lisans bekleniyor",
+/** Alım koşumu sonucu — veritabanı sabitleri ham İngilizce gelir. */
+const RUN_LABELS: Record<string, string> = {
+  RUNNING: "Sürüyor",
+  SUCCESS: "Başarılı",
+  PARTIAL: "Kısmi",
+  FAILED: "Başarısız",
+  SKIPPED: "Atlandı",
 };
+
+/**
+ * Kart başlığı ve mesajlarda kullanılan ad.
+ *
+ * `displayName` piyasa adıdır ve iki kaynakta birden aynı olabilir ("Kayseri
+ * Yerel Piyasa" x2). Kullanıcı ekranındaki rozet adı hem ayırt eder hem de
+ * iki ekranın aynı kaynağı aynı adla anmasını sağlar.
+ */
+function providerLabel(provider: AdminProviderRow): string {
+  return sourceBadgeFor(provider.code)?.label ?? provider.displayName;
+}
+
+/**
+ * "Bağlı kaynak" = sistemin gerçekten fiyat çektiği ya da yöneticinin açtığı
+ * kaynak. Yalnızca bunlar kart olarak çizilir; geri kalanı kapalı listeye iner.
+ */
+function isConnected(provider: AdminProviderRow): boolean {
+  return provider.enabled || provider.coverage > 0 || provider.lastRun !== null;
+}
+
+/** Bağlanmamış kaynağın tek cümlelik sebebi. */
+function disconnectedReason(provider: AdminProviderRow): string {
+  return provider.blockedReason ?? "Kapalı; bu kaynaktan fiyat alınmıyor.";
+}
 
 export function AdminPriceSourcesView({
   initialProviders,
@@ -130,7 +155,20 @@ export function AdminPriceSourcesView({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultProvider = providers.find((provider) => provider.isDefault) ?? null;
+  const connected = providers.filter(isConnected);
+  const disconnected = providers.filter((provider) => !isConnected(provider));
+
+  // Durum özeti: açık ama veri getirmeyen kaynak "fiyat gelmiyor" demektir.
+  const enabledProviders = providers.filter((provider) => provider.enabled);
+  const silentProviders = enabledProviders.filter(
+    (provider) => provider.coverage === 0 || !provider.health?.lastSuccessAt,
+  );
+  let lastSuccessAt: string | null = null;
+  for (const provider of enabledProviders) {
+    const at = provider.health?.lastSuccessAt;
+    if (!at) continue;
+    if (!lastSuccessAt || Date.parse(at) > Date.parse(lastSuccessAt)) lastSuccessAt = at;
+  }
 
   async function reload() {
     const [rows, quarantineRows] = await Promise.all([
@@ -159,37 +197,43 @@ export function AdminPriceSourcesView({
     <div className="space-y-5">
       <SectionTitle
         title="Fiyat kaynakları"
-        description="Kaynakların lisans durumu, kapsamı ve sağlığı. Lisanssız kaynak etkinleştirilemez ve kullanıcıya sunulmaz."
+        description="Fiyatların hangi kaynaktan geldiği ve en son ne zaman güncellendiği."
       />
 
       {notice ? <Alert tone="success">{notice}</Alert> : null}
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
-      <Card className="p-4" data-testid="default-source">
-        <p className="text-sm font-semibold text-ink">Global varsayılan kaynak</p>
-        <p className="mt-1 text-xs text-muted">
-          {defaultProvider
-            ? `${defaultProvider.displayName} (${defaultProvider.marketDisplayName})`
-            : "Tanımlı değil — kendi seçimini yapmamış kullanıcılara fiyat kaynağı ATANMAZ."}
-        </p>
-        <p className="mt-1 text-xs text-subtle">
-          Kendi tercihini yapmış kullanıcılar bu değişiklikten etkilenmez.
-        </p>
-      </Card>
+      {enabledProviders.length === 0 ? (
+        <Alert tone="danger">Hiçbir fiyat kaynağı açık değil; fiyat gelmiyor.</Alert>
+      ) : silentProviders.length > 0 ? (
+        <Alert tone="notice">
+          {silentProviders.length} kaynaktan fiyat gelmiyor:{" "}
+          {silentProviders.map(providerLabel).join(", ")}.
+        </Alert>
+      ) : (
+        <Alert tone="success">
+          Fiyat kaynakları çalışıyor.
+          {lastSuccessAt ? ` Son güncelleme ${formatDateTime(lastSuccessAt)}.` : ""}
+        </Alert>
+      )}
 
       <ul className="space-y-3" data-testid="admin-price-sources">
-        {providers.map((provider) => (
+        {connected.length === 0 ? (
+          <li className="text-sm text-muted">Bağlı fiyat kaynağı yok.</li>
+        ) : null}
+        {connected.map((provider) => (
           <Card key={provider.code} className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <p className="text-sm font-semibold text-ink">{provider.displayName}</p>
+                  <p className="text-sm font-semibold text-ink">{providerLabel(provider)}</p>
                   <span
                     className={cx(
                       "badge",
                       provider.licenseStatus === "LICENSED"
                         ? "badge-positive"
-                        : provider.licenseStatus === "DEV_ONLY"
+                        : provider.licenseStatus === "DEV_ONLY" ||
+                            provider.licenseStatus === "EXPERIMENTAL_PRIVATE"
                           ? "badge-notice"
                           : "badge-negative",
                     )}
@@ -197,86 +241,52 @@ export function AdminPriceSourcesView({
                     {LICENSE_LABELS[provider.licenseStatus] ?? provider.licenseStatus}
                   </span>
                   {provider.enabled ? <span className="badge badge-positive">Etkin</span> : null}
-                  {provider.userSelectable ? <span className="badge">Kullanıcıya açık</span> : null}
-                  {provider.isDefault ? <span className="badge badge-positive">Global varsayılan</span> : null}
-                  {provider.capabilities.includes("PROTOTYPE") ? (
-                    <span className="badge badge-notice">Taslak adapter</span>
-                  ) : null}
-                  {provider.capabilities.includes("REFERENCE_ONLY") ? (
-                    <span className="badge badge-notice">Yalnızca referans</span>
-                  ) : null}
                 </div>
-                <p className="mt-0.5 break-words text-xs text-muted">
-                  {provider.technicalName} · {provider.marketDisplayName} · {provider.providerType}
-                </p>
+                <p className="mt-0.5 break-words text-xs text-muted">{provider.technicalName}</p>
                 <p className="tabular mt-1 text-xs text-subtle">
-                  Kapsam: {provider.coverage} ürün · Eşleme: {provider.mappingCount} sembol
-                  {provider.health ? ` · Sağlık: ${HEALTH_LABELS[provider.health.status] ?? provider.health.status}` : ""}
+                  {provider.coverage} üründe fiyat
                   {provider.health?.lastSuccessAt
-                    ? ` · Son başarılı: ${formatDateTime(provider.health.lastSuccessAt)}`
+                    ? ` · Son güncelleme ${formatDateTime(provider.health.lastSuccessAt)}`
                     : ""}
                 </p>
                 {provider.lastRun ? (
                   <p className="tabular mt-0.5 text-xs text-subtle">
-                    Son koşum: {provider.lastRun.status} · {provider.lastRun.quoteCount} fiyat ·{" "}
-                    {provider.lastRun.rejectedCount} karantina
-                    {provider.lastRun.safeErrorCode ? ` · ${provider.lastRun.safeErrorCode}` : ""}
+                    Son alım: {RUN_LABELS[provider.lastRun.status] ?? provider.lastRun.status} ·{" "}
+                    {provider.lastRun.quoteCount} fiyat alındı · {provider.lastRun.rejectedCount}{" "}
+                    fiyat reddedildi
                   </p>
                 ) : null}
-                {provider.missingConfig.length > 0 ? (
-                  // Değişken adları uzun ve bölünmeyen tek kelimelerdir (ör.
-                  // SARRAFPRO_REDISTRIBUTION_ALLOWED); 390 px'te taşmaması için kırılır.
-                  <p className="mt-1 break-words text-xs text-[var(--notice)]">
-                    Eksik ayar: {provider.missingConfig.join(", ")}
-                  </p>
-                ) : null}
-                {provider.advertisedCapabilities.length > 0 ? (
-                  <p className="mt-1 break-words text-xs text-subtle">
-                    Sağlayıcı ayrıca şunları sunduğunu bildiriyor ama bizde çalışan adapter YOK:{" "}
-                    {provider.advertisedCapabilities.join(", ")}
-                  </p>
-                ) : null}
-                {provider.requiresPersistentWorker ? (
-                  <p className="mt-1 break-words text-xs text-subtle">
-                    Bu kaynak kalıcı worker gerektirir (istek ömrü içinde bağlantı açılmaz).
+                {/* Ortam değişkeni ADLARI ekrana yazılmaz; sahibinin okuyacağı tek
+                    şey kaynağın neden fiyat alamadığıdır. blockedReason varsa aynı
+                    cümle iki kez yazılmasın diye yalnızca o gösterilir. */}
+                {provider.missingConfig.length > 0 && !provider.blockedReason ? (
+                  <p className="mt-1 text-xs text-[var(--notice)]">
+                    Bu kaynak kurulmadığı için fiyat alamıyor.
                   </p>
                 ) : null}
                 {provider.blockedReason ? (
                   <p className="mt-1 break-words text-xs text-[var(--notice)]">{provider.blockedReason}</p>
                 ) : null}
-                <p className="mt-1 max-w-prose break-words text-xs text-subtle">{provider.attribution}</p>
-                {provider.referenceUrl ? (
-                  <a
-                    className="mt-1 inline-block text-xs text-accent underline"
-                    href={provider.referenceUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >
-                    Kaynağın resmî sayfası
-                  </a>
-                ) : null}
+                {/* Dürüst kaynak açıklaması SİLİNMEZ, yalnızca katlanır: bir kez
+                    okunacak referans bilgisidir, her kartta açık durması gerekmez. */}
+                <Explain title="Kaynak hakkında" className="mt-1.5">
+                  <p className="max-w-prose break-words">{provider.attribution}</p>
+                  {provider.referenceUrl ? (
+                    <a
+                      className="mt-1 inline-block text-accent underline"
+                      href={provider.referenceUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Kaynağın sayfası
+                    </a>
+                  ) : null}
+                </Explain>
               </div>
 
               {/* shrink-0 mobilde max-content genişlik dayatıp yatay taşma üretiyordu;
                   dar ekranda kendi satırını alır ve düğmeler içeride sarar. */}
               <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
-                <button
-                  type="button"
-                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
-                  disabled={busy !== null}
-                  data-testid={`test-${provider.code}`}
-                  onClick={() =>
-                    void run(provider.code, async () => {
-                      const health = await apiFetch<{ status: string; message: string }>(
-                        `/api/admin/price-sources/${provider.code}/test`,
-                        { method: "POST" },
-                      );
-                      return `${provider.displayName}: ${health.message}`;
-                    })
-                  }
-                >
-                  Bağlantıyı test et
-                </button>
                 <button
                   type="button"
                   className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
@@ -288,7 +298,7 @@ export function AdminPriceSourcesView({
                         `/api/admin/price-sources/${provider.code}/refresh`,
                         { method: "POST" },
                       );
-                      return `${provider.displayName}: ${result.message}`;
+                      return `${providerLabel(provider)}: ${result.message}`;
                     })
                   }
                 >
@@ -309,48 +319,12 @@ export function AdminPriceSourcesView({
                         }),
                       });
                       return provider.enabled
-                        ? `${provider.displayName} kapatıldı.`
-                        : `${provider.displayName} etkinleştirildi.`;
+                        ? `${providerLabel(provider)} kapatıldı.`
+                        : `${providerLabel(provider)} etkinleştirildi.`;
                     })
                   }
                 >
                   {provider.enabled ? "Kapat" : "Etkinleştir"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
-                  disabled={busy !== null || !provider.enabled}
-                  data-testid={`selectable-${provider.code}`}
-                  onClick={() =>
-                    void run(provider.code, async () => {
-                      await apiFetch(`/api/admin/price-sources/${provider.code}`, {
-                        method: "PATCH",
-                        body: JSON.stringify({ enabled: true, userSelectable: !provider.userSelectable }),
-                      });
-                      return provider.userSelectable
-                        ? `${provider.displayName} kullanıcı seçimine kapatıldı.`
-                        : `${provider.displayName} kullanıcı seçimine açıldı.`;
-                    })
-                  }
-                >
-                  {provider.userSelectable ? "Kullanıcıya kapat" : "Kullanıcıya aç"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost min-h-9 px-2.5 py-1 text-xs"
-                  disabled={busy !== null || !provider.userSelectable || provider.isDefault}
-                  data-testid={`default-${provider.code}`}
-                  onClick={() =>
-                    void run(provider.code, async () => {
-                      await apiFetch("/api/admin/price-sources/default", {
-                        method: "PUT",
-                        body: JSON.stringify({ providerCode: provider.code }),
-                      });
-                      return `${provider.displayName} global varsayılan kaynak yapıldı.`;
-                    })
-                  }
-                >
-                  {provider.isDefault ? "Varsayılan" : "Varsayılan yap"}
                 </button>
               </div>
             </div>
@@ -358,16 +332,31 @@ export function AdminPriceSourcesView({
         ))}
       </ul>
 
+      {disconnected.length > 0 ? (
+        <Card className="p-4" data-testid="disconnected-sources">
+          {/* Kaynaklar koddan silinmez; yalnızca ekranı doldurmasınlar diye katlanır.
+              Ad olarak technicalName kullanılır: displayName birkaç kaynakta aynıdır
+              ve liste birbirinin kopyası satırlara dönerdi. */}
+          <Explain title={`Bağlanmamış kaynaklar (${disconnected.length})`}>
+            <ul className="space-y-1.5">
+              {disconnected.map((provider) => (
+                <li key={provider.code} className="break-words">
+                  {provider.technicalName} — {disconnectedReason(provider)}
+                </li>
+              ))}
+            </ul>
+          </Explain>
+        </Card>
+      ) : null}
+
       <Card className="p-4" data-testid="quarantine-list">
-        <p className="text-sm font-semibold text-ink">Son karantina kayıtları</p>
-        <p className="mt-1 text-xs text-muted">
-          Bu fiyatlar değerlemeye GİRMEDİ. Kayıtlar değiştirilemez; ham sağlayıcı yanıtı saklanmaz.
-        </p>
+        <p className="text-sm font-semibold text-ink">Reddedilen fiyatlar</p>
+        <p className="mt-1 text-xs text-muted">Bu fiyatlar değerlemeye girmedi.</p>
         {quarantine.length === 0 ? (
-          <p className="mt-2 text-xs text-subtle">Karantinaya alınmış kayıt yok.</p>
+          <p className="mt-2 text-xs text-subtle">Reddedilen fiyat yok.</p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-xs">
+            <table className="w-full min-w-[520px] text-left text-xs">
               <thead className="text-subtle">
                 <tr>
                   <th className="py-1 pr-3 font-medium">Zaman</th>
@@ -376,21 +365,29 @@ export function AdminPriceSourcesView({
                   <th className="py-1 pr-3 font-medium">Sebep</th>
                   <th className="py-1 pr-3 font-medium">Bozdurma</th>
                   <th className="py-1 pr-3 font-medium">Yeniden alım</th>
-                  <th className="py-1 pr-3 font-medium">Eşleme</th>
                 </tr>
               </thead>
               <tbody className="text-muted">
                 {quarantine.map((row, index) => (
                   <tr key={`${row.providerCode}-${row.canonicalProductId}-${row.createdAt}-${index}`}>
                     <td className="tabular py-1 pr-3">{formatDateTime(row.createdAt)}</td>
-                    <td className="py-1 pr-3">{row.providerCode}</td>
-                    <td className="py-1 pr-3">{row.canonicalProductId}</td>
+                    <td className="py-1 pr-3">
+                      {sourceBadgeFor(row.providerCode)?.label ?? row.providerCode}
+                    </td>
+                    {/* requireProduct bilinmeyen kimlikte HATA fırlatır; tek eski kayıt
+                        yüzünden yönetim tablosu çökmesin diye ham kimliğe düşülür. */}
+                    <td className="py-1 pr-3">
+                      {getProduct(row.canonicalProductId)?.name ?? row.canonicalProductId}
+                    </td>
                     <td className="py-1 pr-3 text-[var(--notice)]">
                       {REJECTION_LABELS[row.rejectionCode] ?? row.rejectionCode}
                     </td>
-                    <td className="tabular py-1 pr-3">{row.liquidationPrice ?? "—"}</td>
-                    <td className="tabular py-1 pr-3">{row.replacementPrice ?? "—"}</td>
-                    <td className="py-1 pr-3 break-words">{row.mappingVersion ?? "—"}</td>
+                    <td className="tabular py-1 pr-3">
+                      {row.liquidationPrice ? formatMoney(row.liquidationPrice) : "—"}
+                    </td>
+                    <td className="tabular py-1 pr-3">
+                      {row.replacementPrice ? formatMoney(row.replacementPrice) : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -23,11 +23,10 @@
  */
 
 /** Kullanıcıya gösterilen plan adı. Teknik sağlayıcı adı değildir. */
-export const VALUATION_PLAN_NAME = "Hibrit Kayseri Değerlemesi";
+export const VALUATION_PLAN_NAME = "Kayseri ağırlıklı fiyatlar";
 
 export const VALUATION_PLAN_DESCRIPTION =
-  "Kayseri ekranında bulunan ürünler Sarraf TV Kayseri fiyatıyla, bulunmayan ürünler " +
-  "Kapalıçarşı ve Türkiye geneli referans fiyatlarıyla hesaplanır.";
+  "Her ürünün fiyatı listede yazan tek bir piyasadan gelir: Kayseri, Kapalıçarşı veya Türkiye geneli.";
 
 /** Hibrit planın anlık görüntüde kullandığı sanal kimlik. */
 export const HYBRID_PROVIDER_ID = "hibrit-kayseri";
@@ -132,8 +131,7 @@ export const SHARED_CATEGORY_QUOTE: Readonly<Record<string, string>> = {
   "eski-tam": "yeni-tam",
 };
 
-export const SHARED_CATEGORY_NOTE =
-  "Kayseri ekranı yeni/eski ayrımı yayımlamadığı için ortak kategori fiyatı kullanılır.";
+export const SHARED_CATEGORY_NOTE = "Eski ve yeni çeyrek/yarım/tam altın aynı fiyatla gösterilir.";
 
 /**
  * GÖRÜNÜM GRUPLARI
@@ -210,39 +208,15 @@ export function plannedProviderFor(productId: string): PlanProviderCode | null {
  */
 export interface SourceBadge {
   label: string;
-  description: string;
 }
 
 export const SOURCE_BADGES: Readonly<Record<string, SourceBadge>> = {
-  [SCREEN_PROVIDER_CODE]: {
-    label: "Kayseri — Sarraf TV",
-    description: "Kayseri sarraflarının canlı ekranında görünen tezgâh fiyatı.",
-  },
-  [KAPALICARSI_PROVIDER_CODE]: {
-    label: "Kapalıçarşı — Anlık Altın",
-    description:
-      "anlikaltinfiyatlari.com sayfasındaki Kapalıçarşı Önerilen tablosu. Kayseri tezgâh fiyatı değildir.",
-  },
-  [TURKIYE_PROVIDER_CODE]: {
-    label: "Türkiye Geneli — Trunçgil",
-    description: "Türkiye geneli piyasa referansı. Belirli bir kuyumcunun tezgâh fiyatı değildir.",
-  },
+  [SCREEN_PROVIDER_CODE]: { label: "Kayseri" },
+  [KAPALICARSI_PROVIDER_CODE]: { label: "Kapalıçarşı" },
+  [TURKIYE_PROVIDER_CODE]: { label: "Türkiye geneli" },
 };
 
 export function sourceBadgeFor(providerCode: string | null | undefined): SourceBadge | null {
   if (!providerCode) return null;
   return SOURCE_BADGES[providerCode] ?? null;
-}
-
-/** Kaç ürünün hangi kaynaktan değerlendiğini özetler (kullanıcıya tek cümle). */
-export function summarizeSources(providerCodes: readonly string[]): string {
-  const counts = new Map<string, number>();
-  for (const code of providerCodes) counts.set(code, (counts.get(code) ?? 0) + 1);
-  const parts: string[] = [];
-  for (const code of PLAN_PROVIDER_CODES) {
-    const count = counts.get(code);
-    if (!count) continue;
-    parts.push(`${count} ürün ${SOURCE_BADGES[code]!.label}`);
-  }
-  return parts.length === 0 ? "" : `${parts.join(", ")} fiyatıyla değerleniyor.`;
 }

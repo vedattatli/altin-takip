@@ -26,11 +26,22 @@ test.describe("fiyat kaynakları", () => {
     await gotoReady(page, "/yonetim/fiyat-kaynaklari");
 
     await expect(page.getByTestId("admin-price-sources")).toBeVisible();
-    await expect(page.getByText("Kayseri Yerel Piyasa", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/Kayseri Sarraflar ve Kuyumcular Derneği/).first()).toBeVisible();
+
+    /*
+     * Ekran yalnızca değerleme planının kaynaklarını ve yöneticinin açtığı
+     * kaynakları kart olarak çizer; fiyat getirmeyenler katlanmış listeye
+     * iner. DÜRÜST ADLANDIRMA orada da sürer: her kaynak gerçekte okuduğu
+     * ekranın/tablonun adıyla anılır, başka bir piyasanın fiyatıymış gibi
+     * gösterilmez.
+     */
+    const disconnected = page.getByTestId("disconnected-sources");
+    await disconnected.locator("summary").click();
+    await expect(disconnected.getByText(/Sarraf TV Kayseri ekran gözlemi/)).toBeVisible();
+    await expect(
+      disconnected.getByText(/anlikaltinfiyatlari\.com — Kapalıçarşı Önerilen tablosu/),
+    ).toBeVisible();
     // Harem'in resmî servisi iddiası hiçbir yerde geçmez.
     await expect(page.getByText(/Harem resmî/i)).toHaveCount(0);
-    await expect(page.getByText(/AltinAPI — bağımsız veri sağlayıcısı/).first()).toBeVisible();
 
     // Lisanssız kaynak API üzerinden de etkinleştirilemez.
     const blocked = await browserApi(page, "PATCH", "/api/admin/price-sources/harem-direct", {
@@ -54,7 +65,7 @@ test.describe("fiyat kaynakları", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("kullanıcı yalnızca açık kaynağı seçer; değişim onay ister ve geçmişi değiştirmez", async ({ page, browser }) => {
+  test("kullanıcı yalnızca açık kaynağı seçer; arayüzde kaynak seçimi yoktur ve geçmiş değişmez", async ({ page, browser }) => {
     test.setTimeout(120_000);
     const adminContext = await browser.newContext();
     const adminPage = await adminContext.newPage();
@@ -70,10 +81,19 @@ test.describe("fiyat kaynakları", () => {
     const sources = await browserApi<{ options: { providerCode: string }[] }>(page, "GET", "/api/price-sources");
     expect(sources.status).toBe(200);
     expect(sources.data?.options.map((option) => option.providerCode)).toEqual(["mock"]);
-    const rejected = await browserApi(page, "POST", "/api/price-sources", { providerCode: "harem-direct" });
-    expect(rejected.status).toBe(409);
-    const reference = await browserApi(page, "POST", "/api/price-sources", { providerCode: "bist-reference" });
-    expect(reference.status).toBe(409);
+    /*
+     * KULLANICI BAZLI KAYNAK SEÇİMİ UCU KALDIRILDI.
+     *
+     * Eskiden bu uç, seçilemez bir kaynak istendiğinde 409 dönerdi. Sadeleştirme
+     * turunda ürün kararı değişti: kullanıcı hiçbir kaynağı seçmez, hangi ürünün
+     * fiyatının nereden geleceğine değerleme planı karar verir. Uç POST kabul
+     * etmiyor (405) — yani "yanlış kaynak seçme" ihtimali ortadan KALKTI, sadece
+     * reddedilmiyor. Bu test o kapının kapalı kaldığını sabitler.
+     */
+    for (const providerCode of ["harem-direct", "bist-reference", "mock"]) {
+      const attempt = await browserApi(page, "POST", "/api/price-sources", { providerCode });
+      expect(attempt.status, providerCode).toBe(405);
+    }
 
     // Portföyde işlem oluştur ve değerlemeyi kaydet.
     const created = await browserApi(page, "POST", "/api/transactions", {
@@ -87,19 +107,11 @@ test.describe("fiyat kaynakları", () => {
     expect(created.status).toBe(201);
 
     await gotoReady(page, "/fiyat-kaynagi");
+    // Ekran teknik sağlayıcı SEÇTİRMEZ: ne seçim düğmesi ne de onay adımı
+    // vardır; kullanıcıya yalnızca fiyatların durumu gösterilir.
     await expect(page.getByTestId("active-source")).toBeVisible();
-    // Ekran artık teknik sağlayıcı SEÇTİRMEZ: tek bir değerleme planı vardır
-    // ve hangi ürünün hangi kaynaktan geldiği plan tablosunda yazar.
-    await expect(page.getByTestId("plan-table")).toBeVisible();
-    await expect(page.getByTestId("active-source")).toContainText("Hibrit Kayseri Değerlemesi");
     await expect(page.getByTestId("select-mock")).toHaveCount(0);
     await expect(page.getByTestId("confirm-source-change")).toHaveCount(0);
-
-    // Kaynak değişimi API'si YERİNDEDİR (yönetici ve geçiş yolu için) ve
-    // hâlâ denetim kaydı üretir; yalnızca normal kullanıcı arayüzünden
-    // kaldırılmıştır.
-    const changed = await browserApi(page, "POST", "/api/price-sources", { providerCode: "mock" });
-    expect(changed.status).toBe(200);
 
     // Defter ve gerçekleşmiş K/Z değişmez.
     const ledger = await browserApi<{ totalPaid: string }[]>(page, "GET", "/api/transactions");
@@ -113,45 +125,61 @@ test.describe("fiyat kaynakları", () => {
     expect(summary.data?.totalRealizedPnl).toBe("0");
     await expectNoHorizontalOverflow(page);
 
-    // Karşılaştırma ekranı değerleme kaynağını değiştirmez.
-    const before = await browserApi<{ activeProviderCode: string }>(page, "GET", "/api/price-sources/compare");
-    expect(before.data?.activeProviderCode).toBe("mock");
-    await expect(page.getByTestId("compare-table")).toBeVisible();
-    const after = await browserApi<{ active: { providerCode: string } }>(page, "GET", "/api/price-sources");
-    expect(after.data?.active.providerCode).toBe("mock");
+    // Kullanıcı hiçbir şey seçemediği hâlde fiyat görebiliyor: kaynağı
+    // yönetici belirler, kullanıcının kararına gerek yoktur.
+    const after = await browserApi<{ active: { providerCode: string | null } }>(page, "GET", "/api/price-sources");
+    expect(after.status).toBe(200);
 
     await adminContext.close();
   });
 
-  test("panelde aktif kaynak, piyasa ve güncellik görünür; test verisi etiketli kalır", async ({ page, browser }) => {
+  test("fiyat ekranı güncelliği söyler; test verisi panelde etiketli kalır", async ({ page, browser }) => {
     const adminContext = await browser.newContext();
     const adminPage = await adminContext.newPage();
     await loginAsAdmin(adminPage, ADMIN.username, ADMIN.password);
     await browserApi(adminPage, "PATCH", "/api/admin/price-sources/mock", { enabled: true, userSelectable: true });
     await browserApi(adminPage, "POST", "/api/admin/price-sources/mock/refresh");
-    await adminContext.close();
 
-    const username = scopedUsername("kaynakpanel");
-    await createReadyUser(username);
-    await loginAsUser(page, username);
-    await browserApi(page, "POST", "/api/price-sources", { providerCode: "mock" });
-    await browserApi(page, "POST", "/api/transactions", {
-      kind: "BUY",
-      productId: "gram-altin",
-      quantity: "1",
-      occurredAt: "2026-01-10",
-      pricingInputMode: "UNIT_PRICE",
-      unitPrice: "5000",
-    });
+    /*
+     * GLOBAL VARSAYILAN KAYNAK — BU TESTİN SONUNDA GERİ ALINIR.
+     *
+     * Kullanıcı artık kaynak SEÇMEZ; kendi tercihi olmayan herkes yöneticinin
+     * global varsayılanını kullanır. Bu ayar depoda GLOBALDİR: açık bırakılırsa
+     * sonraki spec'lerdeki kullanıcılar da "mock" kaydına bağlanır, o kayıtlar
+     * bayatlar ve o testler fiyatsız kalır. Bu yüzden `finally` ile temizlenir.
+     */
+    await browserApi(adminPage, "PUT", "/api/admin/price-sources/default", { providerCode: "mock" });
 
-    await gotoReady(page, "/panel");
-    // Panelde artık teknik sağlayıcı adı değil DEĞERLEME PLANI görünür.
-    await expect(page.getByTestId("active-price-source")).toContainText("Hibrit Kayseri Değerlemesi");
-    await expect(page.getByTestId("active-price-source")).toContainText("Son fiyat güncellemesi");
-    // Test verisi etiketi kaynak ekranında korunur.
-    await gotoReady(page, "/fiyat-kaynagi");
-    await expect(page.getByTestId("compare-table")).toBeVisible();
-    await expectNoHorizontalOverflow(page);
+    try {
+      const username = scopedUsername("kaynakpanel");
+      await createReadyUser(username);
+      await loginAsUser(page, username);
+      await browserApi(page, "POST", "/api/transactions", {
+        kind: "BUY",
+        productId: "gram-altin",
+        quantity: "1",
+        occurredAt: "2026-01-10",
+        pricingInputMode: "UNIT_PRICE",
+        unitPrice: "5000",
+      });
+
+      /*
+       * Kaynak ekranının kullanıcıyı ilgilendiren tek bilgisi fiyatların ne
+       * kadar güncel olduğudur: durum etiketi ve son güncelleme zamanı. Kaynak
+       * yeni tazelendiği için durum "Güncel" olmak ZORUNDADIR; "Güncel değil"
+       * de aynı kelimeyi taşıdığından beklenti satırın tamamına bakar.
+       */
+      await gotoReady(page, "/fiyat-kaynagi");
+      await expect(page.getByTestId("active-source")).toHaveText(/^Güncel · Son güncelleme \d/);
+
+      // Test verisi panelde "gerçek piyasa verisi değil" diye etiketli kalır.
+      await gotoReady(page, "/panel");
+      await expect(page.getByTestId("price-source").getByText("Gerçek piyasa verisi değil")).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    } finally {
+      await browserApi(adminPage, "PUT", "/api/admin/price-sources/default", { providerCode: "" });
+      await adminContext.close();
+    }
   });
 
   test("zamanlanmış alım ucu: secret olmadan 403, secret ile CSRF çerezi OLMADAN çalışır", async ({
@@ -252,7 +280,8 @@ test.describe("fiyat kaynakları", () => {
     expect(request.data?.message).toContain("yönetici onayıyla");
 
     await gotoReady(page, "/gizlilik");
-    await expect(page.getByText("Bağlayıcı bir alım satım teklifi değildir.")).toBeVisible();
+    // Silme talebinin ne olacağı kullanıcıya gizlilik sayfasında da yazılır.
+    await expect(page.getByText(/yönetici onayıyla kalıcı olarak silinir/)).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 });

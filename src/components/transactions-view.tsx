@@ -23,8 +23,8 @@ const KIND_LABELS: Record<LedgerEntry["kind"], string> = {
   SELL: "Satış",
 };
 
-const STATUS_LABELS: Record<LedgerEntry["status"], string> = {
-  ACTIVE: "Aktif",
+/** Rozet yalnızca aktif OLMAYAN satırlarda basılır; "ACTIVE" için etiket yoktur. */
+const STATUS_LABELS: Record<Exclude<LedgerEntry["status"], "ACTIVE">, string> = {
   VOID: "İptal edildi",
   REPLACED: "Düzeltildi",
 };
@@ -39,32 +39,38 @@ function priceLine(entry: LedgerEntry): string {
     if (entry.quotedDisposalUnitPrice) {
       const net =
         entry.effectiveNetUnitProceeds && entry.effectiveNetUnitProceeds !== entry.quotedDisposalUnitPrice
-          ? ` · Net ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit}`
+          ? ` · Elinize geçen ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit}`
           : "";
       return `Birim satış ${formatMoney(entry.quotedDisposalUnitPrice)}/${unit}${net}`;
     }
     return entry.effectiveNetUnitProceeds
-      ? `Net birim tahsilat ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit} (net tutardan)`
+      ? `Elinize geçen ${formatMoney(entry.effectiveNetUnitProceeds)}/${unit} (toplam tutardan)`
       : "";
   }
   if (entry.quotedAcquisitionUnitPrice) {
     const effective =
       entry.effectiveAcquisitionUnitCost && entry.effectiveAcquisitionUnitCost !== entry.quotedAcquisitionUnitPrice
-        ? ` · Efektif ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit} (masraflar dâhil)`
+        ? ` · Masraflarla ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit}`
         : "";
     const label = entry.costBasisOrigin === "MARKET_BASELINE" ? "Başlangıç fiyatı" : "Birim fiyat";
     return `${label} ${formatMoney(entry.quotedAcquisitionUnitPrice)}/${unit}${effective}`;
   }
+  // "(toplam tutardan)": bu birim rakamı kullanıcı girmedi, girdiği toplam tutardan
+  // bölünerek çıkarıldı; ibare olmazsa kendi yazdığı bir fiyat sanır.
   return entry.effectiveAcquisitionUnitCost
-    ? `Efektif birim maliyet ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit} (toplam tutardan)`
+    ? `Birim maliyet ${formatMoney(entry.effectiveAcquisitionUnitCost)}/${unit} (toplam tutardan)`
     : "";
 }
 
+/**
+ * Rozet yalnızca İSTİSNA maliyet tabanları için basılır: kullanıcının kendi girdiği
+ * gerçek maliyet (ACTUAL) listedeki her satırda aynı olduğu için bilgi taşımaz.
+ */
 function originLabel(entry: LedgerEntry): string | null {
   if (entry.kind === "SELL") return null;
-  if (entry.costBasisOrigin === "ACTUAL") return COST_QUALITY_LABELS.ACTUAL;
   if (entry.costBasisOrigin === "ESTIMATED") return COST_QUALITY_LABELS.ESTIMATED;
-  return COST_QUALITY_LABELS.BASELINE;
+  if (entry.costBasisOrigin === "MARKET_BASELINE") return COST_QUALITY_LABELS.BASELINE;
+  return null;
 }
 
 function LedgerRow({
@@ -86,6 +92,15 @@ function LedgerRow({
   const origin = originLabel(entry);
   const hasFees = !dec(entry.fees).isZero();
   const hasWorkmanship = !dec(entry.workmanship).isZero();
+  /*
+   * Durum kelimesi ("İptal edildi" / "Düzeltildi") satırın üstündeki rozette zaten
+   * duruyor; burada yalnızca başka hiçbir yerde görünmeyen zaman ve sebep kalır.
+   */
+  const historyNote = isActive
+    ? ""
+    : [entry.voidedAt ? formatDateTime(entry.voidedAt) : null, entry.voidReason]
+        .filter((part): part is string => Boolean(part))
+        .join(" · ");
 
   return (
     <li
@@ -103,7 +118,11 @@ function LedgerRow({
             >
               {KIND_LABELS[entry.kind]}
             </span>
-            {!isActive ? <span className="badge">{STATUS_LABELS[entry.status]}</span> : null}
+            {!isActive ? (
+              <span className="badge">
+                {STATUS_LABELS[entry.status as Exclude<LedgerEntry["status"], "ACTIVE">]}
+              </span>
+            ) : null}
             {origin ? <span className="badge">{origin}</span> : null}
             <p className="truncate text-sm font-semibold text-ink">
               {product.name}
@@ -118,26 +137,11 @@ function LedgerRow({
               {hasWorkmanship ? `İşçilik: ${formatMoney(entry.workmanship)}` : ""}
               {hasWorkmanship && hasFees ? " · " : ""}
               {hasFees ? `Masraf: ${formatMoney(entry.fees)}` : ""}
-              {entry.pricingInputMode === "TOTAL_AMOUNT" ? " (toplam tutarın içinde)" : ""}
-            </p>
-          ) : null}
-          {entry.costBasisOrigin === "MARKET_BASELINE" && entry.priceSnapshot ? (
-            <p className="mt-0.5 text-xs text-subtle">
-              Anlık görüntü: {entry.priceSnapshot.provider} · {entry.priceSnapshot.market} ·{" "}
-              {formatDateTime(entry.priceSnapshot.providerTimestamp)} · gerçek tarihsel maliyet değildir
+              {entry.pricingInputMode === "TOTAL_AMOUNT" ? " (tutara dâhil)" : ""}
             </p>
           ) : null}
           {entry.note ? <p className="mt-1 break-words text-xs text-subtle">{entry.note}</p> : null}
-          {!isActive ? (
-            <p className="mt-1 text-xs text-subtle">
-              {STATUS_LABELS[entry.status]}
-              {entry.voidedAt ? ` · ${formatDateTime(entry.voidedAt)}` : ""}
-              {entry.voidReason ? ` · ${entry.voidReason}` : ""}
-            </p>
-          ) : null}
-          {entry.replacesTransactionId ? (
-            <p className="mt-1 text-xs text-subtle">Bir önceki kaydın düzeltilmiş hâlidir.</p>
-          ) : null}
+          {historyNote ? <p className="mt-1 text-xs text-subtle">{historyNote}</p> : null}
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -173,8 +177,15 @@ function LedgerRow({
 }
 
 export function TransactionsView({ initialForm = null }: { initialForm?: LedgerFormKind | null }) {
-  const { ledger, summary, appendTransaction, replaceTransaction, voidTransaction, status } =
-    usePortfolio();
+  const {
+    ledger,
+    summary,
+    appendTransaction,
+    replaceTransaction,
+    voidTransaction,
+    status,
+    error: loadError,
+  } = usePortfolio();
   const { isSimple } = useViewMode();
   const [form, setForm] = useState<LedgerFormKind | null>(initialForm);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
@@ -199,12 +210,12 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
   async function handleSubmit(command: LedgerCommand) {
     if (editing) {
       await replaceTransaction(editing.id, command);
-      setNotice("İşlem düzeltildi. Eski kayıt \"Düzeltildi\" olarak listede kalır.");
+      setNotice("İşlem düzeltildi. Eski kayıt listede üstü çizili kalır.");
     } else {
       const result = await appendTransaction(command);
       setNotice(
         result.replayed
-          ? "Bu işlem zaten kaydedilmişti; ikinci kez oluşturulmadı."
+          ? "Bu işlem zaten kayıtlıydı, tekrar eklenmedi."
           : command.kind === "OPENING_BALANCE"
             ? "Mevcut altın eklendi."
             : command.kind === "BUY"
@@ -221,7 +232,7 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
     setError(null);
     try {
       await voidTransaction(pendingVoid.id, voidReason.trim());
-      setNotice("İşlem iptal edildi. Kayıt silinmedi; \"İptal edildi\" olarak listede kalır.");
+      setNotice("İşlem iptal edildi. Kayıt listede üstü çizili kalır.");
       setPendingVoid(null);
       setVoidReason("");
     } catch (cause) {
@@ -234,8 +245,21 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
   if (status === "loading") {
     return (
       <div className="py-16 text-center text-sm text-muted" role="status">
-        İşlemleriniz yükleniyor…
+        Yükleniyor…
       </div>
+    );
+  }
+
+  /*
+   * Yükleme başarısızsa defter boş görünür; boş durumu göstermek kullanıcıya
+   * "kayıtların silinmiş" demek olur ve aynı işlemleri yeniden girmesine yol açar.
+   */
+  if (status === "error") {
+    return (
+      <Card className="p-5">
+        <p className="text-sm font-semibold text-negative">İşlemleriniz yüklenemedi</p>
+        <p className="mt-1 text-sm text-muted">{loadError}</p>
+      </Card>
     );
   }
 
@@ -247,14 +271,14 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
   const addButtons = form ? null : (
     <div className="flex flex-wrap gap-2">
       <button type="button" className="btn btn-secondary min-h-11" data-testid="add-opening" onClick={() => openForm("opening")}>
-        Mevcut Altını Ekle
+        Mevcut altınımı ekle
       </button>
       <button type="button" className="btn btn-primary min-h-11" data-testid="add-buy" onClick={() => openForm("buy")}>
-        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
+        {isSimple ? "Yeni aldığım altını ekle" : "Yeni alış ekle"}
       </button>
       {isSimple ? null : (
         <button type="button" className="btn btn-secondary min-h-11" data-testid="add-sell" onClick={() => openForm("sell")}>
-          Satış Ekle
+          Satış ekle
         </button>
       )}
     </div>
@@ -262,10 +286,7 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
 
   return (
     <div className="space-y-5">
-      <SectionTitle
-        title="İşlemler"
-        description="Defter kaynak gerçektir: kayıtlar silinmez, iptal edilir veya düzeltilir."
-      />
+      <SectionTitle title="İşlemler" />
       {addButtons}
 
       {notice ? <Alert tone="success">{notice}</Alert> : null}
@@ -274,9 +295,22 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
       {form === "opening" ? (
         <OpeningBalanceForm summary={summary} onSubmit={handleSubmit} onCancel={closeForm} />
       ) : null}
-      {form === "buy" ? <BuyForm editing={editing} onSubmit={handleSubmit} onCancel={closeForm} /> : null}
+      {/*
+        key: form açıkken listeden başka bir kayda "Düzelt" denirse React bileşeni
+        yeniden kurar. Aksi hâlde alanlar ilk hedefin değerlerinde kalır ve kayıt
+        yanlış işlemin üzerine yazılır.
+      */}
+      {form === "buy" ? (
+        <BuyForm key={editing?.id ?? "yeni"} editing={editing} onSubmit={handleSubmit} onCancel={closeForm} />
+      ) : null}
       {form === "sell" ? (
-        <SellForm summary={summary} editing={editing} onSubmit={handleSubmit} onCancel={closeForm} />
+        <SellForm
+          key={editing?.id ?? "yeni"}
+          summary={summary}
+          editing={editing}
+          onSubmit={handleSubmit}
+          onCancel={closeForm}
+        />
       ) : null}
 
       {pendingVoid ? (
@@ -287,18 +321,24 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
             ·{" "}
             {formatQuantity(pendingVoid.quantity, pendingVoid.productId)} ·{" "}
             {formatOccurred(pendingVoid.occurredAt, pendingVoid.occurredTime)}.
-            Kayıt silinmez; &quot;İptal edildi&quot; olarak listede kalır ve toplamlar yeniden hesaplanır.
-            Bir alışın iptali sonraki bir satışı eldeki miktarın üstüne çıkarıyorsa iptal reddedilir.
+            Kayıt silinmez, listede üstü çizili kalır.
           </p>
-          <Field label="Sebep" htmlFor="void-reason" hint="İsteğe bağlı.">
-            <input
-              id="void-reason"
-              className="control min-h-11"
-              maxLength={140}
-              value={voidReason}
-              onChange={(event) => setVoidReason(event.target.value)}
-            />
-          </Field>
+          {/*
+            Sebep alanı basit modda gösterilmez: zorunlu değildir, boş sebeple iptal
+            sorunsuz çalışır ve hiçbir tutarı etkilemez. Özellik kaldırılmadı,
+            detaylı modda yerindedir.
+          */}
+          {isSimple ? null : (
+            <Field label="Sebep (isteğe bağlı)" htmlFor="void-reason">
+              <input
+                id="void-reason"
+                className="control min-h-11"
+                maxLength={140}
+                value={voidReason}
+                onChange={(event) => setVoidReason(event.target.value)}
+              />
+            </Field>
+          )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button type="button" className="btn btn-secondary min-h-11" onClick={() => setPendingVoid(null)} disabled={busy}>
               Vazgeç
@@ -320,14 +360,7 @@ export function TransactionsView({ initialForm = null }: { initialForm?: LedgerF
         {ledger.length === 0 ? (
           <EmptyState
             title="Henüz altın eklenmedi"
-            description="Mevcut altınınızı ekleyin veya ilk alış işleminizi kaydedin; portföyünüz ve kâr/zarar hesabınız burada oluşmaya başlar."
-            action={
-              form ? undefined : (
-                <button type="button" className="btn btn-primary min-h-11" onClick={() => openForm("opening")}>
-                  Mevcut Altını Ekle
-                </button>
-              )
-            }
+            description="Yukarıdaki düğmelerle ilk altınınızı ekleyin."
           />
         ) : (
           <ul data-testid="transaction-list">

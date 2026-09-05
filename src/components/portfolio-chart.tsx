@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api-client";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatPercent } from "@/lib/format";
 import { usePortfolio } from "@/state/portfolio-store";
 import { Card, cx } from "./ui";
 
@@ -11,56 +11,41 @@ import { Card, cx } from "./ui";
  * PORTFÖY DEĞERİ GRAFİĞİ
  *
  * ARALIK = MUM ADIMI, "SON ŞU KADAR SÜRE" DEĞİL.
- * Borsa arayüzlerindeki 15m / 1H / 4H / 1D / 1W ile aynı anlam: 1H seçilince
- * grafik en baştan itibaren saatlik kovalara bölünür, her kovanın kapanışı bir
- * nokta olur ve noktalar birleştirilerek çizgi çizilir. Geriye ne kadar
- * gidildiği aralıktan TÜRETİLİR (aralık × en fazla nokta), tıpkı borsada ekranda
- * sabit sayıda mum tutulması gibi.
+ * Borsa arayüzlerindeki 1H / 1D / 1W ile aynı anlam: 1sa seçilince grafik en
+ * baştan itibaren saatlik kovalara bölünür, her kovanın kapanışı bir nokta olur
+ * ve noktalar birleştirilerek çizgi çizilir. Geriye ne kadar gidildiği
+ * aralıktan TÜRETİLİR (aralık × en fazla nokta), tıpkı borsada ekranda sabit
+ * sayıda mum tutulması gibi.
  *
  * ÇÖZÜNÜRLÜK UYDURULMAZ. Fiyat ~5-10 dakikada bir toplanıyor; bu yüzden 1m
  * veya 1s aralığı YOKTUR ve bir kovaya hiç gözlem düşmediyse o kova boş kalır,
- * bir öncekinin değeriyle DOLDURULMAZ. Kaç kovanın boş kaldığı grafiğin
- * altında yazar.
+ * bir öncekinin değeriyle DOLDURULMAZ. Nokta yatay yerini ZAMANDAN alır ve
+ * boşluk bir adımdan uzunsa çizgi orada KIRILIR; kaç kovanın boş kaldığı
+ * grafiğin altında yazar.
  *
  * Kütüphane kullanılmaz: çizgi satır içi SVG'dir. Tek bir çizgi ve birkaç
  * eksen etiketi için paket eklemek gereksiz bağımlılıktır.
  */
 
 const INTERVALS = [
-  { id: "15m", label: "15dk" },
-  { id: "1h", label: "1sa" },
-  { id: "4h", label: "4sa" },
-  { id: "1d", label: "1gün" },
+  { id: "1h", label: "1sa", ms: 60 * 60_000 },
+  { id: "1d", label: "1gün", ms: 24 * 60 * 60_000 },
   // "1h" YAZILMAZ: Türkçede hem "1 saat" hem "1 hafta" okunur.
-  { id: "1w", label: "1hafta" },
+  { id: "1w", label: "1hafta", ms: 7 * 24 * 60 * 60_000 },
 ] as const;
 
 type IntervalId = (typeof INTERVALS)[number]["id"];
 
-/** Kullanıcıya yazılan tam ad (kısa düğme etiketi yeterince açık değil). */
-const INTERVAL_NAMES: Readonly<Record<IntervalId, string>> = {
-  "15m": "15 dakikalık",
-  "1h": "saatlik",
-  "4h": "4 saatlik",
-  "1d": "günlük",
-  "1w": "haftalık",
-};
-
 interface HistoryPoint {
   at: string;
-  observedAt: string;
   liquidationValue: string;
   pricedProducts: number;
   missingProducts: number;
-  observations: number;
 }
 
 interface HistoryResponse {
-  interval: string;
   points: HistoryPoint[];
-  medianStepMs: number | null;
   emptyIntervals: number;
-  empty: boolean;
   ledgerChangesInRange: number;
 }
 
@@ -69,21 +54,11 @@ const VIEW_HEIGHT = 180;
 const PADDING_X = 8;
 const PADDING_Y = 12;
 
-function describeStep(ms: number | null): string {
-  if (ms === null) return "";
-  const minutes = Math.round(ms / 60_000);
-  if (minutes < 1) return "Fiyat saniyeler arayla toplanıyor.";
-  if (minutes === 1) return "Fiyat yaklaşık dakikada bir toplanıyor.";
-  if (minutes < 60) return `Fiyat yaklaşık ${String(minutes)} dakikada bir toplanıyor.`;
-  const hours = Math.round(minutes / 60);
-  return `Fiyat yaklaşık ${String(hours)} saatte bir toplanıyor.`;
-}
-
 /** Eksen etiketi: kısa aralıklarda saat, uzun aralıklarda tarih. */
 function formatTick(iso: string, interval: IntervalId): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const showTime = interval === "15m" || interval === "1h" || interval === "4h";
+  const showTime = interval === "1h";
   if (showTime) {
     return date.toLocaleString("tr-TR", {
       day: "2-digit",
@@ -96,7 +71,7 @@ function formatTick(iso: string, interval: IntervalId): string {
   return date.toLocaleDateString("tr-TR", {
     day: "2-digit",
     month: "2-digit",
-    year: "2-digit",
+    year: "numeric",
     timeZone: "Europe/Istanbul",
   });
 }
@@ -156,25 +131,54 @@ export function PortfolioChart() {
   // Düz çizgide bölme hatası olmasın; tek nokta da çizilebilsin.
   const span = max - min || Math.max(max, 1) * 0.01;
 
-  const coords = points.map((point, index) => {
+  /*
+   * YATAY EKSEN ZAMANDIR, SIRA NUMARASI DEĞİL.
+   *
+   * Noktalar dizideki sıralarına göre eşit aralıklarla dizilseydi, hiç ölçüm
+   * yapılamayan saatler ile ölçülen dakikalar ekranda aynı genişlikte
+   * görünürdü: boşluk, doldurulmuş bir grafikten ayırt edilemezdi.
+   */
+  const stepMs = INTERVALS.find((option) => option.id === intervalId)?.ms ?? 0;
+  const firstAt = points.length > 0 ? Date.parse(points[0]!.at) : 0;
+  const lastAt = points.length > 0 ? Date.parse(points[points.length - 1]!.at) : 0;
+
+  const coords = points.map((point) => {
+    const at = Date.parse(point.at);
     const x =
-      points.length === 1
+      lastAt === firstAt
         ? VIEW_WIDTH / 2
-        : PADDING_X + (index / (points.length - 1)) * (VIEW_WIDTH - PADDING_X * 2);
+        : PADDING_X + ((at - firstAt) / (lastAt - firstAt)) * (VIEW_WIDTH - PADDING_X * 2);
     const value = Number(point.liquidationValue);
-    const y = VIEW_HEIGHT - PADDING_Y - ((value - min) / span) * (VIEW_HEIGHT - PADDING_Y * 2);
-    return { x, y, point };
+    /*
+     * Bütün değerler eşitse çizgi kutunun DİBİNE değil ORTASINA gelir:
+     * hareketsiz bir portföy "dibe vurmuş" gibi okunmamalı.
+     */
+    const y =
+      max === min
+        ? VIEW_HEIGHT / 2
+        : VIEW_HEIGHT - PADDING_Y - ((value - min) / span) * (VIEW_HEIGHT - PADDING_Y * 2);
+    return { x, y, at, point };
   });
 
-  const line = coords.map((coord, index) => `${index === 0 ? "M" : "L"}${coord.x.toFixed(1)} ${coord.y.toFixed(1)}`).join(" ");
-  const area =
-    coords.length > 0
-      ? `${line} L${coords[coords.length - 1]!.x.toFixed(1)} ${VIEW_HEIGHT} L${coords[0]!.x.toFixed(1)} ${VIEW_HEIGHT} Z`
-      : "";
+  /*
+   * ÖLÇÜLMEMİŞ ARALIKTA ÇİZGİ KIRILIR.
+   *
+   * İki nokta arasındaki süre bir adımın 1,5 katını aşıyorsa arada hiç gözlem
+   * yok demektir; "L" yerine "M" yazılır ve boşluk düz bir tırmanışla
+   * kapatılmaz. Aksi hâlde grafik, boş kovayı doldurmakla aynı şeyi çizerdi.
+   */
+  const line = coords
+    .map((coord, index) => {
+      const previous = coords[index - 1];
+      const gap = previous !== undefined && coord.at - previous.at > stepMs * 1.5;
+      return `${index === 0 || gap ? "M" : "L"}${coord.x.toFixed(1)} ${coord.y.toFixed(1)}`;
+    })
+    .join(" ");
 
   const first = values[0];
   const last = values[values.length - 1];
-  const change = first !== undefined && last !== undefined ? last - first : null;
+  /* Tek nokta karşılaştırma DEĞİLDİR: ikinci bir ölçüm yokken "değişmedi" denmez. */
+  const change = points.length >= 2 && first !== undefined && last !== undefined ? last - first : null;
   const changePct = change !== null && first ? (change / first) * 100 : null;
   const partial = points.some((point) => point.missingProducts > 0);
 
@@ -190,17 +194,32 @@ export function PortfolioChart() {
    * kâr/zarar zaten üstteki K/Z kartlarında, maliyete karşı hesaplanıyor.
    */
   const flows = data?.ledgerChangesInRange ?? 0;
-  const changeIsPriceOnly = flows === 0;
+
+  /*
+   * KAPSAM DA EŞİT OLMALI.
+   *
+   * Bir ürünün o anda fiyatı yoksa toplama girmez. İki uç nokta aynı ürünleri
+   * kapsamıyorsa aradaki fark fiyat hareketi değil, ölçümün EKSİKLİĞİDİR:
+   * sonradan fiyatlanan bir ürün, hiç fiyat oynamamışken devasa bir "artış"
+   * gibi görünür. Böyle bir farkın kâr/zarar rengini alması yasaktır.
+   */
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+  const sameCoverage =
+    firstPoint !== undefined &&
+    lastPoint !== undefined &&
+    firstPoint.missingProducts === 0 &&
+    lastPoint.missingProducts === 0 &&
+    firstPoint.pricedProducts === lastPoint.pricedProducts;
+  const changeIsPriceOnly = flows === 0 && sameCoverage;
   const emptyIntervals = data?.emptyIntervals ?? 0;
 
   return (
     <Card className="p-4" data-testid="portfolio-chart">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-ink">Portföy değeri</p>
-          <p className="mt-0.5 text-xs text-muted">
-            Bozdurma değeri, {INTERVAL_NAMES[intervalId]} adımlarla
-          </p>
+          <p className="text-sm font-semibold text-ink">Değer değişimi</p>
+          <p className="mt-0.5 text-xs text-muted">Bugün bozdurursanız alacağınız tutar</p>
         </div>
         {change !== null && changePct !== null ? (
           <p className="text-right">
@@ -212,24 +231,26 @@ export function PortfolioChart() {
               data-testid="chart-change"
             >
               {change >= 0 ? "+" : "−"}
-              {formatMoney(Math.abs(change).toFixed(2))} ({changePct >= 0 ? "+" : "−"}
-              {Math.abs(changePct).toFixed(2)}%)
+              {formatMoney(Math.abs(change).toFixed(2))} ({formatPercent(changePct)})
             </span>
-            <span className="mt-0.5 block text-[11px] font-normal text-subtle" data-testid="chart-change-basis">
-              {changeIsPriceOnly ? "grafiğin başından bugüne" : "alım/satım dâhil — kâr/zarar değildir"}
-            </span>
+            {flows > 0 ? (
+              <span className="mt-0.5 block text-[11px] font-normal text-subtle" data-testid="chart-change-basis">
+                Alım/satım dâhil, kâr değil
+              </span>
+            ) : null}
           </p>
         ) : null}
       </div>
 
       <div className="mt-3 flex w-full flex-wrap gap-1" role="radiogroup" aria-label="Grafik aralığı">
         {INTERVALS.map((option) => (
+          /* Sesli ad, düğmenin ÜSTÜNDE yazanı içermek zorundadır (WCAG 2.5.3). */
           <button
             key={option.id}
             type="button"
             role="radio"
             aria-checked={intervalId === option.id}
-            aria-label={`${INTERVAL_NAMES[option.id]} grafik`}
+            aria-label={`${option.label} aralığı`}
             data-testid={`chart-interval-${option.id}`}
             onClick={() => setIntervalId(option.id)}
             className={cx(
@@ -255,7 +276,7 @@ export function PortfolioChart() {
           </p>
         ) : points.length === 0 ? (
           <p className="py-8 text-center text-xs text-subtle" role="status" data-testid="chart-empty">
-            Bu aralıkta henüz kayıtlı fiyat gözlemi yok. Grafik, fiyat toplandıkça dolar.
+            Henüz yeterli fiyat kaydı yok; grafik zamanla oluşur.
           </p>
         ) : (
           <>
@@ -264,10 +285,9 @@ export function PortfolioChart() {
               className="h-40 w-full"
               preserveAspectRatio="none"
               role="img"
-              aria-label={`Portföy değeri grafiği, ${INTERVAL_NAMES[intervalId]} ${String(points.length)} nokta`}
+              aria-label="Portföy değeri grafiği"
               data-testid="chart-svg"
             >
-              <path d={area} fill="var(--color-accent-soft)" stroke="none" />
               <path
                 d={line}
                 fill="none"
@@ -305,17 +325,15 @@ export function PortfolioChart() {
         )}
       </div>
 
-      {points.length > 0 ? (
+      {/*
+        Not YALNIZCA söylenecek bir şey varken çıkar: çizgide gerçek boşluk
+        varsa (boş kova sayısı kullanıcıya yazılmak zorunda) veya bazı ürünler
+        fiyatsız olduğu için toplama girmediyse. Normal bir günde hiç metin yok.
+      */}
+      {points.length > 0 && (emptyIntervals > 0 || partial) ? (
         <p className="mt-2 break-words text-[11px] leading-relaxed text-subtle" data-testid="chart-note">
-          {String(points.length)} {INTERVAL_NAMES[intervalId]} nokta. Her nokta, o aralığa düşen son
-          gözlemin değeridir. {describeStep(data?.medianStepMs ?? null)}
-          {emptyIntervals > 0
-            ? ` ${String(emptyIntervals)} aralıkta hiç gözlem yoktu; o aralıklar boş bırakıldı, bir önceki değerle doldurulmadı.`
-            : ""}
-          {changeIsPriceOnly
-            ? ""
-            : ` Bu aralıkta ${String(flows)} işlem yaptınız; çizgideki sıçramaların bir kısmı fiyat değil, eklediğiniz veya çıkardığınız varlıktır.`}
-          {partial ? " Bazı noktalarda elde olan ürünlerin bir kısmının fiyatı yoktu; o ürünler toplama katılmadı." : ""}
+          {emptyIntervals > 0 ? `${String(emptyIntervals)} kez fiyat kaydı alınamadı; çizgide boşluk var. ` : ""}
+          {partial ? "Fiyatı olmayan ürünler grafiğe katılmadı." : ""}
         </p>
       ) : null}
     </Card>

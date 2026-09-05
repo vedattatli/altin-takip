@@ -263,8 +263,19 @@ test.describe("yetkilendirme", () => {
     });
     expect(attempt.status).toBe(403);
 
-    await gotoReady(page, "/ayarlar");
-    await expect(page.getByText("Kullanıcı", { exact: true })).toBeVisible();
+    /*
+     * Rol rozeti Ayarlar ekranından KALDIRILDI (arayüz sadeleştirmesi); rol
+     * artık kullanıcıya hiçbir yerde etiket olarak gösterilmiyor. Doğrulanan
+     * davranış aynı kalır: denemeden sonra hesap hâlâ NORMAL kullanıcıdır.
+     * Rol, ekrandaki etiket yerine oturum ucundan okunur.
+     */
+    const session = await browserApi<{ user: { role: string } | null }>(
+      page,
+      "GET",
+      "/api/auth/session",
+    );
+    expect(session.status).toBe(200);
+    expect(session.data?.user?.role).toBe("user");
   });
 
   test("oturumsuz istek yönetim uçlarına erişemez", async ({ request }) => {

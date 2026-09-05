@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { signOf } from "@/lib/format";
 
 /** Sınıf birleştirici — koşullu sınıflar için. */
@@ -117,7 +118,7 @@ export function EmptyState({
   action,
 }: {
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
 }) {
   return (
@@ -133,7 +134,7 @@ export function EmptyState({
       </div>
       <div>
         <p className="text-base font-semibold text-ink">{title}</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{description}</p>
+        {description ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{description}</p> : null}
       </div>
       {action}
     </div>
@@ -155,19 +156,35 @@ export function Field({
 }) {
   const hintId = `${htmlFor}-hint`;
   const errorId = `${htmlFor}-error`;
+  /*
+   * İpucu/hata paragrafını alanın KENDİSİNE bağlarız. Bağlamazsak id'ler ölü
+   * kalır ve "Parolalar eşleşmiyor." gibi bir uyarı ekran okuyucuya hiç
+   * ulaşmaz; form görme engelli kullanıcıya hiçbir şey olmamış gibi görünür.
+   * Hata varsa ipucu zaten basılmadığı için hata metni önceliklidir.
+   * Alan kendi aria-describedby'ını yazdıysa ona dokunmayız: sarmalayıcı bir
+   * <div> içindeki input kendi bağını kurmuş olabilir.
+   */
+  const describedBy = error ? errorId : hint ? hintId : undefined;
+  const child = isValidElement(children)
+    ? (children as ReactElement<{ "aria-describedby"?: string }>)
+    : null;
+  const describedChildren =
+    child && describedBy && !child.props["aria-describedby"]
+      ? cloneElement(child, { "aria-describedby": describedBy })
+      : children;
   return (
     <div>
       <label className="field-label" htmlFor={htmlFor}>
         {label}
       </label>
-      {children}
+      {describedChildren}
       {hint && !error ? (
         <p id={hintId} className="mt-1 text-xs text-subtle">
           {hint}
         </p>
       ) : null}
       {error ? (
-        <p id={errorId} className="mt-1 text-xs font-medium text-negative">
+        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-negative">
           {error}
         </p>
       ) : null}
@@ -219,17 +236,11 @@ export function moneySizeClass(text: string, emphasis = false): string {
 }
 
 /**
- * AÇILIR AÇIKLAMA — "gerektiğinde göster".
+ * Açılır açıklama. Yalnızca ekrandaki bir sayının anlamını taşıyan metin için
+ * kullanılır; süsleme metni buraya da konmaz.
  *
- * Bu uygulama bilerek çok şey açıklar: hangi fiyat nereden geliyor, maliyet
- * nasıl hesaplanıyor, bir ürün neden fiyatsız. Bu metinler DOĞRULUK için
- * gereklidir ve silinmez.
- *
- * Ama hepsini aynı anda göstermek ekranı yoruyor. Çözüm metni atmak değil,
- * KATLAMAK: varsayılan olarak tek satırlık bir başlık görünür, isteyen açar.
- *
- * `<details>` kullanılır çünkü JavaScript olmadan da çalışır, klavyeyle
- * açılır ve ekran okuyucular doğru anons eder.
+ * `<details>` seçildi: JavaScript olmadan çalışır, klavyeyle açılır, ekran
+ * okuyucular doğru anons eder.
  */
 export function Explain({
   title,

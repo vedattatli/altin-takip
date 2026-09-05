@@ -16,7 +16,7 @@ import { cx } from "./ui";
  * Adresler korunur: eski bağlantılar ve yer imleri çalışmaya devam eder.
  */
 const TABS = [
-  { href: "/fiyat-kaynagi", label: "Kaynak" },
+  { href: "/fiyat-kaynagi", label: "Fiyat listesi" },
   { href: "/kayseri-fiyatlari", label: "Kayseri ekranı" },
 ] as const;
 

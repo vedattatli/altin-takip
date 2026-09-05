@@ -15,16 +15,14 @@ import {
  * testler viewport'u kendileri değiştirmez; o anki genişliğe göre BEKLENEN
  * davranışı doğrular.
  *
- * Kırılım eşiği 1280 px'tir:
- *   < 1280  tek sütun — canlı panel dashboard'un ALTINDA
- *   ≥ 1280  iki sütun — solda portföy, sağda dar canlı panel
- *
- * 1024'te iki sütun DENENDİ ve bırakıldı: ana sütun ~490 px'e düşüyor,
- * özet kartları sıkışıyordu. Kontrollü alt yerleşim daha okunaklı.
+ * Panel artık HER genişlikte TEK sütundur. Yanındaki canlı fiyat paneli
+ * panelden kaldırıldı; ham fiyat ekranı ayrı sayfada (/kayseri-fiyatlari)
+ * duruyor. Eskiden 1280 px'te ikinci bir sütun açılırdı, o kırılım yok:
+ * bu yüzden tek sütunluluk üç genişlikte de aynı şekilde doğrulanır.
  */
 
 test.describe("panel düzeni", () => {
-  test("dashboard iki sütunlu ızgara kabında durur ve taşma yapmaz", async ({ page, viewport }) => {
+  test("dashboard tek sütunlu kapta durur ve taşma yapmaz", async ({ page }) => {
     const username = scopedUsername("duzen");
     await createReadyUser(username);
     await loginAsUser(page, username);
@@ -33,20 +31,25 @@ test.describe("panel düzeni", () => {
     const grid = page.getByTestId("dashboard-grid");
     await expect(grid).toBeVisible();
 
-    const columns = await grid.evaluate((node) => window.getComputedStyle(node).gridTemplateColumns);
-    const trackCount = columns.trim().split(/\s+/u).length;
-    const width = viewport?.width ?? 0;
+    // Yan sütundaki canlı fiyat paneli panelden kaldırıldı; geri gelirse bu düşer.
+    await expect(page.getByTestId("kayseri-live-panel")).toHaveCount(0);
 
-    if (width >= 1280) {
-      expect(trackCount, `1280+ genişlikte iki sütun beklenir (${columns})`).toBe(2);
-      // Sağ sütun ekranın yaklaşık beşte biri kadardır.
-      const tracks = columns.trim().split(/\s+/u).map((value) => Number.parseFloat(value));
-      const panelWidth = tracks[1]!;
-      expect(panelWidth).toBeGreaterThanOrEqual(260);
-      expect(panelWidth).toBeLessThanOrEqual(360);
-    } else {
-      expect(trackCount, `1280 altında tek sütun beklenir (${columns})`).toBe(1);
-    }
+    // Kap TEK sütundur. Kap bir ızgara değilse hesaplanan değer "none" olur;
+    // ızgaraya çevrilirse iz sayısı okunur ve yine bire eşit olmalıdır.
+    const columns = await grid.evaluate((node) => window.getComputedStyle(node).gridTemplateColumns);
+    const trackCount = columns.trim() === "none" ? 1 : columns.trim().split(/\s+/u).length;
+    expect(trackCount, `her genişlikte tek sütun beklenir (${columns})`).toBe(1);
+
+    // Kap içerik alanının TAMAMINI kaplar: sağda ikinci bir sütuna yer ayrılmaz.
+    const widths = await grid.evaluate((node) => ({
+      container: node.getBoundingClientRect().width,
+      main: node.closest("main")?.getBoundingClientRect().width ?? 0,
+    }));
+    expect(widths.main, "dashboard kabı <main> içinde olmalı").toBeGreaterThan(0);
+    expect(
+      Math.abs(widths.container - widths.main),
+      `kap içerik alanını doldurmalı (kap=${widths.container}, ana=${widths.main})`,
+    ).toBeLessThanOrEqual(1);
 
     await expectNoHorizontalOverflow(page);
   });

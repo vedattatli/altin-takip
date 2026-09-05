@@ -5,17 +5,15 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import type { SessionUser } from "@/auth/types";
-import { ROLE_LABELS } from "@/auth/types";
 import { appConfig } from "@/config/app.config";
 import { apiFetch } from "@/lib/api-client";
 import { usePortfolio } from "@/state/portfolio-store";
 import { Alert, Card, Field, SectionTitle } from "./ui";
 
-export function SettingsView({ user }: { user: SessionUser | null }) {
+export function SettingsView({ user }: { user: SessionUser }) {
   const router = useRouter();
-  const { portfolio, repository, renamePortfolio, status } = usePortfolio();
+  const { portfolio, renamePortfolio, status, error: loadError } = usePortfolio();
   const [name, setName] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,7 +21,6 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
   const [logoutAllBusy, setLogoutAllBusy] = useState(false);
   const [logoutAllError, setLogoutAllError] = useState<string | null>(null);
   const [deletionOpen, setDeletionOpen] = useState(false);
-  const [deletionReason, setDeletionReason] = useState("");
   const [deletionBusy, setDeletionBusy] = useState(false);
   const [deletionNotice, setDeletionNotice] = useState<string | null>(null);
   const [deletionError, setDeletionError] = useState<string | null>(null);
@@ -35,11 +32,11 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
     try {
       const result = await apiFetch<{ message: string }>("/api/account/deletion-request", {
         method: "POST",
-        body: JSON.stringify({ reason: deletionReason.trim() }),
+        // Gövde boş kalamaz: `readJson` gövdesiz istekte 400 döndürür.
+        body: JSON.stringify({}),
       });
       setDeletionNotice(result.message);
       setDeletionOpen(false);
-      setDeletionReason("");
     } catch (cause) {
       setDeletionError(cause instanceof Error ? cause.message : "Talep gönderilemedi.");
     } finally {
@@ -66,7 +63,6 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
   if (portfolio && portfolio.id !== loadedPortfolioId) {
     setLoadedPortfolioId(portfolio.id);
     setName(portfolio.name);
-    setDisplayName(portfolio.displayName);
   }
 
   async function handleSave(event: React.FormEvent) {
@@ -75,7 +71,7 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
     setSaved(false);
     setBusy(true);
     try {
-      await renamePortfolio({ name: name.trim() || "Portföyüm", displayName: displayName.trim() });
+      await renamePortfolio({ name: name.trim() || "Portföyüm" });
       setSaved(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Kaydedilemedi.");
@@ -89,30 +85,26 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
       <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Ayarlar</h1>
 
       <section>
-        <SectionTitle title="Portföy" description="Portföyünüzü kendinize göre adlandırın." />
+        <SectionTitle title="Portföy" />
         <Card className="p-4 sm:p-5">
           <form className="space-y-4" onSubmit={handleSave} noValidate>
+            {status === "error" ? (
+              <Alert tone="danger">
+                {loadError ?? "Portföyünüz yüklenemedi. Sayfayı yenileyin."}
+              </Alert>
+            ) : null}
             <Field label="Portföy adı" htmlFor="portfolio-name">
               <input
                 id="portfolio-name"
                 className="control"
                 maxLength={80}
                 value={name}
-                onChange={(event) => setName(event.target.value)}
-                disabled={status !== "ready"}
-              />
-            </Field>
-            <Field
-              label="Görünen ad"
-              htmlFor="portfolio-display-name"
-              hint="Panelde selamlama ve raporlarda kullanılır. İsteğe bağlı."
-            >
-              <input
-                id="portfolio-display-name"
-                className="control"
-                maxLength={80}
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
+                onChange={(event) => {
+                  // Yazmaya başlayınca eski "kaydedildi"/hata bildirimi geçersizdir.
+                  setName(event.target.value);
+                  setSaved(false);
+                  setError(null);
+                }}
                 disabled={status !== "ready"}
               />
             </Field>
@@ -129,56 +121,20 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
         </Card>
       </section>
 
-      {user ? (
-        <section>
-          <SectionTitle title="Hesap" />
-          <Card className="divide-y divide-[var(--line)]">
-            <dl className="grid grid-cols-1 gap-y-3 p-4 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs text-subtle">Kullanıcı adı</dt>
-                <dd className="text-sm font-medium text-ink">{user.username}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-subtle">Görünen ad</dt>
-                <dd className="text-sm font-medium text-ink">{user.displayName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-subtle">Rol</dt>
-                <dd className="text-sm font-medium text-ink">{ROLE_LABELS[user.role]}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-subtle">Veri saklama</dt>
-                <dd className="text-sm font-medium text-ink">
-                  {repository.label}
-                  {repository.syncsAcrossDevices
-                    ? " · cihazlar arasında senkron"
-                    : " · yalnızca bu cihaz"}
-                </dd>
-              </div>
-            </dl>
-            <div className="p-4">
-              <Link href="/parola-degistir" className="btn btn-secondary">
-                Parolamı değiştir
-              </Link>
-            </div>
-          </Card>
-        </section>
-      ) : null}
+      <section>
+        <SectionTitle title="Hesabım" />
+        <Card className="space-y-3 p-4">
+          <div>
+            <p className="text-xs text-subtle">Kullanıcı adı</p>
+            <p className="text-sm font-medium text-ink">{user.username}</p>
+          </div>
 
-      {user ? (
-        <section>
-          <SectionTitle
-            title="Oturumlar"
-            description="Her cihazda bir kez giriş yaparsınız; oturum siz çıkış yapana kadar açık kalır."
-          />
-          <Card className="space-y-3 p-4">
-            <p className="text-sm text-muted">
-              Normal “Çıkış” yalnızca bu cihazı kapatır. Telefon, tablet ve bilgisayardaki tüm
-              oturumları aynı anda kapatmak için aşağıdaki seçeneği kullanın.
-            </p>
-            {logoutAllError ? <Alert tone="danger">{logoutAllError}</Alert> : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/parola-degistir" className="btn btn-secondary">
+              Parolamı değiştir
+            </Link>
             {logoutAllOpen ? (
-              <div className="flex flex-wrap items-center gap-2">
+              <>
                 <button
                   type="button"
                   className="btn btn-danger"
@@ -196,7 +152,7 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
                 >
                   Vazgeç
                 </button>
-              </div>
+              </>
             ) : (
               <button
                 type="button"
@@ -207,15 +163,16 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
                 Tüm cihazlardan çıkış yap
               </button>
             )}
-          </Card>
-        </section>
-      ) : null}
+          </div>
+
+          {logoutAllError ? <Alert tone="danger">{logoutAllError}</Alert> : null}
+
+          <p className="text-sm text-muted">“Çıkış” yalnızca bu cihazı kapatır.</p>
+        </Card>
+      </section>
 
       <section>
-        <SectionTitle
-          title="Verileriniz"
-          description="Uygulamaya kaydettiğiniz altın portföyünü dışa aktarabilir veya silinmesini talep edebilirsiniz."
-        />
+        <SectionTitle title="Verileriniz" />
         <Card className="space-y-3 p-4">
           <div className="flex flex-wrap gap-2">
             <a className="btn btn-secondary min-h-11" href="/api/portfolio/export?tur=islem" data-testid="export-ledger">
@@ -226,11 +183,8 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
               href="/api/portfolio/export?tur=pozisyon"
               data-testid="export-positions"
             >
-              Pozisyonları CSV indir
+              Varlıklarımı CSV indir
             </a>
-            <Link className="btn btn-secondary min-h-11" href="/gizlilik">
-              Gizlilik ve KVKK
-            </Link>
           </div>
 
           {deletionNotice ? <Alert tone="success">{deletionNotice}</Alert> : null}
@@ -239,18 +193,8 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
           {deletionOpen ? (
             <div className="space-y-3 rounded-[var(--radius-sm)] border border-negative-soft p-3.5">
               <p className="text-sm text-muted">
-                Hesabınız ve uygulamaya kaydettiğiniz portföy verisi yönetici onayıyla kalıcı olarak silinir.
-                Silmeden önce verilerinizi CSV olarak indirmeniz önerilir.
+                Bu işlem geri alınamaz; silmeden önce CSV dosyalarınızı indirin.
               </p>
-              <Field label="Sebep (isteğe bağlı)" htmlFor="deletion-reason">
-                <input
-                  id="deletion-reason"
-                  className="control min-h-11"
-                  maxLength={500}
-                  value={deletionReason}
-                  onChange={(event) => setDeletionReason(event.target.value)}
-                />
-              </Field>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
@@ -284,23 +228,14 @@ export function SettingsView({ user }: { user: SessionUser | null }) {
         </Card>
       </section>
 
-      <section>
-        <SectionTitle title="Uygulama" />
-        <Card className="p-4 text-sm text-muted">
-          <p>
-            <span className="font-medium text-ink">{appConfig.name}</span> sürüm{" "}
-            {appConfig.version}
-          </p>
-          <p className="mt-2 leading-relaxed">
-            Fiyat kaynağınızı <Link className="text-accent underline" href="/fiyat-kaynagi">Fiyat kaynağı</Link>{" "}
-            ekranından görebilir ve yöneticinin açtığı kaynaklar arasında değiştirebilirsiniz. Lisanssız
-            kaynaklar gerçek veri olarak kullanılmaz; test verisi her zaman açıkça etiketlenir.
-          </p>
-          <p className="mt-2 leading-relaxed">
-            Gösterilen fiyatlar bilgilendirme amaçlıdır ve bağlayıcı bir alım satım teklifi değildir.
-          </p>
-        </Card>
-      </section>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
+        <span>
+          {appConfig.name} {appConfig.version}
+        </span>
+        <Link className="underline" href="/gizlilik">
+          Gizlilik ve KVKK
+        </Link>
+      </div>
     </div>
   );
 }

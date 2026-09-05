@@ -68,10 +68,26 @@ function Row({
   );
 }
 
-export function PriceListView({ snapshot }: { snapshot: PriceSnapshot | null }) {
+export function PriceListView({
+  snapshot,
+  serverNow,
+}: {
+  snapshot: PriceSnapshot | null;
+  serverNow?: string;
+}) {
   const clock = useClientClock(30_000);
-  // Saat gelmeden anlık görüntünün kendi zamanı kullanılır; hidrasyon bozulmasın.
-  const fallback = Date.parse(snapshot?.fetchedAt ?? "");
+  /*
+   * İstemci saati gelmeden (sunucu render'ı ve hidrasyon) sunucudan geçirilen
+   * gerçek zaman kullanılır; hidrasyon bozulmasın diye Date.now() çağrılmaz.
+   *
+   * Anlık görüntünün KENDİ zamanına düşmek son çaredir: o durumda fiyatın yaşı
+   * sıfır çıkar ve bayatlık kapısı (validate.ts) sunucuda hiç tetiklenmez, yani
+   * günler öncesinin fiyatı ilk HTML'de güncelmiş gibi basılır. Bunu önlemek
+   * için sayfa `serverNow={new Date().toISOString()}` geçirmelidir.
+   */
+  const serverNowMs = Date.parse(serverNow ?? "");
+  const snapshotMs = Date.parse(snapshot?.fetchedAt ?? "");
+  const fallback = Number.isFinite(serverNowMs) ? serverNowMs : snapshotMs;
   const now = clock ?? (Number.isFinite(fallback) ? fallback : 0);
 
   const groups = GROUPS.map((group) => ({
@@ -115,7 +131,7 @@ export function PriceListView({ snapshot }: { snapshot: PriceSnapshot | null }) 
     <section className="space-y-4" data-testid="price-list">
       <SectionTitle
         title="Fiyatlar"
-        description="Bozdurma, kuyumcunun sizden alacağı fiyattır; yeniden alım, size satacağı fiyat."
+        description="Bozdurma kuyumcuya satış, yeniden alım kuyumcudan alış fiyatıdır."
       />
 
       {groups.map((group) => (

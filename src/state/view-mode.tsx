@@ -119,12 +119,7 @@ export function ViewModeToggle() {
       className="view-mode-toggle"
       data-testid="view-mode-toggle"
       data-mode={isSimple ? "basit" : "detayli"}
-      aria-label={isSimple ? "Detaylı moda geç" : "Basit moda geç"}
-      title={
-        isSimple
-          ? "Detaylı mod: satış ekleme, gerçekleşmiş kâr/zarar ve kaynak ayrıntıları"
-          : "Basit mod: yalnızca altın ekleme, portföy ve kâr/zarar"
-      }
+      title={isSimple ? "Ekranda daha fazla ayrıntı gösterir" : "Ekranı sadeleştirir"}
     >
       {isSimple ? "Detaylı mod" : "Basit mod"}
     </button>

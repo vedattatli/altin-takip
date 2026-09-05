@@ -119,7 +119,7 @@ Sağlayıcı → sunucu ingestion → doğrulama/karantina → kanonik eşleme
 - Aynı sağlayıcı için iki alım **paralel çalışmaz** (`pg_try_advisory_xact_lock`); ikinci çağrı
   `SKIPPED` döner.
 - Aynı koşum anahtarı iki kez uygulanmaz (idempotent); tarihçede çift kayıt oluşmaz.
-- Varsayılan aralık **60 saniye**, `PRICE_INGESTION_INTERVAL_MS` ile 15 sn – 5 dk arasında
+- Toplama sıklığını GitHub Actions zamanlaması belirler (`*/5 * * * *`); uygulama içinde
   ayarlanabilir.
 - Zamanlanmış uç `POST /api/cron/price-ingestion`, `PRICE_CRON_SECRET` ile korunur; secret
   yoksa uç kapalıdır. Test sağlayıcısı üretim cron'unda çalışmaz.

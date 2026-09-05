@@ -15,10 +15,8 @@ import { Alert, Card, Field } from "../ui";
  */
 
 export interface MfaStatus {
-  required: boolean;
   state: "not_required" | "not_enrolled" | "pending_confirmation" | "enrolled";
   sessionVerified: boolean;
-  remainingRecoveryCodes: number;
   configured: boolean;
 }
 
@@ -42,7 +40,6 @@ export function AdminMfaView({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const needsEnrollment = status.state === "not_enrolled" || status.state === "pending_confirmation";
 
@@ -52,7 +49,6 @@ export function AdminMfaView({
     try {
       const result = await apiFetch<EnrollmentPayload>("/api/auth/mfa/enroll", { method: "POST" });
       setEnrollment(result);
-      setNotice("Kurtarma kodlarınızı güvenli bir yere kaydedin; bir daha gösterilmeyecek.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Kurulum başlatılamadı.");
     } finally {
@@ -75,13 +71,24 @@ export function AdminMfaView({
     }
   }
 
+  async function signOut() {
+    setBusy(true);
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+      router.replace("/giris");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!status.configured) {
     return (
       <Card className="p-5">
         <h1 className="text-lg font-semibold text-ink">Güvenlik doğrulaması yapılandırılmamış</h1>
-        <p className="mt-2 text-sm text-muted">
-          Yönetici ikinci faktörü için sunucuda <code>AUTH_MFA_ENCRYPTION_KEY</code> tanımlı olmalıdır.
-          Bu anahtar olmadan yönetim işlemleri açılmaz.
+        <p className="mt-2 break-words text-sm text-muted">
+          Yönetici ikinci faktörü için sunucuda <code className="break-words">AUTH_MFA_ENCRYPTION_KEY</code>{" "}
+          tanımlı olmalıdır.
         </p>
       </Card>
     );
@@ -92,10 +99,7 @@ export function AdminMfaView({
       <h1 className="text-lg font-semibold text-ink">
         {needsEnrollment ? "İkinci faktörü kurun" : "Kimliğinizi doğrulayın"}
       </h1>
-      <p className="mt-2 text-sm text-muted">
-        Yönetici hesabı bütün kullanıcıların uygulamaya kaydettiği portföyleri görebildiği için ikinci
-        faktör zorunludur. {needsEnrollment ? "Kurulumu tamamlamadan" : "Doğrulamadan"} yönetim paneli açılmaz.
-      </p>
+      <p className="mt-2 text-sm text-muted">Bu adımı tamamlamadan yönetim paneli açılmaz.</p>
 
       {needsEnrollment && !enrollment ? (
         <button
@@ -113,7 +117,7 @@ export function AdminMfaView({
         <div className="mt-4 space-y-3">
           <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 p-3.5">
             <p className="text-xs text-subtle">
-              1. Doğrulayıcı uygulamanızda &quot;QR kodu tara&quot; deyip aşağıdaki kodu okutun.
+              Doğrulayıcı uygulamanızda &quot;QR kodu tara&quot; deyip aşağıdaki kodu okutun.
             </p>
             <div className="mt-3 flex justify-center">
               {/* Beyaz zemin şart: karanlık tema üstünde QR okunmaz. */}
@@ -134,9 +138,8 @@ export function AdminMfaView({
                 QR okutamıyorum, elle gireyim
               </summary>
               <p className="mt-2 text-xs text-subtle">
-                Uygulamada &quot;Kurulum anahtarını gir&quot; seçeneğini ve{" "}
-                <strong>zaman tabanlı (TOTP)</strong> tipini seçin, sonra şu anahtarı yazın. Anahtar
-                yalnızca A–Z harfleri ile 2–7 rakamlarını içerir; 0, 1, 8, 9 veya küçük harf yoktur.
+                Anahtarda yalnızca A–Z harfleri ve 2–7 rakamları vardır; 0, 1, 8, 9 veya küçük harf
+                yoktur.
               </p>
               <p
                 className="tabular mt-2 break-all text-sm font-semibold tracking-wider text-ink"
@@ -188,21 +191,25 @@ export function AdminMfaView({
         </form>
       )}
 
-      {notice ? (
-        <div className="mt-3">
-          <Alert tone="success">{notice}</Alert>
-        </div>
-      ) : null}
       {error ? (
         <div className="mt-3">
           <Alert tone="danger">{error}</Alert>
         </div>
       ) : null}
 
-      <p className="mt-4 text-xs text-subtle">
-        Hesap: {username}. Kurtarma kodunuzu da kaybettiyseniz başka bir yönetici sıfırlama yapabilir;
-        bu işlem ayrı denetim kaydı üretir.
-      </p>
+      {/* Bu ekran (app) düzeninin dışındadır; üst menüdeki Çıkış düğmesi burada yoktur.
+          Kod üretemeyen yönetici başka türlü ekranda kilitli kalır. */}
+      <button
+        type="button"
+        className="btn btn-ghost mt-3 min-h-11 w-full"
+        onClick={() => void signOut()}
+        disabled={busy}
+        data-testid="mfa-signout"
+      >
+        Çıkış yap
+      </button>
+
+      <p className="mt-4 text-xs text-subtle">Hesap: {username}</p>
     </Card>
   );
 }

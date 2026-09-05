@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { PASSWORD_RULES_TR } from "@/auth/password";
 import { useHydrated } from "@/components/hydration-marker";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { Alert, Field } from "@/components/ui";
@@ -55,8 +54,7 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
   if (done) {
     return (
       <Alert tone="success" title="Parolanız güncellendi">
-        Bu cihazdaki oturumunuz devam ediyor; diğer cihazlardaki oturumlar güvenlik için
-        kapatıldı. Panele yönlendiriliyorsunuz…
+        Diğer cihazlarda yeniden giriş yapmanız gerekecek.
       </Alert>
     );
   }
@@ -65,25 +63,40 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
     <form className="space-y-4" method="post" onSubmit={handleSubmit} noValidate>
       {forced ? (
         <Alert tone="notice" title="Parolanızı değiştirmeniz gerekiyor">
-          Hesabınıza geçici bir parola atanmış. Devam etmek için kendi parolanızı belirleyin.
+          Hesabınıza geçici bir parola verilmiş.
         </Alert>
       ) : null}
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
       <Field label="Mevcut parola" htmlFor="current-password">
-        <input
-          id="current-password"
-          type={show ? "text" : "password"}
-          className="control"
-          autoComplete="current-password"
-          required
-          value={currentPassword}
-          onChange={(event) => setCurrentPassword(event.target.value)}
-        />
+        <div className="relative">
+          <input
+            id="current-password"
+            type={show ? "text" : "password"}
+            className="control pr-20"
+            autoComplete="current-password"
+            required
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+          {/* Tek düğme üç parola alanını birlikte açar; diğer giriş ekranlarıyla aynı kalıp. */}
+          <button
+            type="button"
+            onClick={() => setShow((current) => !current)}
+            aria-pressed={show}
+            className="absolute inset-y-1 right-1 rounded-[6px] px-2.5 text-xs font-semibold text-muted hover:bg-surface-3 hover:text-ink"
+          >
+            {show ? "Gizle" : "Göster"}
+          </button>
+        </div>
       </Field>
 
-      <Field label="Yeni parola" htmlFor="new-password">
+      <Field
+        label="Yeni parola"
+        htmlFor="new-password"
+        hint="En az 10 karakter olmalı, harf ve rakam içermeli."
+      >
         <input
           id="new-password"
           type={show ? "text" : "password"}
@@ -106,25 +119,6 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
           onChange={(event) => setRepeatPassword(event.target.value)}
         />
       </Field>
-
-      <label className="flex items-center gap-2 text-sm text-muted">
-        <input
-          type="checkbox"
-          checked={show}
-          onChange={(event) => setShow(event.target.checked)}
-          className="h-4 w-4"
-        />
-        Parolaları göster
-      </label>
-
-      <div className="rounded-[var(--radius-sm)] border border-line bg-surface-2 px-3.5 py-3">
-        <p className="text-xs font-semibold text-muted">Parola kuralları</p>
-        <ul className="mt-1.5 space-y-1 text-xs text-subtle">
-          {PASSWORD_RULES_TR.map((rule) => (
-            <li key={rule}>• {rule}</li>
-          ))}
-        </ul>
-      </div>
 
       <button type="submit" className="btn btn-primary w-full" disabled={busy || !hydrated}>
         {busy ? "Kaydediliyor…" : "Parolayı değiştir"}

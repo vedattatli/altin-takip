@@ -18,11 +18,22 @@ test.describe("giriş ekranı", () => {
     await expect(page.getByLabel("Kullanıcı adı")).toBeVisible();
     await expect(page.getByLabel("Parola", { exact: true })).toBeVisible();
 
-    // E-posta / telefon / OTP alanı ve kayıt bağlantısı YOKTUR.
+    // E-posta / telefon / OTP alanı YOKTUR.
     await expect(page.locator('input[type="email"]')).toHaveCount(0);
     await expect(page.locator('input[type="tel"]')).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /kayıt|üye ol/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /demo/i })).toHaveCount(0);
+
+    // KAYIT ARTIK HERKESE AÇIK.
+    //
+    // Eskiden hesapları yalnızca yönetici açardı ve bu ekranda kayıt bağlantısı
+    // BULUNMAZDI; test de bunu doğrulardı. Ürün kararı değişti (bkz.
+    // src/app/api/auth/register/route.ts), giriş ekranı artık kayıt sayfasına
+    // bağlantı veriyor. Beklenti bağlantının adresine bakar: metin kısalsa bile
+    // kullanıcının kayıt sayfasına ulaşabildiği doğrulanmaya devam eder.
+    await expect(page.getByRole("link", { name: "Hesap oluşturun" })).toHaveAttribute(
+      "href",
+      "/kayit",
+    );
   });
 
   test("parola göster/gizle düğmesi çalışır", async ({ page }) => {

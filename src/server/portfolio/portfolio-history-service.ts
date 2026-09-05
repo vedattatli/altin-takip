@@ -3,6 +3,7 @@ import "server-only";
 import { replayLedger } from "@/domain/accounting";
 import { dec } from "@/domain/accounting/decimal";
 import type { LedgerEntry } from "@/domain/accounting/types";
+import { SCREEN_OBSERVATION_FRESH_MS } from "@/prices/providers/sarraf-tv-screen-collector";
 import { PLAN_PROVIDER_CODES, plannedProviderFor, SHARED_CATEGORY_QUOTE } from "@/prices/valuation-plan";
 import { ownScope, type UserActor } from "@/server/auth/actor";
 import type { AuthBackend } from "@/server/auth/backend";
@@ -44,8 +45,16 @@ import type { PriceHistoryRow } from "@/server/prices/types";
  * 12:15 fiyatıymış gibi etiketlerdi.
  */
 
-/** Bir fiyat en fazla bu kadar süre "hâlâ geçerli" sayılıp ileri taşınır. */
-const MAX_CARRY_FORWARD_MS = 3 * 60 * 60_000;
+/**
+ * Bir fiyat en fazla bu kadar süre "hâlâ geçerli" sayılıp ileri taşınır.
+ *
+ * Eşik, portföy kartının kullandığı bayatlık sınırıyla AYNI olmak zorundadır
+ * (`SCREEN_OBSERVATION_FRESH_MS` = 90 dakika; `validateUsableQuote` de onu
+ * uygular). Grafik daha gevşek bir sınır kullansaydı aynı ekranda iki farklı
+ * toplam çıkardı: panel bayat fiyatı reddedip "kısmi değerleme" derken grafik
+ * o fiyatı sessizce toplama katardı.
+ */
+const MAX_CARRY_FORWARD_MS = SCREEN_OBSERVATION_FRESH_MS;
 
 /**
  * Grafikte tek seferde döndürülen en fazla nokta sayısı.
@@ -108,7 +117,10 @@ export interface HistoryPoint {
 export interface PortfolioHistory {
   interval: HistoryInterval;
   points: HistoryPoint[];
-  /** Ardışık iki GÖZLEM arasındaki ortanca süre (ms). Verinin gerçek sıklığı. */
+  /**
+   * Verinin gerçek toplanma sıklığı (ms): her sağlayıcının kendi gözlemleri
+   * arasındaki ortanca süre ölçülür ve EN YAVAŞ olan bildirilir.
+   */
   medianStepMs: number | null;
   /** Çizilen aralıkta hiç gözlem düşmeyen kova sayısı (çizgideki boşluklar). */
   emptyIntervals: number;
@@ -194,7 +206,15 @@ export class PortfolioHistoryService {
 
     const [entries, rows] = await Promise.all([
       this.backend.listLedger(scope),
-      this.backend.priceQuoteHistory(PLAN_PROVIDER_CODES, since),
+      /*
+       * SATIR SINIRI AÇIKÇA VERİLİR.
+       *
+       * Varsayılan 5000 satır, üç plan sağlayıcısı 5 dakikada bir yazarken
+       * yaklaşık son 10 saate denk geliyordu: "1 gün" ve "1 hafta" düğmeleri
+       * istenen pencereyi değil, satır sınırının yettiği yeri gösterirdi.
+       * 20000, RPC'nin kendi üst sınırıdır (0022_price_history_series.sql).
+       */
+      this.backend.priceQuoteHistory(PLAN_PROVIDER_CODES, since, 20000),
     ]);
 
     const timelines = buildTimelines(rows);
@@ -236,6 +256,13 @@ export class PortfolioHistoryService {
     const ordered = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
 
     const points: HistoryPoint[] = [];
+    /*
+     * Gözlem DÜŞEN ama kullanıcının ürünlerinden hiçbirinin fiyatı bulunmadığı
+     * için atlanan kovalar. Bunlar "hiç gözlem yoktu" DEĞİLDİR; toplayıcı
+     * çalışıyordu, susan yalnızca o ürünün kaynağıydı. Ayrı tutulur ki
+     * `emptyIntervals` yanlış teşhis üretmesin.
+     */
+    const unpricedBucketStarts: number[] = [];
     for (const [start, bucket] of ordered) {
       const at = bucket.last;
       const upTo = entriesUpTo(entries, at);
@@ -258,7 +285,10 @@ export class PortfolioHistoryService {
 
       // Elde hiç ürün yoksa nokta anlamlıdır (değer 0); ama elde ürün varken
       // hiçbirinin fiyatı yoksa nokta ATLANIR — "0 TL" yanlış bilgi olurdu.
-      if (priced === 0 && missing > 0) continue;
+      if (priced === 0 && missing > 0) {
+        unpricedBucketStarts.push(start);
+        continue;
+      }
 
       points.push({
         at: new Date(start).toISOString(),
@@ -274,13 +304,22 @@ export class PortfolioHistoryService {
      * ÇİZGİDEKİ BOŞLUKLAR: ilk ve son nokta arasında KAÇ kova olması
      * gerekiyordu ile kaç nokta çizildiği arasındaki fark. Kullanıcı "15
      * dakikalık seçtim ama çizgi kopuk" dediğinde cevabı burada.
+     *
+     * Fiyatsız kaldığı için atlanan kovalar bu sayıdan DÜŞÜLÜR: onlarda gözlem
+     * vardı. Aksi hâlde arayüz "hiç fiyat kaydı alınamadı" derdi ve kullanıcı
+     * toplayıcının bozulduğunu sanırdı; oysa susan yalnızca kendi ürününün
+     * kaynağıydı. Yalnızca çizilen pencereye düşen kovalar sayılır; pencere
+     * dışındakiler zaten farkın içinde değildir.
      */
     let emptyIntervals = 0;
     if (points.length >= 2) {
       const first = Date.parse(points[0]!.at);
       const last = Date.parse(points[points.length - 1]!.at);
       const expected = Math.round((last - first) / intervalMs) + 1;
-      emptyIntervals = Math.max(0, expected - points.length);
+      const unpricedInRange = unpricedBucketStarts.filter(
+        (start) => start > first && start < last,
+      ).length;
+      emptyIntervals = Math.max(0, expected - points.length - unpricedInRange);
     }
 
     // Yalnızca ÇİZİLEN pencere sayılır: grafikte görünmeyen bir işlem çizgiyi
@@ -299,8 +338,9 @@ export class PortfolioHistoryService {
     return {
       interval,
       points,
-      // Verinin GERÇEK sıklığı ham gözlemlerden ölçülür, kovalardan değil.
-      medianStepMs: medianStep(observed),
+      // Sıklık ham gözlemlerden ölçülür (kovalardan değil) ve sağlayıcı
+      // BAŞINA: bkz. `slowestObservationStepMs`.
+      medianStepMs: slowestObservationStepMs(rows),
       emptyIntervals,
       empty: points.length === 0,
       ledgerChangesInRange,
@@ -314,6 +354,39 @@ function entriesUpTo(entries: readonly LedgerEntry[], at: number): LedgerEntry[]
     const instant = Date.parse(entry.occurredAtInstant);
     return Number.isFinite(instant) && instant <= at;
   });
+}
+
+/**
+ * TOPLAMA SIKLIĞI SAĞLAYICI BAŞINA ÖLÇÜLÜR, BİRLEŞİK DAMGALARDAN DEĞİL.
+ *
+ * Tek koşumda sağlayıcılar sırayla çekilir; damgaları arasında saniyeler olur
+ * (kimi sağlayıcı satır saatini de taşır). Hepsini tek kümede birleştirip
+ * ortanca almak, koşumlar arası ~5 dakikayı görmezden gelip "saniyeler arayla
+ * toplanıyor" gibi olgusal olarak yanlış bir sonuç verirdi.
+ *
+ * Her sağlayıcının kendi ortancası ölçülür ve EN YAVAŞ olan bildirilir:
+ * kullanıcı açısından anlamlı olan, verinin ne sıklıkta TAMAMLANDIĞIdır.
+ */
+function slowestObservationStepMs(rows: readonly PriceHistoryRow[]): number | null {
+  const byProvider = new Map<string, Set<number>>();
+  for (const row of rows) {
+    const planned = plannedProviderFor(row.canonicalProductId);
+    // Plan dışı sağlayıcı fiyatı çizmiyor; sıklığını da belirlemez.
+    if (planned === null || planned !== row.providerCode) continue;
+    const at = Date.parse(row.observedAt);
+    if (!Number.isFinite(at)) continue;
+    const stamps = byProvider.get(row.providerCode);
+    if (stamps) stamps.add(at);
+    else byProvider.set(row.providerCode, new Set([at]));
+  }
+
+  let slowest: number | null = null;
+  for (const stamps of byProvider.values()) {
+    const step = medianStep([...stamps].sort((a, b) => a - b));
+    if (step === null) continue;
+    if (slowest === null || step > slowest) slowest = step;
+  }
+  return slowest;
 }
 
 function medianStep(times: readonly number[]): number | null {

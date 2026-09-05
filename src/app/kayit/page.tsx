@@ -30,6 +30,13 @@ export default async function RegisterPage() {
           <RegisterForm />
         </div>
 
+        <p className="mt-5 text-center text-sm text-muted">
+          Zaten hesabınız var mı?{" "}
+          <Link href="/giris" className="font-medium text-accent hover:underline">
+            Giriş yapın
+          </Link>
+        </p>
+
         {/*
           PAROLA KURTARMA UYARISI BİLEREK BURADA.
 
@@ -38,16 +45,8 @@ export default async function RegisterPage() {
           sıfırlayabilir. Bunu kayıt anında söylemek, sonradan öğrenmekten
           iyidir.
         */}
-        <p className="mt-5 text-center text-xs leading-relaxed text-subtle">
-          Parolanızı unutursanız kendiniz sıfırlayamazsınız; yöneticiyle iletişime geçmeniz
-          gerekir. Parolanızı güvenli bir yerde saklayın.
-        </p>
-
-        <p className="mt-4 text-center text-sm text-muted">
-          Zaten hesabınız var mı?{" "}
-          <Link href="/giris" className="font-medium text-accent hover:underline">
-            Giriş yapın
-          </Link>
+        <p className="mt-4 text-center text-xs leading-relaxed text-subtle">
+          Parolanızı not edin; unutursanız yalnızca yönetici sıfırlayabilir.
         </p>
       </div>
     </main>

@@ -52,6 +52,8 @@ const testEnv = {
   AUTH_MFA_ENCRYPTION_KEY: E2E_MFA_ENCRYPTION_KEY,
   // Zamanlanmış fiyat alımı ucu için test secret'ı.
   PRICE_CRON_SECRET: E2E_CRON_SECRET,
+  // Ekran worker sırrı: E2E'de kullanılmaz ama .env.local sızmasın diye sabitlenir.
+  PRICE_SCREEN_WORKER_SECRET: "",
   // Test verisi sağlayıcısı için AYRI kapı. Yerel auth kapısından bağımsızdır ve
   // gerçek üretim dağıtımında (VERCEL_ENV=production) hiçbir etkisi yoktur.
   PRICE_ALLOW_MOCK_PROVIDER: PRICE_TEST_TOKEN,
@@ -75,7 +77,6 @@ const testEnv = {
   NEXT_PUBLIC_ENABLE_DEMO_MODE: "false",
   // Bu değişkenler E2E'de KULLANILMAZ; boş bırakılır ki canlı bir
   // sağlayıcıya veya gerçek bir yapılandırmaya düşülmesin.
-  PRICE_INGESTION_INTERVAL_MS: "",
   PRICE_STALE_AFTER_MS: "",
   PRICE_MAX_CHANGE_RATIO: "",
   PRICE_MAX_SPREAD_RATIO: "",

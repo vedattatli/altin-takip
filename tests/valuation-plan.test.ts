@@ -15,7 +15,6 @@ import {
   PRIMARY_DISPLAY_GROUPS,
   SCREEN_PROVIDER_CODE,
   SHARED_CATEGORY_QUOTE,
-  summarizeSources,
   TURKIYE_PROVIDER_CODE,
   VALUATION_SOURCE_PLAN,
 } from "@/prices/valuation-plan";
@@ -252,23 +251,5 @@ describe("3. görünüm grupları", () => {
   it("varsayılan listede tam olarak altı ad vardır", () => {
     const labels = PRIMARY_DISPLAY_GROUPS.map((group) => group.label);
     expect(labels).toEqual(["Gram Altın", "Çeyrek Altın", "Yarım Altın", "Tam Altın", "Ata Altın", "Gremse Altın"]);
-  });
-});
-
-describe("4. kaynak özeti", () => {
-  it("kaç ürünün hangi kaynaktan geldiğini sayar", () => {
-    const text = summarizeSources([
-      SCREEN_PROVIDER_CODE,
-      SCREEN_PROVIDER_CODE,
-      SCREEN_PROVIDER_CODE,
-      SCREEN_PROVIDER_CODE,
-      KAPALICARSI_PROVIDER_CODE,
-    ]);
-    expect(text).toContain("4 ürün Kayseri — Sarraf TV");
-    expect(text).toContain("1 ürün Kapalıçarşı — Anlık Altın");
-  });
-
-  it("fiyat yoksa boş metin döner", () => {
-    expect(summarizeSources([])).toBe("");
   });
 });

@@ -73,8 +73,17 @@ describe("sayaç anahtarları", () => {
     expect(buckets[2]!.settings).toBe(DEFAULT_LOGIN_RATE_LIMIT_POLICY.pair);
   });
 
-  it("boş kullanıcı adı için de anahtar üretir", () => {
-    expect(loginRateLimitBuckets("1.2.3.4", "")[1]!.key).toBe("user:?");
+  /*
+   * Geçersiz kullanıcı adı doğrulamadan BOŞ dize olarak döner. Sabit bir "?"
+   * kovası, dünyadaki bütün yazım hatalarını tek sayaca yazar ve birbirinden
+   * habersiz ziyaretçiler birbirini kilitler. Boş ad IP'ye kapsanır; GEÇERLİ
+   * bir kullanıcı adının kovası ise IP'den bağımsız kalır (dağıtık deneme
+   * koruması aynen sürer).
+   */
+  it("boş kullanıcı adı IP'ye kapsanır; geçerli ad kapsanmaz", () => {
+    expect(loginRateLimitBuckets("1.2.3.4", "")[1]!.key).toBe("user:?:1.2.3.4");
+    expect(loginRateLimitBuckets("5.6.7.8", "")[1]!.key).toBe("user:?:5.6.7.8");
+    expect(loginRateLimitBuckets("1.2.3.4", "ayse")[1]!.key).toBe("user:ayse");
   });
 
   it("varsayılan politika: kombinasyon en sıkı, IP en geniş eşiktir", () => {

@@ -64,12 +64,33 @@ export const DEFAULT_QUALITY_POLICY: QualityPolicy = {
   },
 };
 
+/**
+ * DEVRE KESİCİ REFERANSININ AZAMİ YAŞI
+ *
+ * PRICE_JUMP kontrolü, en son kabul edilmiş bozdurma fiyatını referans alır.
+ * Karantinaya düşen quote güncel fiyat tablosuna YAZILMADIĞI için bu referans
+ * kendiliğinden tazelenmez: uzun bir kesintiden sonra gerçek fiyat eşiği aşarsa
+ * her koşumda aynı ret üretilir ve kilit kendi kendini besler.
+ *
+ * Bu yüzden referans, yaşı bu sınırı aşınca KULLANILMAZ. Referans yokluğunda
+ * sıçrama kontrolü zaten uygulanmaz; kaynak kesinti sonrası kendiliğinden
+ * toparlanır, kısa aralıklı gerçek sıçrama yakalanmaya devam eder.
+ *
+ * Referansı okuyan çağıran (ingestion ve ekran worker yolları) bu sınırdan eski
+ * satırları `previousLiquidation` sonucuna KOYMAMALIDIR.
+ */
+export const PRICE_JUMP_REFERENCE_MAX_AGE_MS = 6 * 60 * 60_000;
+
 export interface QualityContext {
   providerId: ProviderId;
   marketId: MarketId;
   /** Katalogdaki geçerli ürün kimlikleri. */
   knownProductIds: ReadonlySet<string>;
-  /** Aynı sağlayıcı/ürün için bilinen son geçerli bozdurma fiyatı (sayısal). */
+  /**
+   * Aynı sağlayıcı/ürün için bilinen son geçerli bozdurma fiyatı (sayısal).
+   * Çağıran, `PRICE_JUMP_REFERENCE_MAX_AGE_MS`'ten eski referansları elemelidir;
+   * eski referans döndürmek devre kesiciyi kalıcı kilide çevirir.
+   */
   previousLiquidation?: (productId: string) => number | null;
   now: number;
   policy?: Partial<QualityPolicy>;

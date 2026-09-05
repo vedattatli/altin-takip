@@ -78,7 +78,6 @@ const EXPECTED_GUARDS: Record<string, Guard> = {
   "admin/audit/route.ts": "admin",
   // Sprint 3: fiyat kaynakları, ikinci faktör, veri hakları ve zamanlanmış alım.
   "price-sources/route.ts": "usable",
-  "price-sources/compare/route.ts": "usable",
   "portfolio/export/route.ts": "usable",
   "account/deletion-request/route.ts": "usable",
   "admin/price-sources/route.ts": "admin",

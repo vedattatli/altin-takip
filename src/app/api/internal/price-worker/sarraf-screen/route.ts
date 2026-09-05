@@ -24,6 +24,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const HEADERS = { "Cache-Control": "private, no-store" } as const;
+const WORKER_ROUTE_FAILURE_MARKER = "ALTIN_WORKER_ROUTE_FAILURE";
 
 function deny(code: string, status = 403): NextResponse {
   return NextResponse.json({ error: "Worker isteği reddedildi.", code }, { status, headers: HEADERS });
@@ -83,8 +84,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
       { status: 200, headers: HEADERS },
     );
-  } catch {
-    // İç hata ayrıntısı sızdırılmaz.
+  } catch (error) {
+    // İç hata ayrıntısı YANITA sızdırılmaz ama sunucu loguna iz bırakılır:
+    // sessizce ölen bir worker'ın sebebi yöneticinin hiçbir yerde göremediği
+    // bir boşluğa düşmemelidir. Yalnızca hata mesajı yazılır; ham gövde,
+    // imza, secret ve adres LOGLANMAZ.
+    console.error(WORKER_ROUTE_FAILURE_MARKER, {
+      route: "sarraf-screen",
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: "Worker isteği işlenemedi.", code: "worker_error" },
       { status: 500, headers: HEADERS },

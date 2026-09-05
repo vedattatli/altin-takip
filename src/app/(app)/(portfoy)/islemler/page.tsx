@@ -8,8 +8,6 @@ const FORM_BY_PARAM: Record<string, LedgerFormKind> = {
   mevcut: "opening",
   alis: "buy",
   satis: "sell",
-  // Eski bağlantı: ?yeni=1 -> yeni alış
-  "1": "buy",
 };
 
 export default async function TransactionsPage({
@@ -18,7 +16,7 @@ export default async function TransactionsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const raw = params.ekle ?? params.yeni;
+  const raw = params.ekle;
   const key = Array.isArray(raw) ? raw[0] : raw;
   return <TransactionsView initialForm={key ? (FORM_BY_PARAM[key] ?? null) : null} />;
 }

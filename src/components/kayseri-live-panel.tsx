@@ -8,22 +8,12 @@ import type { KayseriSnapshot } from "./kayseri-prices-view";
 import { cx } from "./ui";
 
 /**
- * KAYSERİ CANLI ALTIN EKRANI — KOMPAKT PANEL
+ * KAYSERİ ALTIN FİYATLARI — KOMPAKT PANEL
  *
- * İKİ AYRI ZAMAN, BİLEREK AYRI GÖSTERİLİR:
- *
- *  1. Ekran gözlemi   — toplayıcının Sarraf TV ekranını en son okuduğu an.
- *  2. Canlı pencere   — tv.sarraf.pro kendi kendini sürekli günceller.
- *
- * Canlı pencere, portföy hesabından DAHA YENİ bir fiyat gösteriyor olabilir;
- * çünkü hesap saatte bir toplanan doğrulanmış gözlemi kullanır. Bu fark
- * gizlenmez, panelin altında açıkça yazılır. Eski bir gözlem hiçbir koşulda
- * "anlık" diye etiketlenmez.
- *
- * Canlı pencere VARSAYILAN OLARAK YÜKLENMEZ: üçüncü taraf bir sayfa, kullanıcı
- * istemeden portföy ekranında çalışmaz. Kullanıcı açtığında `sandbox` ile
- * sınırlandırılmış, `referrerpolicy="no-referrer"` ile kimliksiz yüklenir ve
- * üst pencereyi yönlendiremez.
+ * Panelde yazan zaman, toplayıcının Sarraf TV ekranını en son okuduğu andır;
+ * portföy hesabı da saatte bir toplanan bu doğrulanmış gözlemi kullanır.
+ * Gözlemin yaşı gizlenmez: tazelik rozeti ve güncelleme saati panelde açıkça
+ * yazılır, eski bir gözlem hiçbir koşulda "anlık" diye etiketlenmez.
  */
 
 /** Panelde gösterilen dört ürün ve ekrandaki karşılıkları. */
@@ -46,9 +36,9 @@ function money(value: string | null): string {
 function StatusBadge({ snapshot }: { snapshot: KayseriSnapshot }) {
   const { freshness, ageMinutes } = snapshot;
   if (freshness === "none") {
-    return <span className="badge">Gözlem yok</span>;
+    return <span className="badge">Fiyat yok</span>;
   }
-  const label = freshness === "fresh" ? "Güncel" : freshness === "stale" ? "Bayat" : "Kullanılamıyor";
+  const label = freshness === "fresh" ? "Güncel" : freshness === "stale" ? "Eski" : "Kullanılamıyor";
   return (
     <span
       className={cx("badge", freshness === "fresh" ? "badge-positive" : freshness === "stale" ? "badge-notice" : "badge-negative")}
@@ -68,7 +58,14 @@ function PriceTable({ snapshot }: { snapshot: KayseriSnapshot }) {
         entry.rawLabels.includes(candidate.rawLabel.trim().toLocaleUpperCase("tr-TR")),
       ) ??
       null;
-    return { ...entry, row };
+    /*
+     * Yalnızca DEĞERLEMEYE GİREN satır gösterilir. Ekranda okunan bir satır,
+     * eşleme onaylanmadığı sürece portföy hesabına girmez; onu burada fiyatmış
+     * gibi basmak, panelin "portföyün kullandığı fiyat" iddiasını yalanlar.
+     * Değerlemeye girmeyen ham satırlar /kayseri-fiyatlari referans tablosunda
+     * görünmeye devam eder.
+     */
+    return { ...entry, row: row && row.usedInValuation ? row : null };
   });
 
   return (
@@ -96,14 +93,13 @@ function PriceTable({ snapshot }: { snapshot: KayseriSnapshot }) {
 export function KayseriLivePanel({ snapshot }: { snapshot: KayseriSnapshot }) {
   // Mobilde varsayılan kapalı; masaüstünde CSS ile her zaman açık.
   const [openOnMobile, setOpenOnMobile] = useState(false);
-  const [liveOpen, setLiveOpen] = useState(false);
 
   if (!snapshot.allowed) return null;
 
   const observedText = snapshot.observedAt ? formatDateTime(snapshot.observedAt) : "—";
 
   return (
-    <aside className="live-panel" aria-label="Kayseri canlı altın ekranı" data-testid="kayseri-live-panel">
+    <aside className="live-panel" aria-label="Kayseri altın fiyatları" data-testid="kayseri-live-panel">
       <div className="card live-panel-card">
         <button
           type="button"
@@ -113,8 +109,7 @@ export function KayseriLivePanel({ snapshot }: { snapshot: KayseriSnapshot }) {
           onClick={() => setOpenOnMobile((value) => !value)}
         >
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-ink">Kayseri Canlı Altın Ekranı</span>
-            <span className="block truncate text-xs text-muted">Sarraf TV Kayseri</span>
+            <span className="block truncate text-sm font-semibold text-ink">Kayseri Altın Fiyatları</span>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             <StatusBadge snapshot={snapshot} />
@@ -127,44 +122,15 @@ export function KayseriLivePanel({ snapshot }: { snapshot: KayseriSnapshot }) {
         <div id="live-panel-body" className={cx("live-panel-body", openOnMobile && "is-open")}>
           <div className="live-panel-scroll">
             <PriceTable snapshot={snapshot} />
-
-            {liveOpen ? (
-              <div className="mt-3">
-                <iframe
-                  title="Sarraf TV Kayseri canlı ekranı"
-                  src={SARRAF_TV_URL}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  /*
-                   * `allow-same-origin` framelenen sayfaya KENDİ origin'ini
-                   * geri verir; bizim origin'imizi vermez. Üst pencereyi
-                   * yönlendirme, form gönderme ve açılır pencere izinleri
-                   * bilinçli olarak VERİLMEZ.
-                   */
-                  sandbox="allow-scripts allow-same-origin"
-                  className="h-[190px] w-full rounded-[var(--radius-sm)] border border-line bg-black"
-                />
-                <p className="mt-1 text-[0.6875rem] leading-snug text-subtle">
-                  Bu pencere kaynağın kendi canlı ekranıdır ve portföy hesabının veri kaynağı değildir.
-                </p>
-              </div>
-            ) : null}
           </div>
 
           <div className="live-panel-foot">
             <p className="tabular text-[0.6875rem] leading-snug text-subtle" data-testid="panel-observed-at">
-              Portföy hesabında kullanılan son doğrulanmış gözlem: {observedText}
+              Son güncelleme: {observedText}
             </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <button
-                type="button"
-                className="text-accent underline"
-                onClick={() => setLiveOpen((value) => !value)}
-              >
-                {liveOpen ? "Canlı ekranı gizle" : "Canlı ekranı göster"}
-              </button>
+            <div className="mt-1.5 text-xs">
               <Link className="text-accent underline" href="/kayseri-fiyatlari">
-                Tam ekran aç
+                Tüm Kayseri fiyatları
               </Link>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 
+import { AppError } from "@/server/auth/errors";
 import {
   clientKey,
   getAuthService,
@@ -23,7 +24,9 @@ import { apiRoute } from "@/server/security/route";
  * `user` rolüyle açılır. `admin` yalnızca `npm run admin:create` ile verilir.
  *
  * Kayıt başarılıysa kullanıcı DOĞRUDAN oturum açar; ayrıca giriş yapması
- * istenmez. Oturum kuralları giriş ucuyla birebir aynıdır.
+ * istenmez. Oturum kuralları giriş ucuyla birebir aynıdır. Otomatik giriş
+ * başarısız olursa hesap yine de açılmış olur; bu durum 409 +
+ * `registered_not_signed_in` ile bildirilir (aşağıdaki nota bakın).
  */
 export const POST = apiRoute(async (request) => {
   const body = await readJson<{
@@ -48,13 +51,30 @@ export const POST = apiRoute(async (request) => {
   );
 
   const deviceLabel = describeDevice((await headers()).get("user-agent"));
-  const result = await service.login(
-    body.username ?? "",
-    body.password ?? "",
-    key,
-    deviceLabel,
-    body.keepSignedIn === true,
-  );
+
+  // Buraya gelindiyse hesap ARTIK VAR. Otomatik giriş ayrı bir adımdır ve kendi
+  // GİRİŞ hız sınırı kovalarını kullanır; kullanıcı daha önce yanlış parolayla
+  // deneyip o kovayı kilitlediyse burası 429 fırlatır. Ham hatayı yukarı
+  // bırakmak kayıt formuna "Çok fazla başarısız giriş denemesi" yazdırır ve
+  // kullanıcı hesabın açılmadığını sanır (sonra aynı adı denediğinde "bu ad
+  // kullanılıyor" alır). Bu yüzden giriş adımının HER hatası, hesabın
+  // açıldığını söyleyen tek bir mesaja çevrilir.
+  let result;
+  try {
+    result = await service.login(
+      body.username ?? "",
+      body.password ?? "",
+      key,
+      deviceLabel,
+      body.keepSignedIn === true,
+    );
+  } catch {
+    throw new AppError(
+      409,
+      "Hesabınız oluşturuldu ancak otomatik giriş yapılamadı. Giriş sayfasından giriş yapın.",
+      "registered_not_signed_in",
+    );
+  }
 
   const store = await cookies();
   store.set(

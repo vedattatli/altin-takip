@@ -4,31 +4,19 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import {
-  COST_QUALITY_DESCRIPTIONS,
   COST_QUALITY_LABELS,
   dec,
-  PARTIAL_VALUATION_LABEL,
-  PNL_LABELS,
-  PRICE_UNAVAILABLE_LABEL,
   type HoldingView,
+  type PnlLabelKind,
 } from "@/domain/accounting";
 import {
-  formatDateTime,
   formatGrams,
   formatMoney,
   formatPercent,
   formatQuantity,
   formatSignedMoney,
 } from "@/lib/format";
-import {
-  isPrimaryProduct,
-  plannedProviderFor,
-  SHARED_CATEGORY_NOTE,
-  sourceBadgeFor,
-  summarizeSources,
-  VALUATION_PLAN_DESCRIPTION,
-  VALUATION_PLAN_NAME,
-} from "@/prices/valuation-plan";
+import { isPrimaryProduct } from "@/prices/valuation-plan";
 import { isGoldProduct } from "@/domain/catalog";
 import { usePortfolio } from "@/state/portfolio-store";
 import { useViewMode } from "@/state/view-mode";
@@ -37,7 +25,19 @@ import { PriceSourceLine } from "./price-source-line";
 import { DismissibleNotice } from "./dismissible-notice";
 import { Card, DeltaValue, EmptyState, Explain, SectionTitle, cx, moneySizeClass } from "./ui";
 
-const PRICE_UNAVAILABLE = PRICE_UNAVAILABLE_LABEL;
+/*
+ * EKRAN METİNLERİ
+ *
+ * Motorun sabitleri muhasebe diliyle yazılıdır ("Fiyat verisi kullanılamıyor",
+ * "Maliyet bazlı K/Z"). Panelde günlük Türkçesi gösterilir; motor sabitleri ve
+ * hesaplar aynen durur. Fiyat yoksa yine SIFIR yazılmaz, bu etiket basılır.
+ */
+const PRICE_UNAVAILABLE = "Fiyat yok";
+
+const PNL_BASIS_TEXT: Record<PnlLabelKind, string> = {
+  COST_BASIS: "Maliyetinize göre",
+  SINCE_TRACKING_START: "Takibe başladığınız günden beri",
+};
 
 function StatCard({
   label,
@@ -70,34 +70,19 @@ function StatCard({
   );
 }
 
+/**
+ * MALİYET ROZETİ
+ *
+ * Yalnızca DİKKAT isteyen maliyet durumları rozet alır. "Gerçek maliyet"
+ * normal durumdur ve neredeyse her satırda çıkardı; rozetin YOKLUĞU maliyetin
+ * gerçek olduğu anlamına gelir.
+ */
 function CostQualityBadge({ holding }: { holding: HoldingView }) {
   const quality = holding.costQuality;
-  if (quality === "NONE") return null;
+  if (quality === "NONE" || quality === "ACTUAL") return null;
   return (
-    <span
-      className={cx("badge", quality === "ACTUAL" ? "badge-positive" : "badge-notice")}
-      title={COST_QUALITY_DESCRIPTIONS[quality]}
-      data-testid="cost-quality"
-    >
+    <span className="badge badge-notice" data-testid="cost-quality">
       {COST_QUALITY_LABELS[quality]}
-    </span>
-  );
-}
-
-/**
- * KAYNAK ROZETİ
- *
- * Kullanıcıya teknik sağlayıcı kimliği veya güven seviyesi gösterilmez;
- * yalnızca piyasanın adı görünür. Fiyat henüz gelmediyse PLANLANAN kaynak
- * yazılır — böylece "bu ürün hangi kaynaktan değerlenecek" sorusu fiyat
- * gelmeden de yanıtlıdır.
- */
-function SourceBadge({ productId, quoteProvider }: { productId: string; quoteProvider: string | null }) {
-  const badge = sourceBadgeFor(quoteProvider ?? plannedProviderFor(productId));
-  if (!badge) return null;
-  return (
-    <span className="badge" title={badge.description} data-testid="source-badge">
-      {badge.label}
     </span>
   );
 }
@@ -127,7 +112,6 @@ function HoldingRow({
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="truncate text-sm font-semibold text-ink">{name}</p>
             <CostQualityBadge holding={holding} />
-            <SourceBadge productId={product.id} quoteProvider={quote?.provider ?? null} />
           </div>
           {/*
             "has" karşılığı YALNIZCA altında yazılır. Gümüş ve dövizin has altın
@@ -140,29 +124,38 @@ function HoldingRow({
           </p>
           <p className="tabular mt-0.5 text-xs text-muted">
             Ortalama maliyet: {position.averageCost ? formatMoney(position.averageCost) : "—"}/{product.unit}
-            {simple ? "" : ` · Kalan maliyet: ${formatMoney(position.remainingCostBasis)}`}
           </p>
+          {/*
+            Birim fiyat kalır: kullanıcı sağdaki toplamı bununla doğruluyor.
+            Fiyatın ne zaman alındığı sayfanın altındaki şeritte bir kez yazar;
+            her satırda tekrarlanmaz.
+          */}
           {quote ? (
             <p className="tabular mt-0.5 text-xs text-subtle">
-              Bozdurma: {formatMoney(quote.liquidationPrice)}/{product.unit} · Yeniden alım:{" "}
-              {formatMoney(quote.replacementPrice)}/{product.unit} · Son güncelleme:{" "}
-              {formatDateTime(quote.fetchedAt)}
+              Bozdurma: {formatMoney(quote.liquidationPrice)}/{product.unit}
+              {simple ? "" : ` · Yeniden alım: ${formatMoney(quote.replacementPrice)}/${product.unit}`}
             </p>
           ) : null}
+          {/*
+            Eski ve yeni ürün, kaynağın yayımladığı TEK kategori fiyatıyla
+            değerlenir. Fiyat türetilmiyor; kullanıcı iki satırın neden kuruşu
+            kuruşuna aynı olduğunu bilmezse ekranı yanlış okur.
+          */}
           {sharedFrom !== null ? (
-            <p className="mt-0.5 text-xs text-subtle" title={SHARED_CATEGORY_NOTE} data-testid="shared-category">
-              Ortak kategori fiyatı
+            <p className="mt-0.5 text-xs text-subtle" data-testid="shared-category">
+              Eski ve yeni için aynı fiyat kullanılıyor.
             </p>
-          ) : null}
-          {holding.costQuality === "MIXED" ? (
-            <p className="mt-0.5 text-xs text-subtle">{COST_QUALITY_DESCRIPTIONS.MIXED}</p>
           ) : null}
         </div>
         <div className="shrink-0 text-right">
           <p className="tabular text-sm font-semibold text-ink">
             {priced ? formatMoney(holding.liquidationValue!) : PRICE_UNAVAILABLE}
           </p>
-          {priced ? (
+          {/*
+            Basit mod "yeniden alım" kavramını bilerek göstermez; satırda ikinci
+            bir TL rakamı hangisinin portföy değeri olduğunu bulanıklaştırırdı.
+          */}
+          {priced && !simple ? (
             <p className="tabular mt-0.5 text-xs text-muted">Yeniden alım {formatMoney(holding.replacementValue!)}</p>
           ) : null}
         </div>
@@ -174,13 +167,15 @@ function HoldingRow({
             formatted={formatSignedMoney(holding.unrealizedPnl)}
             suffix={holding.unrealizedPnlPercent !== null ? formatPercent(holding.unrealizedPnlPercent) : undefined}
           />
-          <span className="ml-1 text-subtle">{simple ? "kâr/zarar" : "gerçekleşmemiş"}</span>
+          {/*
+            Basit modda işaretli ve renkli rakam zaten kâr/zarar olarak okunur.
+            Detaylı modda hemen altında bir de "Gerçekleşmiş" satırı var; ikisini
+            ayıran tek şey bu kelime.
+          */}
+          {simple ? null : <span className="ml-1 text-subtle">gerçekleşmemiş</span>}
         </p>
       ) : (
-        <p className="mt-1.5 text-xs text-muted">
-          Bu ürün için güncel fiyat alınamıyor; değerleme ve gerçekleşmemiş K/Z hesaplanmadı. Başka
-          bir kaynağın fiyatı bu ürüne yazılmaz.
-        </p>
+        <p className="mt-1.5 text-xs text-muted">Bugünkü fiyatı alınamadı; kâr/zarar hesaplanmadı.</p>
       )}
       {!simple && !dec(position.realizedPnl).isZero() ? (
         <p className="tabular mt-0.5 text-xs text-muted">
@@ -192,53 +187,46 @@ function HoldingRow({
 }
 
 export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: () => void }) {
-  const {
-    summary,
-    snapshot,
-    status,
-    error,
-    isOnline,
-    repository,
-    refreshPrices,
-    portfolio,
-    lastSyncedAt,
-    syncStatus,
-  } = usePortfolio();
+  const { summary, snapshot, status, error, isOnline, repository, refreshPrices, portfolio } =
+    usePortfolio();
   const { isSimple } = useViewMode();
 
   const base = addHref ?? "/islemler";
+  const addAction = (kind: "mevcut" | "alis" | "satis", label: string, className: string) =>
+    onAdd ? (
+      <button type="button" className={className} onClick={onAdd}>
+        {label}
+      </button>
+    ) : (
+      <Link href={`${base}?ekle=${kind}`} className={className}>
+        {label}
+      </Link>
+    );
+
+  const existingButton = addAction("mevcut", "Mevcut Altını Ekle", "btn btn-secondary min-h-11");
+  const buyButton = addAction("alis", isSimple ? "Altın Ekle" : "Yeni Alış Ekle", "btn btn-primary min-h-11");
+  const sellButton = addAction("satis", "Satış Ekle", "btn btn-secondary min-h-11");
+
   /*
    * Basit modda SATIŞ düğmesi gösterilmez: günlük kullanımda altın eklenir,
-   * satılmaz. Satış özelliği KALDIRILMADI — detaylı moda geçince yerindedir
-   * ve kayıtlar aynen durur.
+   * satılmaz. "Mevcut Altını Ekle" de dolu listede gizlenir; kullanıcı gözüyle
+   * iki düğme de "altın ekle" demek ve aradaki muhasebe farkı düğme adından
+   * anlaşılmıyor. Hiçbir akış KALDIRILMADI: mevcut altın girişi boş durum
+   * kartında ve /islemler sayfasında, satış ise detaylı modda yerindedir.
    */
-  const actionButtons = onAdd ? (
+  const actionButtons = (
     <div className="flex flex-wrap gap-2">
-      <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
-        Mevcut Altını Ekle
-      </button>
-      <button type="button" className="btn btn-primary min-h-11" onClick={onAdd}>
-        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
-      </button>
-      {isSimple ? null : (
-        <button type="button" className="btn btn-secondary min-h-11" onClick={onAdd}>
-          Satış Ekle
-        </button>
-      )}
+      {isSimple ? null : existingButton}
+      {buyButton}
+      {isSimple ? null : sellButton}
     </div>
-  ) : (
+  );
+
+  const emptyStateButtons = (
     <div className="flex flex-wrap gap-2">
-      <Link href={`${base}?ekle=mevcut`} className="btn btn-secondary min-h-11">
-        Mevcut Altını Ekle
-      </Link>
-      <Link href={`${base}?ekle=alis`} className="btn btn-primary min-h-11">
-        {isSimple ? "Altın Ekle" : "Yeni Alış Ekle"}
-      </Link>
-      {isSimple ? null : (
-        <Link href={`${base}?ekle=satis`} className="btn btn-secondary min-h-11">
-          Satış Ekle
-        </Link>
-      )}
+      {existingButton}
+      {buyButton}
+      {isSimple ? null : sellButton}
     </div>
   );
 
@@ -262,7 +250,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   /*
    * Üç ayrı durum:
    *   NEVER_USED : hiç işlem yok → 0 TL ve "Henüz altın eklenmedi"
-   *   CLOSED     : geçmiş işlem var, açık pozisyon yok → gerçekleşmiş K/Z korunur, "Açık pozisyonunuz bulunmuyor"
+   *   CLOSED     : geçmiş işlem var, elde varlık yok → gerçekleşmiş K/Z korunur, "Elinizde varlık kalmadı"
    *   OPEN       : açık pozisyon var → değerleme KAPSAMA göre (full / partial / none)
    * Değerleme kararı sağlayıcı meta durumuna değil, eldeki pozisyonlar için gerçekten
    * kullanılabilir quote kapsamına (valuationStatus) göre verilir.
@@ -271,17 +259,15 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   const isNeverUsed = portfolioState === "NEVER_USED";
   const isClosed = portfolioState === "CLOSED";
   const isOpen = portfolioState === "OPEN";
-  const isEmpty = !isOpen;
   const noPrices = isOpen && summary.valuationStatus === "none";
   const partial = isOpen && summary.valuationStatus === "partial";
   const priceOk = !noPrices;
+  // Kartın kendi "(kısmi)" eki ile tek uyarı kutusu eksik kapsamı zaten söyler;
+  // aynı uyarı kart ipuçlarında tekrar edilmez.
   const partialSuffix = partial ? " (kısmi)" : "";
-  const coverageText = partial
-    ? `${PARTIAL_VALUATION_LABEL}: yalnızca fiyatı bulunan ${summary.pricedPositionCount}/${summary.positionCount} varlığın toplamı`
-    : null;
   // Açık pozisyon yoksa değer 0 TL'dir; açık pozisyon var ama hiç kullanılabilir fiyat yoksa "kullanılamıyor" (0 TL DEĞİL).
   const valuation = (value: string) => (noPrices ? PRICE_UNAVAILABLE : formatMoney(value));
-  const pnlText = PNL_LABELS[summary.pnlLabel];
+  const pnlText = PNL_BASIS_TEXT[summary.pnlLabel];
 
   /*
    * GÖRÜNÜM AYIRIMI
@@ -298,12 +284,6 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
   const sharedFrom = (productId: string): string | null =>
     summary.snapshot?.provider.memberProviders?.[productId]?.sharedFrom ?? null;
 
-  const sourceSummary = summarizeSources(
-    openHoldings
-      .map((holding) => holding.quote?.provider)
-      .filter((code): code is string => typeof code === "string"),
-  );
-
   return (
     <div className="space-y-5" data-portfolio-state={portfolioState} data-valuation-status={summary.valuationStatus}>
       <div>
@@ -311,29 +291,29 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           {portfolio?.name ?? "Portföyüm"}
         </h1>
         {/*
-          Açıklama SİLİNMEDİ, katlandı. Doğruluk için gerekli ama her açılışta
-          okunması gerekmiyor; isteyen açar.
+          Açıklama SİLİNMEDİ, katlandı. İki kartın hangi fiyat yönünü gösterdiğini
+          bilmeyen kullanıcı ikisini karıştırır. Basit modda hiç yazılmaz: orada
+          "yeniden alım değeri" kartı zaten gizli ve tek kartın kendi ipucu aynı
+          bilgiyi veriyor.
         */}
-        <Explain title="Bu sayılar nasıl hesaplanıyor?" className="mt-1.5">
-          <p>
-            <span className="font-medium text-ink">Bozdurma değeri</span> kuyumcunun alış fiyatına,{" "}
-            <span className="font-medium text-ink">yeniden alım değeri</span> kuyumcunun satış
-            fiyatına göre hesaplanır.
-          </p>
-          <p className="mt-1.5">
-            Maliyet yöntemi: ürün bazlı hareketli ağırlıklı ortalama. Gümüş ve döviz portföy
-            değerine girer, has altın gramına girmez.
-          </p>
-        </Explain>
+        {isSimple ? null : (
+          <Explain title="Bu sayılar nasıl hesaplanıyor?" className="mt-1.5">
+            <p>
+              <span className="font-medium text-ink">Bozdurma değeri</span> kuyumcunun size ödeyeceği,{" "}
+              <span className="font-medium text-ink">yeniden alım değeri</span> ise aynısını bugün
+              almanın bedelidir.
+            </p>
+          </Explain>
+        )}
       </div>
 
+      {/* Kartlar 0 TL gösteriyor; sebebi yazılmazsa kullanıcı uygulamayı bozuk sanar. */}
       {isClosed ? (
         <div
           className="rounded-[var(--radius)] border border-line bg-surface-2 px-3.5 py-3 text-sm text-muted"
           data-testid="portfolio-closed"
         >
-          <span className="font-semibold text-ink">Açık pozisyonunuz bulunmuyor.</span> Geçmiş işlemleriniz ve
-          gerçekleşmiş K/Z kayıtlarınız korunuyor.
+          Elinizde varlık kalmadı; geçmiş kayıtlarınız duruyor.
         </div>
       ) : null}
 
@@ -348,7 +328,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
         <StatCard
           label={isSimple ? `Portföy değeri${partialSuffix}` : `Tahmini bozdurma değeri${partialSuffix}`}
           value={valuation(summary.totalLiquidationValue)}
-          hint={coverageText ?? "Bugün bozdurursanız yaklaşık"}
+          hint="Bugün bozdurursanız yaklaşık"
           emphasis
           testId="stat-liquidation"
         />
@@ -356,7 +336,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           <StatCard
             label={`Yeniden alım değeri${partialSuffix}`}
             value={valuation(summary.totalReplacementValue)}
-            hint={coverageText ?? "Aynısını bugün almanın maliyeti"}
+            hint="Aynısını bugün almanın maliyeti"
             testId="stat-repurchase"
           />
         )}
@@ -373,30 +353,36 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
                 data-testid="stat-simple-pnl"
                 className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalPnl)))}
               >
-              {isEmpty || priceOk ? (
+              {priceOk ? (
                 <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
               ) : (
                 <span className="text-muted">{PRICE_UNAVAILABLE}</span>
               )}
             </p>
+            {/*
+              YÜZDE, ÜSTTEKİ SAYIYA AİT OLMALI.
+              Kartın büyük rakamı TOPLAM kâr/zarardır (gerçekleşmiş +
+              gerçekleşmemiş); motorun verdiği yüzde ise yalnızca elde kalanın
+              oranıdır. Satış yapan kullanıcıda ikisi birbirini tutmaz, o yüzden
+              yüzde yalnızca hiç satış yokken yazılır. Arayüzde yüzde UYDURULMAZ.
+            */}
             <p className="mt-1 text-xs text-muted">
-              {summary.totalUnrealizedPnlPercent !== null && priceOk
+              {summary.totalUnrealizedPnlPercent !== null && priceOk && dec(summary.totalRealizedPnl).isZero()
                 ? `Maliyete göre ${formatPercent(summary.totalUnrealizedPnlPercent)}`
-                : "Güncel fiyatla maliyetiniz arasındaki fark"}
-              {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
+                : "Satışlarınız dâhil toplam kâr/zarar"}
             </p>
           </Card>
         ) : (
           <>
             <Card className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
-                Gerçekleşmemiş K/Z{partialSuffix}
+                Gerçekleşmemiş kâr/zarar{partialSuffix}
               </p>
               <p
                 data-testid="stat-unrealized"
                 className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalUnrealizedPnl)))}
               >
-                {isEmpty || priceOk ? (
+                {priceOk ? (
                   <DeltaValue
                     value={summary.totalUnrealizedPnl}
                     formatted={formatSignedMoney(summary.totalUnrealizedPnl)}
@@ -407,44 +393,37 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
               </p>
               <p className="mt-1 text-xs text-muted">
                 {summary.totalUnrealizedPnlPercent !== null && priceOk
-                  ? `${pnlText} · ${formatPercent(summary.totalUnrealizedPnlPercent)}`
+                  ? `${pnlText} ${formatPercent(summary.totalUnrealizedPnlPercent)}`
                   : pnlText}
-                {partial ? ` · ${PARTIAL_VALUATION_LABEL}` : ""}
               </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Gerçekleşmiş K/Z</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
+                Gerçekleşmiş kâr/zarar
+              </p>
               <p
                 data-testid="stat-realized"
                 className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalRealizedPnl)))}
               >
                 <DeltaValue value={summary.totalRealizedPnl} formatted={formatSignedMoney(summary.totalRealizedPnl)} />
               </p>
-              <p className="mt-1 text-xs text-muted">
-                Satışlardan oluşan sonuç; portföy değerine eklenmez
-                {partial ? "; fiyat eksikliğinden etkilenmez" : ""}.
-              </p>
+              <p className="mt-1 text-xs text-muted">Sattıklarınızdan kalan kâr/zarar</p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">Toplam K/Z{partialSuffix}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
+                Toplam kâr/zarar{partialSuffix}
+              </p>
               <p
                 data-testid="stat-total-pnl"
                 className={cx("stat-value mt-1.5 font-semibold", moneySizeClass(formatSignedMoney(summary.totalPnl)))}
               >
-                {isEmpty || priceOk ? (
+                {priceOk ? (
                   <DeltaValue value={summary.totalPnl} formatted={formatSignedMoney(summary.totalPnl)} />
                 ) : (
                   <span className="text-muted">{PRICE_UNAVAILABLE}</span>
                 )}
               </p>
-              <p className="mt-1 text-xs text-muted">
-                {noPrices
-                  ? `Gerçekleşmemiş K/Z hesaplanamadı; gerçekleşmiş K/Z ${formatSignedMoney(summary.totalRealizedPnl)}`
-                  : isClosed
-                    ? "Açık pozisyon yok; toplam K/Z gerçekleşmiş K/Z'ye eşittir"
-                    : `Gerçekleşmiş + gerçekleşmemiş · ${pnlText}`}
-                {partial ? " · kesin toplam değildir (fiyatı olmayan varlıklar hariç)" : ""}
-              </p>
+              <p className="mt-1 text-xs text-muted">Sattıklarınız ve elinizdekiler birlikte</p>
             </Card>
           </>
         )}
@@ -453,28 +432,23 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
       {/*
         KAPATILABİLİR.
 
-        Kullanıcı haklıydı: bilgilendirme kutusu ekranda sonsuza kadar durmaz.
-        Kapatmak burada güvenli, çünkü uyarının ÖZÜ zaten kâr/zarar kartının
-        kendi etiketinde yazıyor ("Takip başlangıcından itibaren K/Z"). Kutu
-        gitse de sayı yanlış okunmuyor.
+        Bilgilendirme kutusu ekranda sonsuza kadar durmaz; kullanıcı okuyup
+        kapatabilir. Kutunun kimliği metinle birlikte sürümlenir (bkz.
+        dismissible-notice.tsx), yoksa metin değişince kimse yeni cümleyi görmez.
 
-        Aşağıdaki "fiyat verisi kullanılamıyor" uyarısı ise KAPATILAMAZ: o,
-        ekrandaki sayının neden EKSİK olduğunu söyler; kapanırsa kullanıcı
-        eksik bir toplamı tam sanır.
+        Aşağıdaki fiyat uyarıları ise KAPATILAMAZ: onlar ekrandaki sayının neden
+        EKSİK olduğunu söyler; kapanırsa kullanıcı eksik bir toplamı tam sanır.
       */}
       {summary.hasEstimatedOrBaseline ? (
         <DismissibleNotice
-          id="pnl-tracking-start-v1"
+          id="pnl-tracking-start-v2"
           className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3 py-2"
           testId="pnl-label-notice"
         >
-          <Explain title={`${PNL_LABELS.SINCE_TRACKING_START} — neden?`}>
-            <span>
-              {summary.holdingHasEstimatedOrBaseline
-                ? "Portföyde takip başlangıç değeri veya tahmini maliyetle eklenmiş altın var. Bu değerler gerçek tarihsel alış maliyeti değildir; kâr/zarar takip başlangıcından itibaren hesaplanır."
-                : "Elde kalan altınların tamamı gerçek maliyetli; ancak geçmiş satışların bir kısmı takip başlangıç değerine veya tahmini maliyete dayandığından toplam kâr/zarar gerçek tarihsel maliyet iddiası taşımaz."}
-            </span>
-          </Explain>
+          <p className="text-xs leading-relaxed text-muted">
+            Bazı altınlarınız gerçek alış fiyatıyla girilmedi; kâr/zarar takibe başladığınız günden
+            beri hesaplanıyor.
+          </p>
         </DismissibleNotice>
       ) : null}
 
@@ -483,19 +457,18 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
           className="rounded-[var(--radius)] border border-negative-soft bg-negative-soft px-3.5 py-3 text-sm text-negative"
           data-testid="valuation-none"
         >
-          {PRICE_UNAVAILABLE}: elinizdeki ürünler için fiyat yok, geçersiz veya bayat. Güncel değer ve
-          gerçekleşmemiş K/Z hesaplanmış gibi gösterilmez; başka ürünün fiyatından tahmin yapılmaz.
-          Elde kalan maliyet ve gerçekleşmiş K/Z fiyattan bağımsızdır.
+          Şu anda fiyat alınamadığı için bugünkü değeriniz ve kârınız hesaplanamadı; girdiğiniz
+          maliyet değişmedi.
         </div>
       ) : summary.hasMissingPrices ? (
         <div
           className="rounded-[var(--radius)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3.5 py-3 text-sm text-[var(--notice)]"
           data-testid="partial-valuation"
         >
-          <span className="font-semibold">{PARTIAL_VALUATION_LABEL}:</span> {summary.unpricedPositionCount} ürün için
-          fiyat alınamadı. Bozdurma, yeniden alım ve gerçekleşmemiş K/Z toplamları yalnızca fiyatı bulunan{" "}
-          {summary.pricedPositionCount} varlığı kapsar; fiyatı olmayan varlıkların maliyet toplamı{" "}
-          {formatMoney(summary.unpricedCostBasis)}. Gerçekleşmiş K/Z bundan etkilenmez.
+          {/* Eksiğin büyüklüğü kalır: kullanıcı eksik toplamı tam portföy değeri sanmasın. */}
+          <span className="font-semibold">Eksik fiyat:</span> {summary.unpricedPositionCount} ürünün fiyatı
+          alınamadı; yukarıdaki toplamlar bu ürünleri içermiyor (bu ürünlerin maliyeti{" "}
+          {formatMoney(summary.unpricedCostBasis)}).
         </div>
       ) : null}
 
@@ -515,29 +488,21 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
                 dec(summary.totalPureGoldGrams).greaterThan(0)
                 ? `${summary.positionCount} üründe toplam ${formatGrams(summary.totalPureGoldGrams)} has altın`
                 : `${summary.positionCount} varlık`
-              : isClosed
-                ? "Açık pozisyon yok"
-                : undefined
+              : undefined
           }
           action={isNeverUsed ? undefined : actionButtons}
         />
-        {sourceSummary !== "" ? (
-          <p className="mb-2 text-xs text-muted" data-testid="source-summary">
-            {sourceSummary}
-          </p>
-        ) : null}
         <Card>
           {isNeverUsed ? (
             <EmptyState
               title="Henüz altın eklenmedi"
-              description="Portföyünüz boş. Mevcut altınınızı ekleyin veya ilk alışınızı kaydedin; elde kalan maliyet, bozdurma değeri ve kâr/zarar otomatik hesaplansın."
-              action={actionButtons}
+              description="Altınınızı ekleyin; değeriniz ve kârınız otomatik hesaplansın."
+              action={emptyStateButtons}
             />
           ) : isClosed ? (
-            <EmptyState
-              title="Açık pozisyonunuz bulunmuyor"
-              description="Geçmiş işlemleriniz ve gerçekleşmiş K/Z kayıtlarınız korunuyor. Yeni bir alış veya mevcut altın ekleyerek takibe devam edebilirsiniz."
-            />
+            // Açıklama satırı yok: aynı cümle kartların üstündeki şeritte yazıyor.
+            // Başlık kalır, yoksa listenin yerinde boş bir kutu görünür.
+            <EmptyState title="Elinizde varlık kalmadı" description="" />
           ) : (
             <ul data-testid="holdings-list">
               {primaryHoldings.map((holding) => (
@@ -561,10 +526,7 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
       */}
       {otherHoldings.length > 0 ? (
         <section data-testid="other-holdings-section">
-          <SectionTitle
-            title="Diğer varlıklar"
-            description={`Varsayılan listede yer almayan ${String(otherHoldings.length)} üründe kaydınız var. Bu kayıtlar korunur ve satılabilir.`}
-          />
+          <SectionTitle title="Diğer varlıklar" description={`${String(otherHoldings.length)} varlık`} />
           <Card>
             <ul data-testid="other-holdings-list">
               {otherHoldings.map((holding) => (
@@ -581,56 +543,16 @@ export function DashboardView({ addHref, onAdd }: { addHref?: string; onAdd?: ()
       ) : null}
 
       {/*
-        DEĞERLEME PLANI
-        Kullanıcıya teknik sağlayıcı seçimi sunulmaz: tek bir plan vardır ve
-        hangi ürünün hangi kaynaktan geldiği satır rozetlerinde zaten yazar.
+        Fiyatın nereden ve ne zaman geldiği sayfada TEK yerde yazar: aşağıdaki
+        ince şerit. Plan adı ve sağlayıcı anlatımı kullanıcının hiçbir kararını
+        değiştirmiyordu; merak eden menüden /fiyat-kaynagi sayfasına gidebilir.
       */}
-      {summary.priceSource && !isSimple ? (
-        <div
-          className="rounded-[var(--radius)] border border-line bg-surface-2 px-3.5 py-3 text-xs"
-          data-testid="active-price-source"
-        >
-          <p className="text-sm font-semibold text-ink">{VALUATION_PLAN_NAME}</p>
-          <p className="mt-0.5 break-words text-muted">{VALUATION_PLAN_DESCRIPTION}</p>
-          <p className="tabular mt-0.5 text-subtle">
-            {summary.priceSource.lastQuoteAt
-              ? `Son fiyat güncellemesi: ${formatDateTime(summary.priceSource.lastQuoteAt)}`
-              : "Son fiyat güncellemesi: —"}
-            {" · Durum: "}
-            {summary.priceSource.status === "ok"
-              ? "Güncel"
-              : summary.priceSource.status === "stale"
-                ? "Bayat (yeni fiyat alınamadı)"
-                : summary.priceSource.status === "unavailable"
-                  ? PRICE_UNAVAILABLE
-                  : "Kaynak seçilmedi"}
-            {" · "}
-            {isOpen
-              ? partial
-                ? `${PARTIAL_VALUATION_LABEL} (${summary.pricedPositionCount}/${summary.positionCount})`
-                : noPrices
-                  ? "Değerleme yapılamadı"
-                  : "Tam değerleme"
-              : "Açık pozisyon yok"}
-          </p>
-          <Link className="mt-1 inline-block text-accent underline" href="/fiyat-kaynagi">
-            Fiyat kaynaklarını görüntüle
-          </Link>
-        </div>
-      ) : null}
-
       <PriceSourceLine
         snapshot={snapshot}
         dataStatusLabel={repository.label}
         isOnline={isOnline}
         onRefresh={() => void refreshPrices()}
-        lastSyncedAt={lastSyncedAt}
-        syncStatus={syncStatus}
       />
-      <p className="text-xs leading-relaxed text-subtle">
-        Bu uygulama vergi, muhasebe veya yatırım danışmanlığı hizmeti değildir; girdiğiniz verilere ve
-        bilgilendirme amaçlı fiyatlara dayalı bir portföy takip aracıdır.
-      </p>
     </div>
   );
 }

@@ -43,9 +43,17 @@ test.describe("telefon–PC senkronizasyonu", () => {
       await loginAsUser(mobilePage, username);
       await loginAsUser(otherPage, otherUsername);
 
-      // Mobil panel açık ve senkronizasyon çalışıyor; B kendi işlem listesinde bekliyor.
+      // Mobil panel açık ve HENÜZ BOŞ; B kendi işlem listesinde bekliyor.
+      //
+      // Eskiden burada eşitleme göstergesi (data-testid="sync-status") aranırdı.
+      // O gösterge arayüzden kaldırıldı: yalnızca eşitleme ARIZALANDIĞINDA
+      // çıkıyor, normal işleyişte hiç yazılmıyor. Bu yüzden mobil panelin hazır
+      // ve boş olduğu kendi içeriğinden doğrulanır — böylece aşağıdaki
+      // "≤15 sn içinde 15.000,00 oldu" beklentisi gerçekten bir DEĞİŞİMİ ölçer,
+      // baştan orada duran bir sayıyı değil.
       await gotoReady(mobilePage, "/panel");
-      await expect(mobilePage.getByTestId("sync-status")).toBeVisible();
+      await expect(mobilePage.getByText("Henüz altın eklenmedi")).toBeVisible();
+      await expect(mobilePage.getByTestId("stat-cost")).toContainText("0,00");
       await gotoReady(otherPage, "/panel");
       const otherVersionBefore = await browserApi<{ revision: number }>(otherPage, "GET", "/api/portfolio/version");
 

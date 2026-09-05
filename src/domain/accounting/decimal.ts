@@ -27,8 +27,6 @@ export type Dec = InstanceType<typeof AccountingDecimal>;
 export const MONEY_SCALE = 8;
 /** Gram miktarlarında desteklenen en yüksek ondalık basamak. */
 export const QUANTITY_SCALE = 6;
-/** Arayüzde TL için gösterilen ondalık basamak. */
-export const DISPLAY_MONEY_SCALE = 2;
 
 /** Tutarlar için kabul edilen üst sınır (tam sayı basamak). Aşırı büyük değerler reddedilir. */
 export const MAX_INTEGER_DIGITS = 12;
@@ -158,13 +156,4 @@ export function toDecimalString(value: Dec): string {
 export function toInputDecimal(value: string | Dec): string {
   const text = toDecimalString(typeof value === "string" ? dec(value) : value);
   return text.replace(".", ",");
-}
-
-/** Karşılaştırma için: dize ondalıkların eşitliği. */
-export function decimalEquals(a: string | Dec, b: string | Dec): boolean {
-  return dec(a).equals(dec(b));
-}
-
-export function isDecimalString(value: unknown): value is string {
-  return typeof value === "string" && DECIMAL_LITERAL.test(value);
 }

@@ -24,11 +24,11 @@
   --surface-2: #1f1c16;
   --surface-3: #2a251c;
   --line: #2e2a21;
-  --line-strong: #443d2f;
+  --line-strong: #726957;
 
   --text: #f0ece4;
   --text-muted: #b0a894;
-  --text-subtle: #857d6e;
+  --text-subtle: #9a9180;
 
   --accent: #e0b84e;
   --accent-hover: #eec969;
@@ -287,9 +287,16 @@ body {
     color: var(--text);
   }
 
+  /*
+   * Yazı rengi beyaz DEĞİL koyu mürekkeptir. --negative koyu tema için
+   * üretilmiş AÇIK bir somon rengidir; üstüne beyaz konunca kontrast 2,2:1'e
+   * düşüyordu. Koyu mürekkeple 8,3:1 olur. Bu sınıf yalnızca geri alınamaz
+   * onay düğmelerinde kullanılır; düğmenin metni işlemin ne olduğunu söyleyen
+   * tek bilgidir, okunaklı olmak zorundadır.
+   */
   .btn-danger {
     background: var(--negative);
-    color: #fff;
+    color: var(--accent-contrast);
   }
   .btn-danger:hover:not(:disabled) {
     filter: brightness(1.08);
@@ -324,12 +331,6 @@ body {
     border-color: transparent;
     color: var(--negative);
   }
-}
-
-/* Yatay kaydırma gereken içerik (tablolar) kendi kabında kaydırılır. */
-.scroll-x {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 
 @media (prefers-reduced-motion: reduce) {

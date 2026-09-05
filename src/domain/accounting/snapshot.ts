@@ -10,14 +10,14 @@ import type { PriceSnapshotInput } from "./types";
  *  - ürün eşleşmesi, status = ok, sağlayıcı/piyasa boş değil, para birimi TL
  *  - liquidation > 0, replacement > 0, replacement >= liquidation
  *  - providerTimestamp ve fetchedAt geçerli; toleransı (5 dk) aşacak biçimde gelecekte değil
- *  - providerTimestamp VE fetchedAt en fazla min(15 dk, staleAfterMs) eski
+ *  - providerTimestamp VE fetchedAt en fazla staleAfterMs (bildirilmemişse 15 dk) eski
  *    ("veri şimdi çekilmiş görünse bile sağlayıcı zamanı eskiyse" reddedilir)
  *  - fetchedAt, providerTimestamp'tan (toleransın ötesinde) önce olamaz
  * Kural dışı anlık görüntüyle takip başlangıcı OLUŞTURULMAZ; başka ürün/piyasadan sessiz
  * ikame yapılmaz. Quote düzeyi (sağlayıcı meta ile) doğrulama için bkz. src/prices/validate.ts.
  */
 
-/** Anlık görüntünün takip başlangıcı için kabul edildiği en uzun yaş (mutlak üst sınır). */
+/** Sağlayıcı kendi bayatlık süresini bildirmediğinde kullanılan varsayılan en uzun yaş. */
 export const BASELINE_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
 
 export const SNAPSHOT_CURRENCY = "TRY";
@@ -33,10 +33,17 @@ function positiveDecimal(value: unknown): boolean {
   return dec(value).greaterThan(0);
 }
 
-/** Etkin tazelik sınırı: mutlak üst sınır ile sağlayıcı süresinin küçüğü. */
+/**
+ * Etkin tazelik sınırı: sağlayıcının kendi bayatlık süresi (yoksa varsayılan).
+ *
+ * Burada AYRI/daha dar bir üst sınır uygulanmaz: arayüz kapısı (src/prices/validate.ts)
+ * ürünün kendi staleAfterMs değerini kullandığı için, buraya ikinci bir sınır konursa
+ * ekranda "Güncel" görünüp fiyatı gösterilen bir kotasyon gönderimde reddedilir ve
+ * kullanıcı gördüğü fiyatla kayıt açamaz. İki kapı aynı eşiği kullanmalıdır.
+ */
 export function baselineMaxAgeMs(staleAfterMs: number | undefined): number {
   if (typeof staleAfterMs === "number" && Number.isFinite(staleAfterMs) && staleAfterMs > 0) {
-    return Math.min(BASELINE_SNAPSHOT_MAX_AGE_MS, staleAfterMs);
+    return staleAfterMs;
   }
   return BASELINE_SNAPSHOT_MAX_AGE_MS;
 }

@@ -126,7 +126,11 @@ export function registerRateLimitBuckets(
   clientIp: string,
   normalizedUsername: string,
 ): LoginRateLimitBucket[] {
-  const user = normalizedUsername || "?";
+  // Geçersiz kullanıcı adı doğrulamadan boş dize olarak döner. Sabit bir "?"
+  // kullanılsaydı dünyadaki tüm yazım hataları TEK kovaya yazılır ve birbirinden
+  // habersiz ziyaretçiler birbirini kilitlerdi. Boş adı IP'ye kapsıyoruz: her IP
+  // kendi kovasında kalır, kötüye kullanım koruması aynen sürer.
+  const user = normalizedUsername || `?:${clientIp}`;
   return [
     { kind: "ip", key: `register:ip:${clientIp}`, settings: REGISTER_IP_RATE_LIMIT_SETTINGS },
     { kind: "username", key: `register:user:${user}`, settings: REGISTER_USERNAME_RATE_LIMIT_SETTINGS },
@@ -139,7 +143,9 @@ export function loginRateLimitBuckets(
   normalizedUsername: string,
   policy: LoginRateLimitPolicy = DEFAULT_LOGIN_RATE_LIMIT_POLICY,
 ): LoginRateLimitBucket[] {
-  const user = normalizedUsername || "?";
+  // Kayıt sayacındaki ile aynı gerekçe: geçersiz kullanıcı adı boş dize döner ve
+  // ortak bir "?" kovası masum ziyaretçileri birbirine kilitler. IP'ye kapsıyoruz.
+  const user = normalizedUsername || `?:${clientIp}`;
   return [
     { kind: "ip", key: `ip:${clientIp}`, settings: policy.ip },
     { kind: "username", key: `user:${user}`, settings: policy.username },

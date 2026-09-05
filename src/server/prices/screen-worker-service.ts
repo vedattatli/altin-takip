@@ -135,12 +135,12 @@ export class ScreenWorkerService {
       now: () => this.now(),
     });
 
-    // HAM SATIRLARI SAKLA — kabul edilen fiyat olmasa BİLE.
-    // "Kayseri Fiyatları" ekranının asıl gerekli olduğu durum tam olarak budur:
-    // hiçbir fiyat değerlemeye girmese de kullanıcı ekranda ne yazdığını görür.
-    await this.persistScreenRows(payload, collected, approved);
-
     if (collected.quotes.length === 0) {
+      // HAM SATIRLARI SAKLA — kabul edilen fiyat olmasa BİLE.
+      // "Kayseri Fiyatları" ekranının asıl gerekli olduğu durum tam olarak budur:
+      // hiçbir fiyat değerlemeye girmese de kullanıcı ekranda ne yazdığını görür.
+      // Toplayıcı tek bir fiyat bile çıkaramadı: hiçbir satır değerlemeye girmez.
+      await this.persistScreenRows(payload, collected, approved, new Set());
       return {
         ok: true,
         failure: "COLLECTOR_REJECTED",
@@ -165,6 +165,17 @@ export class ScreenWorkerService {
         maxObservationAgeMs: SCREEN_OBSERVATION_MAX_AGE_MS,
       },
     });
+
+    // HAM SATIRLARI SAKLA — kalite kapısından SONRA.
+    // `usedInValuation`, toplayıcının değil KAPININ kabul ettiği ürünlere göre
+    // yazılmalıdır: karantinaya alınan fiyat değerlemeye girmez, dolayısıyla
+    // ekranda da "hesapta kullanıldı" diye gösterilmemelidir.
+    await this.persistScreenRows(
+      payload,
+      collected,
+      approved,
+      new Set(quality.accepted.map((quote) => quote.canonicalProductId)),
+    );
 
     const ingestionPayload: IngestionPayload = {
       status: quality.accepted.length === 0 ? "unavailable" : quality.quarantined.length > 0 ? "partial" : "ok",
@@ -216,13 +227,19 @@ export class ScreenWorkerService {
    *  - tek yönlü satırlarda rakam `single` alanına yazılır ve alış/satış BOŞ
    *    kalır; aynı değeri iki yöne birden koymak yön uydurmak olurdu.
    *
+   * `acceptedIds` bu yüzden DIŞARIDAN verilir: kabul kümesi toplayıcının değil,
+   * merkezî kalite kapısının çıktısıdır. Burada `collected.quotes` üzerinden
+   * yeniden hesaplansaydı karantinaya alınan (bayat, sıçramalı, sınır dışı)
+   * fiyatlar da "hesapta kullanıldı" görünürdü.
+   *
    * Saklama başarısız olursa fiyat alımı DURDURULMAZ: bu gösterim amaçlı bir
    * yan kayıttır ve muhasebeyi etkilemez.
    */
   private async persistScreenRows(
     payload: ScreenWorkerPayload,
-    collected: { quotes: readonly NormalizedQuote[]; unresolved: readonly { rawProductName: string; reason: string }[] },
+    collected: { unresolved: readonly { rawProductName: string; reason: string }[] },
     approved: ReadonlyMap<string, MappingConfidence>,
+    acceptedIds: ReadonlySet<string>,
   ): Promise<void> {
     /*
      * BOŞ GÖZLEM SON İYİ SATIRLARIN ÜSTÜNE YAZILMAZ.
@@ -239,7 +256,6 @@ export class ScreenWorkerService {
      */
     if (payload.observations.length === 0) return;
 
-    const accepted = new Set(collected.quotes.map((quote) => quote.canonicalProductId));
     const rows: ScreenRawRow[] = [];
 
     for (const observation of payload.observations) {
@@ -260,8 +276,8 @@ export class ScreenWorkerService {
          * diyordu.
          */
         confidence: approved.get(observation.canonicalProductId) ?? observation.mappingConfidence,
-        usedInValuation: accepted.has(observation.canonicalProductId),
-        reason: accepted.has(observation.canonicalProductId)
+        usedInValuation: acceptedIds.has(observation.canonicalProductId),
+        reason: acceptedIds.has(observation.canonicalProductId)
           ? null
           : (collected.unresolved.find((entry) => entry.rawProductName === observation.canonicalProductId)?.reason ??
             "DEGERLEMEYE_GIRMEDI"),

@@ -15,6 +15,15 @@
  * 5. Zamanı geçersiz, fazla eski veya gelecekte olan anlık görüntü "güncel" sayılmaz.
  */
 
+/*
+ * validate.ts bu dosyadan yalnızca TİP ve sabit alır; buradan da yalnızca
+ * fonksiyon gövdesi içinde çağrılan tek bir işlev alınır. İki modülün de
+ * üst düzey kodu diğerinin bağlarına dokunmadığı için bu karşılıklı import
+ * çalışma zamanında sorun çıkarmaz. Kabul kuralları TEK yerde (validate.ts)
+ * kalsın diye doğrulama burada KOPYALANMAZ.
+ */
+import { validateUsableQuote } from "./validate";
+
 export type PriceStatus = "ok" | "stale" | "unavailable";
 
 /** Sağlayıcı saatiyle küçük sapmalara tolerans; bunun ötesindeki "gelecek" zaman bayat sayılır. */
@@ -118,6 +127,32 @@ export function isSnapshotStale(snapshot: PriceSnapshot, now: number = Date.now(
   if (!Number.isFinite(fetchedAt)) return true;
   if (fetchedAt - now > SNAPSHOT_FUTURE_TOLERANCE_MS) return true;
   return now - fetchedAt > snapshot.provider.staleAfterMs;
+}
+
+/**
+ * Ekranda GERÇEKTEN gösterilen fiyatların en eskisinin çekilme zamanı (ISO).
+ *
+ * NEDEN: Hibrit anlık görüntüde `snapshot.fetchedAt`, üye kaynakların EN YENİSİDİR.
+ * Kaynaklardan biri saatlerdir güncellenmese bile en taze kaynak bu alanı ileri
+ * taşır. O zaman şerit "3 dakika önce" derken ekrandaki Çeyrek fiyatı 60 dakikalık
+ * olabilir — yani gösterilen yaş, sayıların gerçek yaşından taze görünür. Yaş
+ * iddiası, kullanıcının gördüğü fiyatların en eskisine bağlanır.
+ *
+ * Hangi fiyatın gösterildiğine merkezi doğrulama karar verir; burada kural
+ * kopyalanmaz. Gösterilebilir tek bir fiyat bile yoksa anlık görüntünün kendi
+ * zamanı döner (bayatlık kararını `isSnapshotStale` vermeye devam eder).
+ */
+export function oldestUsableQuoteAt(snapshot: PriceSnapshot, now: number = Date.now()): string {
+  let oldestMs = Number.POSITIVE_INFINITY;
+  let oldestAt: string | null = null;
+  for (const [productId, quote] of Object.entries(snapshot.quotes)) {
+    if (!validateUsableQuote(snapshot, quote, productId, now).ok) continue;
+    const fetchedAt = Date.parse(quote.fetchedAt);
+    if (!Number.isFinite(fetchedAt) || fetchedAt >= oldestMs) continue;
+    oldestMs = fetchedAt;
+    oldestAt = quote.fetchedAt;
+  }
+  return oldestAt ?? snapshot.fetchedAt;
 }
 
 export function emptySnapshot(meta: PriceProviderMeta, error: string): PriceSnapshot {

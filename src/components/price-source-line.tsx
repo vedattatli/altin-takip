@@ -5,6 +5,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { MARKET_DISPLAY_NAMES } from "@/prices/contract";
 import { isSnapshotStale, type PriceSnapshot } from "@/prices";
+import { SCREEN_PROVIDER_CODE } from "@/prices/valuation-plan";
 import { cx } from "./ui";
 
 /**
@@ -53,23 +54,25 @@ function Dot() {
  * Fiyat kaynağı şeridi — tek satır, sayfanın altında.
  *
  * Ekranın ortasında yer kaplamaz ama ürün kuralı gereği şu bilgiler HER ZAMAN
- * görünür kalır: kaynağın adı, gerçek piyasa verisi olmadığı uyarısı, piyasa,
- * veri durumu ve son fiyat zamanı. Uzun yasal açıklama katlanmış durur.
+ * görünür kalır: fiyatın ne zaman güncellendiği, bayatladıysa uyarısı ve
+ * gerçek piyasa verisi olmadığı uyarısı. Uzun yasal açıklama katlanmış durur.
  */
 export function PriceSourceLine({
   snapshot,
-  dataStatusLabel,
   isOnline,
   onRefresh,
-  lastSyncedAt = null,
   syncStatus = "off",
 }: {
   snapshot: PriceSnapshot | null;
-  dataStatusLabel: string;
+  /**
+   * Verinin nerede saklandığının adı ("Hesabınız"). Şeritte GÖSTERİLMEZ:
+   * fiyat cümlesinin ortasında tek başına duran bu kelime hiçbir cümlenin
+   * parçası değildi. Bilgi, başlığıyla birlikte Ayarlar'daki "Veri saklama"
+   * satırında durur. Prop yalnızca çağıranların imzası için kabul edilir.
+   */
+  dataStatusLabel?: string;
   isOnline: boolean;
   onRefresh?: () => void;
-  /** Cihazlar arası son başarılı senkronizasyon (ms); sunucu deposunda dolar. */
-  lastSyncedAt?: number | null;
   syncStatus?: "off" | "idle" | "syncing" | "paused" | "error";
 }) {
   const now = useClientClock(30_000);
@@ -77,13 +80,33 @@ export function PriceSourceLine({
   const unavailable = !snapshot || snapshot.status === "unavailable";
   // Ekran gözlemi kaynağı kendi fiyat zamanını YAYIMLAMIYOR; elimizde yalnızca
   // gözlem anımız var. Bunu "kaynak zamanı" gibi göstermek yanıltıcı olurdu.
-  const observedOnly = snapshot?.provider.id === "sarraf-tv-kayseri-screen";
+  // Hibrit planda anlık görüntünün kimliği SANALDIR ("hibrit-kayseri"); ekran
+  // kaynağı yalnızca ürün başına plan girdisinde görünür. Bu yüzden hem anlık
+  // görüntünün kimliğine hem de plan üyelerine bakılır — yoksa koşul üretimde
+  // hiç tutmaz ve gözlem anı "kaynak fiyat zamanı" gibi sunulur.
+  const observedOnly =
+    snapshot?.provider.id === SCREEN_PROVIDER_CODE ||
+    Object.values(snapshot?.provider.memberProviders ?? {}).some(
+      (member) => member.provider === SCREEN_PROVIDER_CODE,
+    );
+  const relativeTime =
+    snapshot && now !== null ? formatRelativeTime(snapshot.fetchedAt, now) : null;
 
   return (
     <div data-testid="price-source" className="border-t border-line pt-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-subtle">
-        <span>Fiyat kaynağı:</span>
-        <span className="font-semibold text-muted">{snapshot?.provider.label ?? "Bilinmiyor"}</span>
+        <span
+          className={cx(stale && "text-[var(--notice)]")}
+          title={snapshot ? formatDateTime(snapshot.fetchedAt) : undefined}
+        >
+          {observedOnly
+            ? `Son ekran gözlemi: ${relativeTime ?? "—"}`
+            : relativeTime
+              ? `Fiyatlar: ${relativeTime} güncellendi`
+              : "Fiyatlar: —"}
+          {/* Renk tek bilgi taşıyıcı olamaz; eskimiş fiyat METİNLE de söylenir. */}
+          {stale ? " · fiyat eskimiş" : ""}
+        </span>
 
         {/*
           UYARI YALNIZ UYDURMA VERİ İÇİNDİR.
@@ -95,43 +118,20 @@ export function PriceSourceLine({
           <span className="badge badge-notice">Gerçek piyasa verisi değil</span>
         ) : null}
 
-        <Dot />
-        <span>{marketLabel(snapshot?.provider.market)}</span>
-        <Dot />
-        <span>{dataStatusLabel}</span>
-        <Dot />
-        <span
-          className={cx(stale && "text-[var(--notice)]")}
-          title={
-            snapshot
-              ? observedOnly
-                ? `${formatDateTime(snapshot.fetchedAt)} — kaynak ayrı bir fiyat zaman damgası yayımlamadığı için tarayıcıda gözlendiği zaman gösterilir.`
-                : formatDateTime(snapshot.fetchedAt)
-              : undefined
-          }
-        >
-          {observedOnly ? "Son ekran gözlemi" : "Son fiyat"}:{" "}
-          {snapshot && now !== null
-            ? `${formatRelativeTime(snapshot.fetchedAt, now)}${stale ? " (bayat)" : ""}`
-            : "—"}
-        </span>
-
-        {syncStatus !== "off" ? (
+        {/*
+          Eşitleme bilgisi yalnızca ARIZA hâlinde taşıyıcıdır: o zaman kullanıcı
+          başka cihazında girdiği kaydın burada görünmeyebileceğini bilmelidir.
+          Normal işleyişte ilerleyen sayaç hiçbir karar doğurmuyordu.
+        */}
+        {syncStatus === "error" ? (
           <>
             <Dot />
             <span
               data-testid="sync-status"
               data-sync-status={syncStatus}
-              className={cx(syncStatus === "error" && "text-[var(--notice)]")}
-              title={lastSyncedAt ? formatDateTime(new Date(lastSyncedAt).toISOString()) : undefined}
+              className="text-[var(--notice)]"
             >
-              Eşitleme:{" "}
-              {lastSyncedAt && now !== null
-                ? formatRelativeTime(new Date(lastSyncedAt).toISOString(), now)
-                : syncStatus === "paused"
-                  ? "duraklatıldı"
-                  : "—"}
-              {syncStatus === "error" ? " (yeniden denenecek)" : ""}
+              Kayıtlarınız şu an diğer cihazlarınıza aktarılamıyor
             </span>
           </>
         ) : null}
@@ -160,14 +160,13 @@ export function PriceSourceLine({
 
       {unavailable ? (
         <p className="mt-2 rounded-[var(--radius-sm)] bg-negative-soft px-3 py-2 text-xs font-medium text-negative">
-          Fiyat kaynağına ulaşılamıyor. Başka bir piyasanın fiyatı gösterilmez; değerleme
-          hesaplanmadı.
+          Şu an fiyat alınamıyor; portföyünüzün güncel değeri hesaplanamadı.
         </p>
       ) : null}
 
       {!isOnline ? (
         <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--notice-line)] bg-[var(--notice-soft)] px-3 py-2 text-xs font-medium text-[var(--notice)]">
-          Çevrimdışısınız. Kayıtlı portföyünüzü görüntülüyorsunuz; canlı fiyat akışı yoktur.
+          İnternet bağlantısı yok; ekrandaki fiyatlar güncellenmiyor.
         </p>
       ) : null}
     </div>

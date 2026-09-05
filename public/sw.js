@@ -66,6 +66,9 @@ self.addEventListener("fetch", (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
+          // Yalnızca başarılı yanıt önbelleğe alınır. Önbellek-önce dal olduğu için
+          // 404/5xx bir kez yazılırsa VERSION elle değişene kadar kalıcı olarak servis edilir.
+          if (!response.ok) return response;
           const copy = response.clone();
           caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
           return response;

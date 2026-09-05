@@ -45,8 +45,6 @@ export interface PortfolioRepository {
   replaceTransaction(id: string, command: LedgerCommand): Promise<LedgerReplaceResult>;
   /** Kaydı iptal eder (VOID). Hard delete yoktur. */
   voidTransaction(id: string, reason: string): Promise<LedgerVoidResult>;
-  /** Tüm aktif kayıtları iptal eder. Portföy kaydı korunur. */
-  voidAll(): Promise<number>;
   /**
    * Defter sürümü (cihazlar arası senkronizasyon sinyali). Yalnızca sunucu deposunda
    * bulunur; demo depoları tek cihazdadır.

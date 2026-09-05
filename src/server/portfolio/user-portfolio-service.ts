@@ -1,7 +1,6 @@
 import "server-only";
 
 import {
-  buildAccountingSummary,
   parseLedgerCommand,
   validatePriceSnapshotInput,
   valuePositions,
@@ -31,6 +30,7 @@ import {
   type LedgerVoidResult,
 } from "@/server/auth/backend";
 import {
+  AppError,
   badRequest,
   conflict,
   idempotencyConflict,
@@ -213,15 +213,6 @@ export class UserPortfolioService {
     return this.backend.listPositions(ownScope(actor));
   }
 
-  /** Defterden bağımsız çapraz doğrulama (accounting:verify). */
-  async recomputeSummary(actor: UserActor): Promise<AccountingSummary> {
-    const [ledger, active] = await Promise.all([
-      this.backend.listLedger(ownScope(actor)),
-      this.activeSource(actor),
-    ]);
-    return buildAccountingSummary(ledger, active.snapshot, this.now());
-  }
-
   /**
    * MARKET_BASELINE için sunucu fiyatı: istemciden gelen fiyat KABUL EDİLMEZ.
    * Fiyat yoksa, geçersizse, bayatsa, makası tersse veya zamanı gelecekteyse null döner
@@ -331,6 +322,9 @@ export class UserPortfolioService {
    * Hesap/veri silme talebi.
    * Silme işlemini yönetici yapar; bu metot talebi denetim kaydına yazar ve
    * kullanıcıya sürecin ne olduğunu bildirir. Veri BURADA silinmez.
+   *
+   * ONAY YALNIZCA KAYIT YAZILDIYSA VERİLİR: denetim kaydı yazılamazsa talep
+   * hiçbir yere düşmemiştir; kullanıcıya "alındı" denmez, hata döner.
    */
   async requestAccountDeletion(actor: UserActor, rawReason: unknown): Promise<{
     requested: boolean;
@@ -339,6 +333,7 @@ export class UserPortfolioService {
   }> {
     const reason = typeof rawReason === "string" ? rawReason.trim().slice(0, 500) : "";
     const receivedAt = new Date(this.now()).toISOString();
+    let audited = true;
     try {
       await this.backend.appendAudit({
         adminUserId: actor.profile.id,
@@ -351,8 +346,16 @@ export class UserPortfolioService {
         metadata: { hasReason: reason.length > 0 },
       });
     } catch {
-      // Talep kaydı yazılamazsa kullanıcıya yine de süreç bildirilir; sunucuya loglanır.
+      audited = false;
       console.error("ALTIN_DELETION_REQUEST_AUDIT_FAILURE", { userId: actor.profile.id });
+    }
+    // Kayıt yazılamadıysa talep GERÇEKTE alınmamıştır; onay mesajı gizlenmez, hata döner.
+    if (!audited) {
+      throw new AppError(
+        503,
+        "Talebiniz şu anda kaydedilemedi. Lütfen birazdan tekrar deneyin.",
+        "deletion_request_failed",
+      );
     }
     return {
       requested: true,

@@ -9,15 +9,19 @@ import { cx } from "./ui";
  *
  * Bilgilendirme kutuları ekranda sonsuza kadar durmamalı. Kullanıcı okuyup
  * kapattıysa mesajı tekrar tekrar göstermek ekranı işgal etmekten başka bir
- * şey yapmaz.
+ * şey yapmaz. Bu, uygulama sahibinin AÇIK talebidir; kapatma düğmesini
+ * kaldırma.
  *
  * NE ZAMAN KULLANILIR: mesaj, ekrandaki bir sayının ANLAMINI taşımıyorsa.
  * Kâr/zarar kutusu bunun sınırındaydı ve kapatılabilir yapıldı, çünkü uyarının
- * özü ("Takip başlangıcından itibaren K/Z") zaten kartın kendi etiketinde
+ * özü zaten kartın kendi etiketinde ("Takibe başladığınız günden beri")
  * yazıyor. Kutu gitse de sayı yanlış okunmuyor.
  *
- * NE ZAMAN KULLANILMAZ: "fiyat verisi kullanılamıyor" gibi, ekrandaki sayının
- * neden EKSİK olduğunu söyleyen uyarılar. Onlar durum bildirir, kapatılamaz.
+ * NE ZAMAN KULLANILMAZ: "fiyat alınamadı" gibi, ekrandaki sayının neden EKSİK
+ * olduğunu söyleyen uyarılar. Onlar durum bildirir, kapatılamaz.
+ *
+ * METİN DEĞİŞİRSE `id` SÜRÜMÜNÜ ARTIR (…-v2, -v3). Aksi hâlde eski metni
+ * kapatmış olan kişi yeni cümleyi hiç görmez.
  *
  * Tercih `localStorage`'ta tutulur — görünüm modu tercihiyle aynı desen.
  * Hassas veri değildir ve cihaz başınadır. Depolama kapalıysa (gizli sekme)
@@ -60,7 +64,7 @@ export function DismissibleNotice({
   className,
   testId,
 }: {
-  /** Kalıcı anahtar. Metin değişince yeni bir kimlik verin ki mesaj tekrar görünsün. */
+  /** Kalıcı anahtar. Metin değişince sürümü artırın ki mesaj tekrar görünsün. */
   id: string;
   children: ReactNode;
   className?: string;

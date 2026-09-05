@@ -119,12 +119,6 @@ export function AppShell({
             {badge}
             {user ? (
               <div className="flex items-center gap-2">
-                <span
-                  className="hidden max-w-[10rem] truncate text-sm text-muted sm:inline"
-                  title={user.displayName}
-                >
-                  {user.displayName}
-                </span>
                 <button
                   type="button"
                   className="btn btn-secondary px-3 py-1.5 text-[0.8125rem]"

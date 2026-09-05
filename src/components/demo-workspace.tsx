@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { ViewModeProvider, ViewModeToggle } from "@/state/view-mode";
+import { ViewModeProvider } from "@/state/view-mode";
 import { AppShell } from "./app-shell";
 import { DashboardView } from "./dashboard-view";
 import { TransactionsView } from "./transactions-view";
@@ -25,10 +25,8 @@ export function DemoWorkspace() {
       badge={<span className="badge badge-notice">Demo modu</span>}
     >
       <div className="space-y-5">
-        <Alert tone="notice" title="Demo modu — gerçek hesap değil">
-          Bu ekrandaki veriler yalnızca bu tarayıcıda saklanır. Sunucuya kaydedilmez, başka
-          cihazlarınızda görünmez ve gerçek bir kullanıcı hesabı oluşturmaz. Fiyatlar test
-          verisidir.
+        <Alert tone="notice">
+          Buradaki kayıtlar yalnızca bu tarayıcıda kalır; gerçek hesap değildir.
         </Alert>
 
         <div role="tablist" aria-label="Demo bölümleri" className="flex gap-2">
@@ -62,7 +60,6 @@ export function DemoWorkspace() {
           <TransactionsView />
         )}
       </div>
-      <ViewModeToggle />
     </AppShell>
     </ViewModeProvider>
   );

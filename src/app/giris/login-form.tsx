@@ -106,8 +106,7 @@ export function LoginForm() {
         <span>
           <span className="font-medium text-ink">Bu cihazda oturumumu açık tut</span>
           <span className="mt-0.5 block text-xs leading-relaxed text-subtle">
-            İşaretlerseniz siz çıkış yapana kadar oturumunuz açık kalır. İşaretlemezseniz
-            tarayıcıyı kapatınca veya 30 dakika hareketsiz kalınca oturum sona erer.
+            İşaretlemezseniz tarayıcıyı kapatınca veya 30 dakika işlem yapmayınca çıkış yapılır.
           </span>
         </span>
       </label>

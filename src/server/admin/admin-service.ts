@@ -147,9 +147,13 @@ export class AdminService {
    */
   async listMappingApprovals(actor: AdminActor, code: string): Promise<unknown> {
     const rows = await this.backend.listMappingApprovals(code);
-    await this.audit(actor, "price.mapping_approve", null, true, {
+    // Bu bir OKUMADIR. "price.mapping_approve" yazılırsa her sayfa açılışı denetim
+    // kaydına yapılmamış bir onay düşürür ve GERÇEK onaydan (approveMapping)
+    // `action` sütunuyla ayırt edilemez; kayıtlar append-only olduğu için de
+    // düzeltilemez. Onay kanıtı bozulmasın diye okuma kendi koduyla yazılır.
+    await this.audit(actor, "price.screen_worker", null, true, {
       providerCode: code,
-      action: "list",
+      action: "mapping_list",
       count: rows.length,
     });
     return rows.map((row) => ({
@@ -246,10 +250,24 @@ export class AdminService {
   }
 
   async listUsers(actor: AdminActor, search?: string): Promise<UserProfile[]> {
-    return this.backend.listProfiles({ search, limit: 200 });
+    // Arama metni PostgREST `or()` filtresine gömülür: virgül ve parantez orada
+    // koşul ayırıcıdır, `%` `_` `*` ise joker karakterdir. Ham metin geçerse
+    // "Yılmaz, Ali" araması ifadeyi bozup hata verir, `%` ise sessizce alakasız
+    // kullanıcıları listeler. BOŞLUK KORUNUR ki "ali veli" araması çalışsın.
+    const safeSearch = (search ?? "").replace(/[,()%_*"\\]/g, "").trim().slice(0, 64);
+    const rows = await this.backend.listProfiles({ search: safeSearch, limit: 200 });
+    // Tek çağrıda 200 kullanıcının adı ve son girişi okunur; bu toplu erişim de
+    // iz bırakır. ARANAN METİN metadata'ya YAZILMAZ: kullanıcı adı içerebilir.
+    await this.audit(actor, "user.view", null, true, {
+      action: "list",
+      count: rows.length,
+      searched: safeSearch.length > 0,
+    });
+    return rows;
   }
 
-  async listAudit(actor: AdminActor, limit = 100): Promise<AdminAuditLog[]> {
+  /** Denetim kaydını OKUMAK için kayıt YAZILMAZ: her okuma kendini çoğaltırdı. */
+  async listAudit(_actor: AdminActor, limit = 100): Promise<AdminAuditLog[]> {
     return this.backend.listAudit(limit);
   }
 
@@ -478,7 +496,11 @@ export class AdminService {
       );
     }
 
-    if (target.role === "admin") {
+    // `countAdmins()` YALNIZCA aktif yöneticileri sayar. Hedef zaten pasifse bu
+    // sayıya dâhil değildir; silmek aktif yönetici sayısını hiç düşürmez. Durum
+    // kontrolü olmadan pasifleştirilmiş bir yönetici hesabı kalıcı olarak
+    // silinemez hâle gelir ve kullanıcıya olgu olarak yanlış bir cümle gösterilir.
+    if (target.role === "admin" && target.status === "active") {
       const admins = await this.backend.countAdmins();
       if (admins <= 1) {
         await this.audit(actor, "user.delete_attempt", target, false, { reason: "last_admin" });

@@ -82,14 +82,17 @@ export function AdminUserDetail({
   }
 
   async function revokeSession(sessionId: string) {
+    // Sunucu ya `{ closed: true }` döner ya da hata fırlatır; hata hâlinde run()
+    // zaten null verir. Bu yüzden `.closed` denetlenmez, sonucun varlığı yeter.
+    // Dönüş tipi bilerek `true` sabitidir: sözleşme gevşerse burası derlenmez.
     const result = await run(
       () =>
-        apiFetch<{ closed: boolean }>(`/api/admin/users/${user.id}/sessions/${sessionId}`, {
+        apiFetch<{ closed: true }>(`/api/admin/users/${user.id}/sessions/${sessionId}`, {
           method: "DELETE",
         }),
       "Oturum kapatıldı.",
     );
-    if (result?.closed) setSessions((current) => current.filter((row) => row.id !== sessionId));
+    if (result) setSessions((current) => current.filter((row) => row.id !== sessionId));
   }
 
   async function resetPassword(event: React.FormEvent) {
@@ -100,7 +103,9 @@ export function AdminUserDetail({
           method: "POST",
           body: JSON.stringify({ temporaryPassword }),
         }),
-      "Geçici parola atandı. Kullanıcının tüm oturumları kapatıldı.",
+      // Başarı bildirimini aşağıdaki "Geçici parola atandı" kutusu tek başına
+      // taşıyor; boş dize hiçbir bildirim kutusu basmaz.
+      "",
     );
     if (updated) {
       setUser(updated);
@@ -130,13 +135,6 @@ export function AdminUserDetail({
   return (
     <div className="space-y-5">
       <div>
-        <button
-          type="button"
-          className="btn btn-ghost mb-2 px-0 text-sm"
-          onClick={() => router.push("/yonetim")}
-        >
-          ← Kullanıcılar
-        </button>
         <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
           {user.displayName}
         </h1>
@@ -152,13 +150,18 @@ export function AdminUserDetail({
             <span className="badge badge-notice">Parola değiştirmeli</span>
           ) : null}
         </p>
+        <p className="mt-1 text-xs text-subtle">
+          {user.lastLoginAt
+            ? `Son giriş: ${formatDateTime(user.lastLoginAt)}`
+            : "Henüz giriş yapmadı"}
+        </p>
       </div>
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
       {notice ? <Alert tone="success">{notice}</Alert> : null}
       {issuedPassword ? (
-        <Alert tone="notice" title="Yeni geçici parola">
-          <p>Kullanıcıya güvenli bir kanaldan iletin. Bu parola bir daha gösterilmeyecek.</p>
+        <Alert tone="notice" title="Geçici parola atandı">
+          <p>Kullanıcının oturumları kapatıldı; parolayı ona iletin, bir daha gösterilmeyecek.</p>
           <p className="mt-2 rounded-[var(--radius-sm)] bg-surface px-3 py-2 font-mono text-sm text-ink">
             {issuedPassword}
           </p>
@@ -166,28 +169,7 @@ export function AdminUserDetail({
       ) : null}
 
       <section>
-        <SectionTitle title="Hesap bilgileri" />
-        <Card>
-          <dl className="grid grid-cols-1 gap-y-3 p-4 sm:grid-cols-2">
-            <div>
-              <dt className="text-xs text-subtle">Oluşturulma</dt>
-              <dd className="text-sm text-ink">{formatDateTime(user.createdAt)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-subtle">Son giriş</dt>
-              <dd className="text-sm text-ink">
-                {user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "Henüz giriş yapmadı"}
-              </dd>
-            </div>
-          </dl>
-        </Card>
-      </section>
-
-      <section>
-        <SectionTitle
-          title="Yönetim işlemleri"
-          description="Varsayılan işlem pasifleştirmedir. Kalıcı silme ayrı ve açık onay ister."
-        />
+        <SectionTitle title="Yönetim işlemleri" />
         <Card className="space-y-4 p-4">
           <div className="flex flex-wrap gap-2">
             {user.status === "active" ? (
@@ -250,7 +232,7 @@ export function AdminUserDetail({
               <Field
                 label="Yeni geçici parola"
                 htmlFor="reset-password"
-                hint="Kullanıcının mevcut parolasını göremezsiniz; yalnızca yeni bir geçici parola atayabilirsiniz."
+                hint="Kullanıcının mevcut parolasını göremezsiniz."
               >
                 <div className="flex gap-2">
                   <input
@@ -275,7 +257,7 @@ export function AdminUserDetail({
                 data-testid="submit-reset-password"
                 disabled={busy}
               >
-                Parolayı sıfırla
+                Yeni parolayı kaydet
               </button>
             </form>
           ) : null}
@@ -286,8 +268,7 @@ export function AdminUserDetail({
                 <p>
                   <span className="font-semibold">{user.username}</span> hesabı, portföyü ve{" "}
                   <span className="font-semibold">bütün işlem kayıtları</span> kalıcı olarak
-                  silinecek. (İşlem sayısı burada YAZILMAZ: yönetici kullanıcının finansal
-                  verisini görmez.) Verileri korumak istiyorsanız silme yerine{" "}
+                  silinecek. Verileri korumak istiyorsanız silme yerine{" "}
                   <span className="font-semibold">pasifleştirme</span> kullanın.
                 </p>
               </Alert>
@@ -312,7 +293,7 @@ export function AdminUserDetail({
                 data-testid="confirm-delete-user"
                 disabled={busy || confirmUsername.trim().length === 0}
               >
-                Kalıcı olarak sil
+                Evet, kalıcı olarak sil
               </button>
             </form>
           ) : null}
@@ -320,10 +301,7 @@ export function AdminUserDetail({
       </section>
 
       <section>
-        <SectionTitle
-          title="Aktif oturumlar"
-          description="Cihaz etiketi, oluşturulma ve son görülme zamanı. Ham IP veya cihaz parmak izi saklanmaz."
-        />
+        <SectionTitle title="Aktif oturumlar" />
         <Card>
           {sessions.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted">Açık oturum yok.</p>

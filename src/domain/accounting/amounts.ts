@@ -117,7 +117,7 @@ export function resolveLedgerAmounts(
 
   if (request.pricingInputMode === "MARKET_BASELINE") {
     const snapshot = request.baselineSnapshot;
-    if (!snapshot) throw new LedgerAmountError("Başlangıç fiyatı anlık görüntüsü eksik.");
+    if (!snapshot) throw new LedgerAmountError("Güncel fiyat alınamadığı için takip başlangıcı oluşturulamadı.");
     const unit = dec(snapshot.liquidationPrice);
     if (!unit.greaterThan(0)) throw new LedgerAmountError("Başlangıç fiyatı geçersiz.");
     gross = quantity.times(unit);

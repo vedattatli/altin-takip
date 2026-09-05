@@ -97,7 +97,6 @@ jobs:
           SARRAF_SCREEN_URL: ${{ secrets.SARRAF_SCREEN_URL }}
           APP_DEPLOYMENT_ENV: private-pilot
           PRICE_EXPERIMENTAL_SARRAF_SCREEN: "true"
-          PRICE_EXPERIMENTAL_PRIVATE_PILOT: "true"
         run: npm run price:sarraf:collect-once
 
       # Not: Toplayıcı çıkış kodları

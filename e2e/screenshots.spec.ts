@@ -32,8 +32,10 @@ test("panel ekran görüntüsü", async ({ page }, testInfo) => {
 
   await gotoReady(page, "/panel");
   await expect(page.getByTestId("holdings-list")).toBeVisible();
-  // Göreli zaman metninin yerleşmesini bekle.
-  await expect(page.getByText("Fiyat kaynağı:", { exact: true })).toBeVisible();
+  // Göreli zaman metninin yerleşmesini bekle. Şeritten "Fiyat kaynağı:" etiketi
+  // ve piyasa adı kaldırıldı; kalan taşıyıcı bilgi fiyatın ne zaman
+  // güncellendiğidir ve istemci saati oturmadan yazılmaz.
+  await expect(page.getByTestId("price-source")).toContainText(/Fiyatlar: .+ güncellendi/);
 
   mkdirSync("docs/screenshots", { recursive: true });
   await page.screenshot({ path: target.path, fullPage: target.fullPage });

@@ -79,6 +79,8 @@ export function PortfolioProvider({
   const [summary, setSummary] = useState<AccountingSummary>(EMPTY_SUMMARY);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+  /** İlk yükleme sayacı; artınca yükleme efekti yeniden çalışır (hata sonrası kurtarma). */
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(repository.getVersion ? "idle" : "off");
@@ -103,8 +105,29 @@ export function PortfolioProvider({
     }
   }, [repository]);
 
+  /**
+   * Bilinen sürüm temeli, defter okunmadan ÖNCE örneklenir.
+   *
+   * Sürüm veriden sonra okunursa iki istek arasında başka cihazdan gelen yazma,
+   * elde eski defter varken "bilinen sürüm" olarak kaydedilir; sonraki her kontrol
+   * 304 alacağı için o değişiklik bir daha yüklenmez. Önce örneklemek en kötü
+   * ihtimalle bir kez fazladan yenileme yapar, değişiklik kaçırmaz.
+   */
+  const sampleVersion = useCallback(async () => {
+    if (!repository.getVersion) return null;
+    try {
+      const version = await repository.getVersion(null);
+      if (version.notModified) return null;
+      return { revision: version.revision, etag: version.etag };
+    } catch {
+      // Sürüm okunamazsa bir sonraki kontrol dener.
+      return null;
+    }
+  }, [repository]);
+
   /** Defter + özet + portföy meta birlikte yenilenir (her mutation ve uzak değişiklik sonrası). */
   const refresh = useCallback(async () => {
+    const pending = await sampleVersion();
     const [rows, next, meta] = await Promise.all([
       repository.listLedger(),
       repository.getSummary(),
@@ -115,31 +138,28 @@ export function PortfolioProvider({
     setSummary(next);
     if (meta) setPortfolio(meta);
     // Kendi mutation'ımızdan sonra bilinen sürüm güncellenir; poller aynı değişikliği ikinci kez yüklemez.
-    if (repository.getVersion) {
-      try {
-        const version = await repository.getVersion(null);
-        if (!version.notModified && mounted.current) {
-          versionRef.current = { revision: version.revision, etag: version.etag };
-          setLastSyncedAt(Date.now());
-        }
-      } catch {
-        // Sürüm okunamazsa bir sonraki kontrol dener.
-      }
+    if (pending) {
+      versionRef.current = pending;
+      setLastSyncedAt(Date.now());
     }
-  }, [repository]);
+  }, [repository, sampleVersion]);
 
-  // İlk yükleme: portföy + defter + özet.
+  // İlk yükleme: portföy + defter + özet. loadAttempt artınca yeniden denenir.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setStatus("loading");
       try {
+        // Sürüm veriden önce örneklenir; böylece poller'ın ilk kontrolünde temel
+        // zaten doludur ve aradaki uzak değişiklik "bilinen" sanılıp atlanmaz.
+        const pending = await sampleVersion();
         const [meta, rows, next] = await Promise.all([
           repository.getPortfolio(),
           repository.listLedger(),
           repository.getSummary(),
         ]);
         if (cancelled) return;
+        if (pending) versionRef.current = pending;
         setPortfolio(meta);
         setLedger(rows);
         setSummary(next);
@@ -154,7 +174,28 @@ export function PortfolioProvider({
     return () => {
       cancelled = true;
     };
-  }, [repository]);
+  }, [repository, sampleVersion, loadAttempt]);
+
+  /**
+   * Hata ekranından çıkış yolu.
+   *
+   * İlk yükleme başarısız olursa senkronizasyon poller'ı hiç kurulmaz (status
+   * "ready" değil), yani uygulama kendi başına toparlanamaz. Bağlantı geri
+   * geldiğinde ya da sekmeye dönüldüğünde yükleme yeniden denenir.
+   */
+  useEffect(() => {
+    if (status !== "error") return;
+    const retry = () => setLoadAttempt((n) => n + 1);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") retry();
+    };
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [status]);
 
   // Fiyatları düzenli tazele.
   useEffect(() => {
@@ -204,8 +245,11 @@ export function PortfolioProvider({
         if (disposed) return;
         if (!result.notModified) {
           const known = versionRef.current.revision;
-          versionRef.current = { revision: result.revision, etag: result.etag };
+          // Sürüm işaretçisi yalnızca yenileme başarıyla bittikten SONRA ilerler:
+          // refresh() hata fırlatırsa versionRef eski etag'de kalır, bir sonraki
+          // kontrol 304 yerine 200 alır ve kaçırılan değişikliği yeniden dener.
           if (known !== null && known !== result.revision) await refresh();
+          versionRef.current = { revision: result.revision, etag: result.etag };
         }
         failures = 0;
         setLastSyncedAt(Date.now());
@@ -256,31 +300,48 @@ export function PortfolioProvider({
     };
   }, []);
 
+  /**
+   * Yazma başarılı olduktan sonraki geri-okuma hatası çağırana YANSITILMAZ.
+   *
+   * Aksi hâlde sunucuya işlenmiş bir işlem forma "kaydedilemedi" diye döner;
+   * kullanıcı formu kapatıp yeniden denediğinde yeni clientRequestId üretildiği
+   * için aynı kayıt ikinci kez oluşur. Liste bir sonraki poller turunda dolar.
+   */
+  const refreshAfterWrite = useCallback(async () => {
+    try {
+      await refresh();
+    } catch {
+      // Durum yalnızca senkronizasyon açıkken anlamlı; demo modunda "off" kalır,
+      // yoksa cihazlar arası aktarım uyarısı yanlış yere düşer.
+      if (repository.getVersion) setSyncStatus("error");
+    }
+  }, [refresh, repository]);
+
   const appendTransaction = useCallback(
     async (command: LedgerCommand) => {
       const result = await repository.appendTransaction(command);
-      await refresh();
+      await refreshAfterWrite();
       return result;
     },
-    [repository, refresh],
+    [repository, refreshAfterWrite],
   );
 
   const replaceTransaction = useCallback(
     async (id: string, command: LedgerCommand) => {
       const result = await repository.replaceTransaction(id, command);
-      await refresh();
+      await refreshAfterWrite();
       return result;
     },
-    [repository, refresh],
+    [repository, refreshAfterWrite],
   );
 
   const voidTransaction = useCallback(
     async (id: string, reason: string) => {
       const result = await repository.voidTransaction(id, reason);
-      await refresh();
+      await refreshAfterWrite();
       return result;
     },
-    [repository, refresh],
+    [repository, refreshAfterWrite],
   );
 
   const renamePortfolio = useCallback(

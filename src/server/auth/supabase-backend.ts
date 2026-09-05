@@ -304,10 +304,18 @@ export class SupabaseAuthBackend implements AuthBackend {
   async rotateSession(sessionId: string, now: number, graceMs: number): Promise<string | null> {
     const { data: row } = await this.admin
       .from("app_sessions")
-      .select("id, token_hash, revoked_at")
+      .select("id, token_hash, revoked_at, rotated_at")
       .eq("id", sessionId)
       .maybeSingle();
     if (!row || row.revoked_at !== null) return null;
+
+    // Az önce yenilenmiş oturumu bir daha yenileme. Yenileme kararı isteğin
+    // BAŞINDA çözülen rotatedAt'a bakar; eşzamanlı istekler bu yüzden hepsi
+    // birden "zamanı geldi" der ve jetonu zincirleme yenilerdi. Tarayıcıya en
+    // son ulaşan cevap ara jetonu yazarsa kullanıcı tolerans süresi dolunca
+    // atılırdı.
+    const rotatedAt = Date.parse(row.rotated_at as string);
+    if (!Number.isNaN(rotatedAt) && now - rotatedAt < graceMs) return null;
 
     const token = randomBytes(32).toString("base64url");
     // Eski özet eşleşmesi: eşzamanlı iki yenileme birbirini ezmez.
@@ -411,9 +419,16 @@ export class SupabaseAuthBackend implements AuthBackend {
 
   async listProfiles(options: { search?: string; limit?: number } = {}): Promise<UserProfile[]> {
     let query = this.admin.from("profiles").select("*").order("username").limit(options.limit ?? 200);
-    const search = normalizeUsername(options.search ?? "");
+    // Terim filtre dizesine düz birleştirmeyle giriyor: virgül or() koşullarını
+    // böler, % * ve parantezler ilike jokeri / ifade karakteridir. Önce bunlar
+    // atılır ve uzunluk sınırlanır.
+    const raw = (options.search ?? "").trim().replace(/[,()%*\\"]/g, "").slice(0, 32);
+    // Kullanıcı adı kanonik biçimde (ASCII) saklanır, görünen ad ise Türkçe harf
+    // içerebilir: username normalize terimle, display_name HAM terimle aranır.
+    // Yoksa "Tatlı" araması "tatli" olur ve görünen adı hiç eşleştiremez.
+    const search = normalizeUsername(raw);
     if (search) {
-      query = query.or(`username.ilike.%${search}%,display_name.ilike.%${search}%`);
+      query = query.or(`username.ilike.%${search}%,display_name.ilike.%${raw}%`);
     }
     const { data, error } = await query;
     if (error) fail("Kullanıcılar listelenemedi", error);

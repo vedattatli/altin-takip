@@ -57,7 +57,22 @@ function decimalText(value: unknown): string | null {
     return value.toFixed(2);
   }
   if (typeof value === "string") {
-    const cleaned = value.replace(/\./gu, "").replace(",", ".").trim();
+    /*
+     * BİÇİM TESPİTİ ZORUNLUDUR — nokta koşulsuz silinmez.
+     *
+     * "6.965,69" ile "6965.69" aynı akışta gelebilir. Bütün noktaları binlik
+     * ayırıcı sayıp silmek, ondalık noktalı fiyatı 100 katına çıkarır ve kalite
+     * kapıları bunu tutmaz (pozitif, makas oranı sabit, mutlak üst sınır aşılmaz;
+     * kaynağın İLK alımında karşılaştıracak önceki fiyat da yoktur).
+     *
+     * Bu yüzden yalnızca TR gruplaması kalıba UYUYORSA noktalar silinir; aksi
+     * hâlde nokta ondalık ayırıcı olarak bırakılır. Kural `base.ts` içindeki
+     * `decimalOrNull` ile aynıdır; ikisi birbirinden sapmamalıdır.
+     */
+    const text = value.trim();
+    const cleaned = /^\d{1,3}(\.\d{3})+(,\d+)?$/u.test(text)
+      ? text.replace(/\./gu, "").replace(",", ".")
+      : text.replace(",", ".");
     if (!/^\d+(\.\d+)?$/u.test(cleaned)) return null;
     const parsed = Number(cleaned);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;

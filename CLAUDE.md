@@ -366,8 +366,13 @@ Arayüz yönlendirmesine tek başına güvenme.
   değildir" notu kalır. Bu bir olgudur; kaldırılamaz, ortam bayrağıyla değiştirilemez.
 - Fiyat alınamadığında kullanıcıyı **başka bir kaynağa sessizce düşürme**. Fiyat yoksa yok
   denir ve nedeni yazılır. Bu kural aynen geçerlidir.
-- Kullanıcının AÇIKÇA seçtiği kaynak, hibrit plan tarafından ezilmez; plan yalnızca seçim
-  yokken ya da seçilen kaynak zaten plandayken uygulanır.
+- **Kullanıcı kaynak SEÇMEZ.** `POST /api/price-sources` kaldırıldı; uç yalnızca GET kabul
+  eder. Hangi ürünün fiyatının nereden geleceğine değerleme planı karar verir; kullanıcı
+  hiçbir şey seçmediği için yanlış kaynak seçme ihtimali de yoktur. Kullanıcıya kaynak
+  seçtiren bir arayüz veya uç EKLEME.
+- Kendi tercihi olmayan kullanıcı, yöneticinin belirlediği global varsayılan kaynağı kullanır
+  (`PUT /api/admin/price-sources/default`). "Listedeki ilk açık kaynak" gibi örtük bir
+  davranış YOKTUR.
 
 ## Ortam değişkeni okuma (ihlal edilemez)
 
@@ -444,6 +449,13 @@ karar kondu: yöneticinin `enabled` bayrağı.
 - Erişilebilirlik: yeterli kontrast, klavye ile kullanılabilirlik, `aria-*` etiketleri,
   görünür odak halkası. Rengi tek bilgi taşıyıcı yapma.
 - Ürün kataloğu yalnızca `src/domain/catalog.ts` içinde tanımlanır; bileşenlere dağıtılmaz.
+- **Kullanıcıya teknik kimlik gösterme.** Sağlayıcı kodu (`sarraf-tv-kayseri-screen`), piyasa
+  kimliği (`kayseri`, `hibrit`), lisans durumu (`EXPERIMENTAL_PRIVATE`), eşleme sürümü ve
+  güven seviyesi ekrana ÇIKMAZ. Kullanıcı kaynağı yalnızca kısa adıyla görür ("Kayseri",
+  "Kapalıçarşı") ve çoğu ekranda hiç görmez.
+- **Bir ekrana açıklama eklemeden önce sor: bu cümle olmasa kullanıcı ekrandaki bir SAYIYI
+  yanlış okur mu?** Hayırsa cümleyi yazma. Evetse en fazla bir cümleyle, jargonsuz yaz.
+  Uygulama sahibinin ölçütü: "altın alan adam ne anlar onlardan".
 - **Ürün adını BİRLEŞTİRME.** Her ekran katalog adını gösterir: "Yeni Çeyrek" ve "Eski Çeyrek"
   ayrı satırlardır. Bir zamanlar ikisi "Çeyrek Altın" diye gösteriliyordu; kullanıcı hangisini
   eklediğini panelde göremiyor, seçim listesiyle panel farklı adlar yazıyordu. Ad üreten

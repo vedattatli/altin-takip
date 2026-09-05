@@ -43,7 +43,7 @@ export default async function LoginPage() {
           sıfırlama akışı kurulamaz. Sıfırlamayı yalnızca yönetici yapar.
         */}
         <p className="mt-4 text-center text-xs leading-relaxed text-subtle">
-          Parolanızı unuttuysanız kendiniz sıfırlayamazsınız; yöneticiyle iletişime geçin.
+          Parolanızı unuttuysanız yöneticiye başvurun.
         </p>
       </div>
     </main>

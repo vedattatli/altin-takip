@@ -1,4 +1,3 @@
-import { numberFromEnv } from "@/lib/env";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -23,16 +22,6 @@ import type { IngestionPayload, IngestionResult, ProviderSyncInput } from "./typ
  * - Aynı koşum anahtarı iki kez uygulanmaz (idempotent).
  * - Şüpheli quote değerlemeye girmez; karantinaya alınır ve raporlanır.
  */
-
-export const MIN_INGESTION_INTERVAL_MS = 15_000;
-export const MAX_INGESTION_INTERVAL_MS = 5 * 60_000;
-export const DEFAULT_INGESTION_INTERVAL_MS = 60_000;
-
-/** Yapılandırılmış alım aralığı (15 sn – 5 dk arasına sıkıştırılır). */
-export function ingestionIntervalMs(): number {
-  const raw = numberFromEnv("PRICE_INGESTION_INTERVAL_MS", DEFAULT_INGESTION_INTERVAL_MS, { min: 1 });
-  return Math.min(MAX_INGESTION_INTERVAL_MS, Math.max(MIN_INGESTION_INTERVAL_MS, Math.round(raw)));
-}
 
 const ALL_PRODUCT_IDS = GOLD_PRODUCTS.map((product) => product.id);
 const KNOWN_PRODUCT_IDS = new Set(ALL_PRODUCT_IDS);

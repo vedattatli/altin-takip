@@ -5,7 +5,7 @@ import { parseLedgerCommand } from "@/domain/accounting";
 import { MfaService } from "@/server/auth/mfa-service";
 import { LocalAuthBackend } from "@/server/auth/local-backend";
 import { ProviderNotSelectableError } from "@/server/prices/types";
-import { PriceIngestionService, ingestionIntervalMs } from "@/server/prices/ingestion-service";
+import { PriceIngestionService } from "@/server/prices/ingestion-service";
 import { PriceSourceService } from "@/server/prices/price-source-service";
 import { UserPortfolioService } from "@/server/portfolio/user-portfolio-service";
 import { totpCode } from "@/server/auth/totp";
@@ -292,20 +292,6 @@ describe("2. ingestion: idempotent, kilitli, karantinalı", () => {
     expect(outcomes.map((outcome) => outcome.providerCode)).toEqual(["altinapi"]);
   });
 
-  it("alım aralığı 15 sn – 5 dk arasına sıkıştırılır", () => {
-    const previous = process.env.PRICE_INGESTION_INTERVAL_MS;
-    try {
-      process.env.PRICE_INGESTION_INTERVAL_MS = "1000";
-      expect(ingestionIntervalMs()).toBe(15_000);
-      process.env.PRICE_INGESTION_INTERVAL_MS = "999999";
-      expect(ingestionIntervalMs()).toBe(300_000);
-      delete process.env.PRICE_INGESTION_INTERVAL_MS;
-      expect(ingestionIntervalMs()).toBe(60_000);
-    } finally {
-      if (previous === undefined) delete process.env.PRICE_INGESTION_INTERVAL_MS;
-      else process.env.PRICE_INGESTION_INTERVAL_MS = previous;
-    }
-  });
 });
 
 describe("3. kaynak seçimi ve izolasyon", () => {
